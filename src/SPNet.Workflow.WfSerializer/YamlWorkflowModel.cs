@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using YamlDotNet.Core;
+using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using YamlDotNet.Serialization.ObjectFactories;
 
 namespace SPNet.Workflow.WfSerializer
 {
@@ -48,7 +51,7 @@ namespace SPNet.Workflow.WfSerializer
         public static WorkflowYaml Load(string path)
         {
             if (!File.Exists(path)) throw new FileNotFoundException("Workflow YAML not found: " + path, path);
-            var deserializer = new DeserializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).IgnoreUnmatchedProperties().Build();
+            var deserializer = CreateDeserializer();
             var workflow = deserializer.Deserialize<WorkflowYaml>(File.ReadAllText(path)) ?? throw new InvalidOperationException("Workflow YAML is empty.");
             workflow.Validate();
             return workflow;
@@ -57,49 +60,162 @@ namespace SPNet.Workflow.WfSerializer
         public void Save(string path)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? Environment.CurrentDirectory);
-            var serializer = new SerializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull).Build();
+            var serializer = new SerializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).WithTypeConverter(new WorkflowActionYamlTypeConverter()).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull).Build();
             File.WriteAllText(path, serializer.Serialize(this));
         }
+
+        private static IDeserializer CreateDeserializer() => new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .WithTypeConverter(new WorkflowActionYamlTypeConverter())
+            .IgnoreUnmatchedProperties()
+            .Build();
 
         public void Validate()
         {
             if (!string.Equals(SchemaVersion, "spnet.workflow/v1", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unsupported schemaVersion: " + SchemaVersion);
             if (string.IsNullOrWhiteSpace(Name)) throw new InvalidOperationException("Workflow name is required.");
             if (Stages == null || Stages.Count == 0) throw new InvalidOperationException("At least one stage is required.");
-            foreach (var action in Stages.SelectMany(s => s.Actions ?? new List<ActionYaml>())) action.Validate();
+            foreach (var action in Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>())) action.Validate();
         }
     }
 
     public sealed class StartFlagsYaml { public bool Manual { get; set; } = true; public bool AutoStartCreate { get; set; } public bool AutoStartChange { get; set; } }
     public sealed class TargetYaml { public string Type { get; set; } = "Site"; public string ListTitle { get; set; } = string.Empty; }
     public sealed class VariableYaml { public string Name { get; set; } = string.Empty; public string Type { get; set; } = "String"; }
-    public sealed class StageYaml { public string Name { get; set; } = "Stage"; public List<ActionYaml> Actions { get; set; } = new List<ActionYaml>(); }
+    public sealed class StageYaml { public string Name { get; set; } = "Stage"; public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>(); }
 
-    public sealed class ActionYaml
+    public abstract class WorkflowActionYaml
     {
         public string Type { get; set; } = string.Empty;
+
+        public virtual void Validate()
+        {
+            if (string.IsNullOrWhiteSpace(Type)) throw new InvalidOperationException("Action type is required.");
+        }
+
+        protected void RequireTo()
+        {
+            if (this is ITargetedActionYaml targeted && string.IsNullOrWhiteSpace(targeted.To)) throw new InvalidOperationException(Type + " action requires 'to'.");
+        }
+    }
+
+    public interface ITargetedActionYaml { string To { get; set; } }
+
+    public sealed class CalcActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public CalcActionYaml() { Type = "calc"; }
         public ExpressionYaml LValue { get; set; } = new ExpressionYaml();
         public ExpressionYaml RValue { get; set; } = new ExpressionYaml();
         public string Operator { get; set; } = "Add";
         public string To { get; set; } = string.Empty;
-        public ExpressionYaml Value { get; set; } = null;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireTo();
+        }
+    }
+
+    public sealed class WriteHistoryActionYaml : WorkflowActionYaml
+    {
+        public WriteHistoryActionYaml() { Type = "writeHistory"; }
         public ExpressionYaml Message { get; set; } = new ExpressionYaml();
+
+        public override void Validate() => base.Validate();
+    }
+
+    public sealed class SetStatusActionYaml : WorkflowActionYaml
+    {
+        public SetStatusActionYaml() { Type = "setStatus"; }
         public string Status { get; set; } = string.Empty;
 
-        public void Validate()
+        public override void Validate() => base.Validate();
+    }
+
+    public sealed class AssignActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public AssignActionYaml() { Type = "assign"; }
+        public string To { get; set; } = string.Empty;
+        public ExpressionYaml? Value { get; set; }
+
+        public override void Validate()
         {
-            var t = (Type ?? string.Empty).ToLowerInvariant();
-            if (t != "calc" && t != "writehistory" && t != "setstatus" && t != "assign" && t != "setvariable") throw new InvalidOperationException("Unsupported action type: " + Type);
-            if ((t == "calc" || t == "assign" || t == "setvariable") && string.IsNullOrWhiteSpace(To)) throw new InvalidOperationException(Type + " action requires 'to'.");
+            base.Validate();
+            RequireTo();
+        }
+    }
+
+    public sealed class WorkflowActionYamlTypeConverter : IYamlTypeConverter
+    {
+        public bool Accepts(Type type) => typeof(WorkflowActionYaml).IsAssignableFrom(type);
+
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        {
+            var yamlObject = rootDeserializer(typeof(ActionYamlSurrogate)) as ActionYamlSurrogate ?? throw new InvalidOperationException("Action YAML is empty.");
+            var actionType = (yamlObject.Type ?? string.Empty).ToLowerInvariant();
+            WorkflowActionYaml action;
+            if (actionType == "calc") action = new CalcActionYaml { Type = yamlObject.Type ?? string.Empty, LValue = yamlObject.LValue ?? new ExpressionYaml(), RValue = yamlObject.RValue ?? new ExpressionYaml(), Operator = yamlObject.Operator ?? "Add", To = yamlObject.To ?? string.Empty };
+            else if (actionType == "writehistory") action = new WriteHistoryActionYaml { Type = yamlObject.Type ?? string.Empty, Message = yamlObject.Message ?? new ExpressionYaml() };
+            else if (actionType == "setstatus") action = new SetStatusActionYaml { Type = yamlObject.Type ?? string.Empty, Status = yamlObject.Status ?? string.Empty };
+            else if (actionType == "assign" || actionType == "setvariable") action = new AssignActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty, Value = yamlObject.Value };
+            else throw new InvalidOperationException("Unsupported action type: " + yamlObject.Type);
+            return action;
+        }
+
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
+        {
+            emitter.Emit(new MappingStart(null, null, false, MappingStyle.Block));
+            if (value is CalcActionYaml calc)
+            {
+                WriteScalar(emitter, "type", calc.Type); WriteObject(emitter, serializer, "lValue", calc.LValue); WriteScalar(emitter, "operator", calc.Operator); WriteObject(emitter, serializer, "rValue", calc.RValue); WriteScalar(emitter, "to", calc.To);
+            }
+            else if (value is WriteHistoryActionYaml history)
+            {
+                WriteScalar(emitter, "type", history.Type); WriteObject(emitter, serializer, "message", history.Message);
+            }
+            else if (value is SetStatusActionYaml status)
+            {
+                WriteScalar(emitter, "type", status.Type); WriteScalar(emitter, "status", status.Status);
+            }
+            else if (value is AssignActionYaml assign)
+            {
+                WriteScalar(emitter, "type", assign.Type); WriteScalar(emitter, "to", assign.To); WriteObject(emitter, serializer, "value", assign.Value);
+            }
+            else throw new InvalidOperationException("Unsupported action model: " + (value?.GetType().FullName ?? "<null>"));
+            emitter.Emit(new MappingEnd());
+        }
+
+        private static void WriteScalar(IEmitter emitter, string name, string value)
+        {
+            emitter.Emit(new Scalar(name));
+            emitter.Emit(new Scalar(value ?? string.Empty));
+        }
+
+        private static void WriteObject(IEmitter emitter, ObjectSerializer serializer, string name, object? value)
+        {
+            emitter.Emit(new Scalar(name));
+            serializer(value ?? new ExpressionYaml());
+        }
+
+        private sealed class ActionYamlSurrogate
+        {
+            public string Type { get; set; } = string.Empty;
+            public ExpressionYaml LValue { get; set; } = new ExpressionYaml();
+            public ExpressionYaml RValue { get; set; } = new ExpressionYaml();
+            public string Operator { get; set; } = "Add";
+            public string To { get; set; } = string.Empty;
+            public ExpressionYaml? Value { get; set; }
+            public ExpressionYaml Message { get; set; } = new ExpressionYaml();
+            public string Status { get; set; } = string.Empty;
         }
     }
 
     public sealed class ExpressionYaml
     {
-        public object Literal { get; set; } = null;
+        public object? Literal { get; set; }
         public string Variable { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
-        public ExpressionYaml Value { get; set; } = null;
-        public ExpressionYaml ToString { get; set; } = null;
+        public ExpressionYaml? Value { get; set; }
+        public new ExpressionYaml? ToString { get; set; }
     }
 }

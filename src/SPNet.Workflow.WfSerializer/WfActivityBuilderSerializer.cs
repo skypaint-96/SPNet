@@ -77,14 +77,14 @@ namespace SPNet.Workflow.WfSerializer
                 var stage = new StageYaml { Name = (string?)stageElement.Attribute("DisplayName") ?? "Stage" };
                 foreach (var child in stageElement.Elements().Where(e => e.Name.Namespace == SharePointNamespace))
                 {
-                    if (child.Name.LocalName == "Calc") stage.Actions.Add(new ActionYaml { Type = "calc", To = ReadCalcTarget(child), Operator = "Add", LValue = new ExpressionYaml { Literal = "<exported>" }, RValue = new ExpressionYaml { Literal = "<exported>" } });
-                    else if (child.Name.LocalName == "WriteToHistory") stage.Actions.Add(new ActionYaml { Type = "writeHistory", Message = new ExpressionYaml { Literal = "<exported expression>" } });
-                    else if (child.Name.LocalName == "SetWorkflowStatus") stage.Actions.Add(new ActionYaml { Type = "setStatus", Status = (string?)child.Attribute("Status") ?? "<exported>" });
+                    if (child.Name.LocalName == "Calc") stage.Actions.Add(new CalcActionYaml { To = ReadCalcTarget(child), Operator = "Add", LValue = new ExpressionYaml { Literal = "<exported>" }, RValue = new ExpressionYaml { Literal = "<exported>" } });
+                    else if (child.Name.LocalName == "WriteToHistory") stage.Actions.Add(new WriteHistoryActionYaml { Message = new ExpressionYaml { Literal = "<exported expression>" } });
+                    else if (child.Name.LocalName == "SetWorkflowStatus") stage.Actions.Add(new SetStatusActionYaml { Status = (string?)child.Attribute("Status") ?? "<exported>" });
                 }
                 if (stage.Actions.Count > 0) workflow.Stages.Add(stage);
             }
             workflow.ExportWarnings.Add("Partial structural export: supported actions are listed, but expressions may be placeholders when WF deserialization is not used.");
-            if (workflow.Stages.Count == 0) workflow.Stages.Add(new StageYaml { Name = "Unsupported XAML", Actions = new System.Collections.Generic.List<ActionYaml>() });
+            if (workflow.Stages.Count == 0) workflow.Stages.Add(new StageYaml { Name = "Unsupported XAML", Actions = new System.Collections.Generic.List<WorkflowActionYaml>() });
             workflow.Save(outputYamlPath);
         }
 
@@ -109,7 +109,7 @@ namespace SPNet.Workflow.WfSerializer
                 var toStringType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToString");
 
                 var variableTypes = workflow.Variables?.ToDictionary(v => v.Name, v => MapVariableType(v.Type), StringComparer.OrdinalIgnoreCase) ?? new System.Collections.Generic.Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<ActionYaml>()).Where(a => string.Equals(a.Type, "calc", StringComparison.OrdinalIgnoreCase)).Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(double);
+                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<CalcActionYaml>().Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(double);
                 ValidateAssignments(workflow, variableTypes);
 
                 var flowchart = new Flowchart();
@@ -117,7 +117,7 @@ namespace SPNet.Workflow.WfSerializer
                 foreach (var stageModel in workflow.Stages)
                 {
                     var sequence = new Sequence { DisplayName = string.IsNullOrWhiteSpace(stageModel.Name) ? "Stage" : stageModel.Name };
-                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<ActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, toStringType, variableTypes));
+                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, toStringType, variableTypes));
                     var step = new FlowStep { Action = sequence };
                     flowchart.Nodes.Add(step);
                     if (flowchart.StartNode == null) flowchart.StartNode = step;
@@ -137,46 +137,51 @@ namespace SPNet.Workflow.WfSerializer
             }
         }
 
-        private static Activity BuildAction(ActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type toStringType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildAction(WorkflowActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type toStringType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
-            var actionType = (action.Type ?? string.Empty).ToLowerInvariant();
-            if (actionType == "calc")
-            {
-                var calc = Create(calcType);
-                SetProperty(calc, "LValue", ToInArgument<double>(action.LValue, toStringType));
-                SetProperty(calc, "RValue", ToInArgument<double>(action.RValue, toStringType));
-                SetProperty(calc, "Operator", new InArgument<string>(action.Operator ?? "Add"));
-                SetProperty(calc, "To", new OutArgument<double>(new ArgumentReference<double>(action.To)));
-                return (Activity)calc;
-            }
-            if (actionType == "writehistory")
-            {
-                var write = Create(writeToHistoryType);
-                SetProperty(write, "Message", ToInArgument<string>(action.Message, toStringType));
-                return (Activity)write;
-            }
-            if (actionType == "setstatus")
-            {
-                var status = Create(setStatusType);
-                SetProperty(status, "Status", new InArgument<string>(action.Status ?? string.Empty));
-                return (Activity)status;
-            }
-            if (actionType == "assign" || actionType == "setvariable") return BuildAssign(action, toStringType, variableTypes);
+            if (action is CalcActionYaml calcAction) return BuildCalc(calcAction, calcType, toStringType);
+            if (action is WriteHistoryActionYaml historyAction) return BuildWriteHistory(historyAction, writeToHistoryType, toStringType);
+            if (action is SetStatusActionYaml statusAction) return BuildSetStatus(statusAction, setStatusType);
+            if (action is AssignActionYaml assignAction) return BuildAssign(assignAction, toStringType, variableTypes);
             throw new InvalidOperationException("Unsupported action type: " + action.Type);
+        }
+
+        private static Activity BuildCalc(CalcActionYaml action, Type calcType, Type toStringType)
+        {
+            var calc = Create(calcType);
+            SetProperty(calc, "LValue", ToInArgument<double>(action.LValue, toStringType));
+            SetProperty(calc, "RValue", ToInArgument<double>(action.RValue, toStringType));
+            SetProperty(calc, "Operator", new InArgument<string>(action.Operator ?? "Add"));
+            SetProperty(calc, "To", new OutArgument<double>(new ArgumentReference<double>(action.To)));
+            return (Activity)calc;
+        }
+
+        private static Activity BuildWriteHistory(WriteHistoryActionYaml action, Type writeToHistoryType, Type toStringType)
+        {
+            var write = Create(writeToHistoryType);
+            SetProperty(write, "Message", ToInArgument<string>(action.Message, toStringType));
+            return (Activity)write;
+        }
+
+        private static Activity BuildSetStatus(SetStatusActionYaml action, Type setStatusType)
+        {
+            var status = Create(setStatusType);
+            SetProperty(status, "Status", new InArgument<string>(action.Status ?? string.Empty));
+            return (Activity)status;
         }
 
         private static void ValidateAssignments(WorkflowYaml workflow, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
-            foreach (var action in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<ActionYaml>()).Where(a => string.Equals(a.Type, "assign", StringComparison.OrdinalIgnoreCase) || string.Equals(a.Type, "setVariable", StringComparison.OrdinalIgnoreCase)))
+            foreach (var action in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<AssignActionYaml>())
             {
                 if (!variableTypes.ContainsKey(action.To ?? string.Empty)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + action.To);
             }
         }
 
-        private static Activity BuildAssign(ActionYaml action, Type toStringType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildAssign(AssignActionYaml action, Type toStringType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
             if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException("assign action target variable is not declared: " + action.To);
-            var value = action.Value ?? action.RValue;
+            var value = action.Value ?? new ExpressionYaml();
             if (targetType == typeof(double)) return new Assign<double> { To = new OutArgument<double>(new ArgumentReference<double>(action.To)), Value = ToInArgument<double>(value, toStringType) };
             if (targetType == typeof(bool)) return new Assign<bool> { To = new OutArgument<bool>(new ArgumentReference<bool>(action.To)), Value = ToInArgument<bool>(value, toStringType) };
             return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, toStringType) };

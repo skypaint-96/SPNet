@@ -61,6 +61,8 @@ Supported actions:
 - `writeHistory`: emits SharePoint `WriteToHistory`, with `message`.
 - `setStatus`: emits SharePoint `SetWorkflowStatus`, with `status`.
 
+The external YAML shape is intentionally stable. Internally, action YAML is deserialized into a discriminated action hierarchy (`calc`, `writeHistory`, `setStatus`, and assignment actions) so action-specific validation and WF activity construction stay scoped to the supported action type instead of one broad property bag.
+
 Supported expressions:
 
 - literal values: `literal: 1` or `literal: "text"`.
