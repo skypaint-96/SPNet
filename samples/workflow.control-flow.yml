@@ -1,0 +1,53 @@
+schemaVersion: spnet.workflow/v1
+name: YamlControlFlowSmoke
+target:
+  type: Site
+variables:
+- name: counter
+  type: Double
+stages:
+- name: Control Flow
+  actions:
+  - type: assign
+    to: counter
+    value:
+      literal: 0
+  - type: while
+    condition:
+      type: isLessThan
+      left:
+        variable: counter
+      right:
+        literal: 3
+    actions:
+    - type: writeHistory
+      message:
+        type: toString
+        value:
+          variable: counter
+    - type: calc
+      lValue:
+        variable: counter
+      operator: Add
+      rValue:
+        literal: 1
+      to: counter
+  - type: if
+    condition:
+      type: equals
+      left:
+        variable: counter
+      right:
+        literal: 3
+    then:
+    - type: writeHistory
+      message:
+        literal: Counter reached three
+    - type: setStatus
+      status: Control flow then branch
+    else:
+    - type: writeHistory
+      message:
+        literal: Counter did not reach three
+    - type: setStatus
+      status: Control flow else branch

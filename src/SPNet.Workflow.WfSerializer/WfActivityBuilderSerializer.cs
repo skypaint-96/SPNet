@@ -47,6 +47,7 @@ namespace SPNet.Workflow.WfSerializer
                 var calcType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Calc");
                 var writeToHistoryType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.WriteToHistory");
                 var toStringType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToString");
+                var expressionTypes = new ComparisonExpressionTypes(microsoftActivitiesAssembly);
 
                 var builder = BuildProofOfConceptWorkflow(options.WorkflowName, GetDottedWorkflowClassName(options.WorkflowName), calcType, writeToHistoryType, toStringType);
                 File.WriteAllText(outputPath, AddSharePointDesignerMetadata(SerializeBuilder(builder), options.WorkflowName));
@@ -106,7 +107,11 @@ namespace SPNet.Workflow.WfSerializer
                 var calcType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Calc");
                 var writeToHistoryType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.WriteToHistory");
                 var setStatusType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.SetWorkflowStatus");
+                var commentType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Comment");
+                var delayForType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.DelayFor");
+                var delayUntilType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.DelayUntil");
                 var toStringType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToString");
+                var expressionTypes = new ComparisonExpressionTypes(microsoftActivitiesAssembly);
 
                 var variableTypes = workflow.Variables?.ToDictionary(v => v.Name, v => MapVariableType(v.Type), StringComparer.OrdinalIgnoreCase) ?? new System.Collections.Generic.Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
                 foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<CalcActionYaml>().Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(double);
@@ -117,7 +122,7 @@ namespace SPNet.Workflow.WfSerializer
                 foreach (var stageModel in workflow.Stages)
                 {
                     var sequence = new Sequence { DisplayName = string.IsNullOrWhiteSpace(stageModel.Name) ? "Stage" : stageModel.Name };
-                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, toStringType, variableTypes));
+                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, toStringType, expressionTypes, variableTypes));
                     var step = new FlowStep { Action = sequence };
                     flowchart.Nodes.Add(step);
                     if (flowchart.StartNode == null) flowchart.StartNode = step;
@@ -137,13 +142,46 @@ namespace SPNet.Workflow.WfSerializer
             }
         }
 
-        private static Activity BuildAction(WorkflowActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type toStringType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildAction(WorkflowActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type toStringType, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
             if (action is CalcActionYaml calcAction) return BuildCalc(calcAction, calcType, toStringType);
             if (action is WriteHistoryActionYaml historyAction) return BuildWriteHistory(historyAction, writeToHistoryType, toStringType);
             if (action is SetStatusActionYaml statusAction) return BuildSetStatus(statusAction, setStatusType);
+            if (action is CommentActionYaml commentAction) return BuildComment(commentAction, commentType, toStringType);
+            if (action is DelayForActionYaml delayForAction) return BuildDelayFor(delayForAction, delayForType, toStringType);
+            if (action is DelayUntilActionYaml delayUntilAction) return BuildDelayUntil(delayUntilAction, delayUntilType, toStringType);
             if (action is AssignActionYaml assignAction) return BuildAssign(assignAction, toStringType, variableTypes);
+            if (action is WhileActionYaml whileAction) return BuildWhile(whileAction, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, toStringType, expressionTypes, variableTypes);
+            if (action is IfActionYaml ifAction) return BuildIf(ifAction, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, toStringType, expressionTypes, variableTypes);
             throw new InvalidOperationException("Unsupported action type: " + action.Type);
+        }
+
+        private static Activity BuildWhile(WhileActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type toStringType, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            return new While
+            {
+                DisplayName = string.Equals(action.Type, "loop", StringComparison.OrdinalIgnoreCase) ? "loop" : "while",
+                Condition = BuildBooleanExpression(action.Condition, toStringType, expressionTypes),
+                Body = BuildSequence(action.Actions, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, toStringType, expressionTypes, variableTypes)
+            };
+        }
+
+        private static Activity BuildIf(IfActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type toStringType, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            return new If
+            {
+                DisplayName = "if",
+                Condition = BuildBooleanExpression(action.Condition, toStringType, expressionTypes),
+                Then = BuildSequence(action.Then, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, toStringType, expressionTypes, variableTypes),
+                Else = action.Else == null || action.Else.Count == 0 ? null : BuildSequence(action.Else, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, toStringType, expressionTypes, variableTypes)
+            };
+        }
+
+        private static Sequence BuildSequence(System.Collections.Generic.IEnumerable<WorkflowActionYaml> actions, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type toStringType, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            var sequence = new Sequence();
+            foreach (var child in actions ?? Enumerable.Empty<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(child, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, toStringType, expressionTypes, variableTypes));
+            return sequence;
         }
 
         private static Activity BuildCalc(CalcActionYaml action, Type calcType, Type toStringType)
@@ -170,6 +208,29 @@ namespace SPNet.Workflow.WfSerializer
             return (Activity)status;
         }
 
+        private static Activity BuildComment(CommentActionYaml action, Type commentType, Type toStringType)
+        {
+            var comment = Create(commentType);
+            SetProperty(comment, "CommentText", ToInArgument<string>(action.Text, toStringType));
+            return (Activity)comment;
+        }
+
+        private static Activity BuildDelayFor(DelayForActionYaml action, Type delayForType, Type toStringType)
+        {
+            var delay = Create(delayForType);
+            SetProperty(delay, "Days", ToInArgument<double>(action.Days, toStringType));
+            SetProperty(delay, "Hours", ToInArgument<double>(action.Hours, toStringType));
+            SetProperty(delay, "Minutes", ToInArgument<double>(action.Minutes, toStringType));
+            return (Activity)delay;
+        }
+
+        private static Activity BuildDelayUntil(DelayUntilActionYaml action, Type delayUntilType, Type toStringType)
+        {
+            var delay = Create(delayUntilType);
+            SetProperty(delay, "Date", ToInArgument<DateTime>(action.Date, toStringType));
+            return (Activity)delay;
+        }
+
         private static void ValidateAssignments(WorkflowYaml workflow, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
             foreach (var action in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<AssignActionYaml>())
@@ -184,7 +245,49 @@ namespace SPNet.Workflow.WfSerializer
             var value = action.Value ?? new ExpressionYaml();
             if (targetType == typeof(double)) return new Assign<double> { To = new OutArgument<double>(new ArgumentReference<double>(action.To)), Value = ToInArgument<double>(value, toStringType) };
             if (targetType == typeof(bool)) return new Assign<bool> { To = new OutArgument<bool>(new ArgumentReference<bool>(action.To)), Value = ToInArgument<bool>(value, toStringType) };
+            if (targetType == typeof(DateTime)) return new Assign<DateTime> { To = new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)), Value = ToInArgument<DateTime>(value, toStringType) };
+            if (targetType == typeof(int)) return new Assign<int> { To = new OutArgument<int>(new ArgumentReference<int>(action.To)), Value = ToInArgument<int>(value, toStringType) };
             return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, toStringType) };
+        }
+
+        private static Activity<bool> BuildBooleanExpression(ComparisonExpressionYaml condition, Type toStringType, ComparisonExpressionTypes expressionTypes)
+        {
+            condition = condition ?? new ComparisonExpressionYaml();
+            var op = (string.IsNullOrWhiteSpace(condition.Operator) ? condition.Type : condition.Operator).Replace("_", string.Empty).Replace("-", string.Empty).ToLowerInvariant();
+            if (op == "islessthan" || op == "lessthan") return CreateComparison(expressionTypes.IsLessThan, condition, toStringType);
+            if (op == "greaterthan" || op == "isgreaterthan") return CreateComparison(expressionTypes.IsGreaterThan, condition, toStringType);
+            if (op == "equals" || op == "equal" || op == "isequal") return CreateComparison(expressionTypes.IsEqualNumber, condition, toStringType);
+            if (op == "lessthanorequal" || op == "islessthanorequal") return CreateComparison(expressionTypes.IsLessThanOrEqual, condition, toStringType);
+            if (op == "greaterthanorequal" || op == "isgreaterthanorequal") return CreateComparison(expressionTypes.IsGreaterThanOrEqual, condition, toStringType);
+            throw new InvalidOperationException("Unsupported comparison condition: " + (condition.Operator ?? condition.Type));
+        }
+
+        private static Activity<bool> CreateComparison(Type comparisonType, ComparisonExpressionYaml condition, Type toStringType)
+        {
+            var comparison = Create(comparisonType);
+            SetProperty(comparison, "Left", ToInArgument<double>(condition.Left, toStringType));
+            SetProperty(comparison, "Right", ToInArgument<double>(condition.Right, toStringType));
+            return (Activity<bool>)comparison;
+        }
+
+        private sealed class ComparisonExpressionTypes
+        {
+            public ComparisonExpressionTypes(Assembly assembly)
+            {
+                IsLessThan = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsLessThan`1");
+                IsGreaterThan = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsGreaterThan`1");
+                IsLessThanOrEqual = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsLessThanOrEqual`1");
+                IsGreaterThanOrEqual = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsGreaterThanOrEqual`1");
+                IsEqualNumber = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsEqualNumber`1");
+            }
+
+            public Type IsLessThan { get; }
+            public Type IsGreaterThan { get; }
+            public Type IsLessThanOrEqual { get; }
+            public Type IsGreaterThanOrEqual { get; }
+            public Type IsEqualNumber { get; }
+
+            private static Type GetGenericComparisonType(Assembly assembly, string typeName) => GetRequiredType(assembly, typeName).MakeGenericType(typeof(double));
         }
 
         private static InArgument<T> ToInArgument<T>(ExpressionYaml expression, Type toStringType)
@@ -214,6 +317,8 @@ namespace SPNet.Workflow.WfSerializer
         {
             if (string.Equals(type, "Double", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
             if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Bool", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
+            if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Date", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
+            if (string.Equals(type, "Int32", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Int", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Integer", StringComparison.OrdinalIgnoreCase)) return typeof(int);
             return typeof(string);
         }
 

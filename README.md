@@ -51,7 +51,7 @@ Supported top-level fields:
 - `technicalName`: optional WF class name; defaults to `name + .MTW`.
 - `start`: `manual`, `autoStartCreate`, `autoStartChange` metadata for authoring/publish tooling.
 - `target`: `type` and optional `listTitle` metadata for publish tooling.
-- `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, and `Boolean`/`Bool` are supported.
+- `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, `Boolean`/`Bool`, `Int32`/`Int`/`Integer`, and `DateTime`/`Date` are supported.
 - `stages`: one or more stages, each with supported actions.
 
 Supported actions:
@@ -60,6 +60,11 @@ Supported actions:
 - `assign` / `setVariable`: emits WF `Assign<T>` against an existing YAML variable, with `to` and `value`.
 - `writeHistory`: emits SharePoint `WriteToHistory`, with `message`.
 - `setStatus`: emits SharePoint `SetWorkflowStatus`, with `status`.
+- `comment`: emits SharePoint `Comment`, with `text`. This is a Designer annotation activity, not a runtime history-log action.
+- `delayFor`: emits SharePoint `DelayFor`, with numeric `days`, `hours`, and `minutes` expressions.
+- `delayUntil`: emits SharePoint `DelayUntil`, with a `date` expression. Prefer an explicit ISO-like date literal or a declared `DateTime` variable.
+- `while` / `loop`: emits WF `While`, with a comparison `condition` and nested `actions` sequence.
+- `if`: emits WF `If`, with a comparison `condition`, nested `then` sequence, and optional nested `else` sequence.
 
 The external YAML shape is intentionally stable. Internally, action YAML is deserialized into a discriminated action hierarchy (`calc`, `writeHistory`, `setStatus`, and assignment actions) so action-specific validation and WF activity construction stay scoped to the supported action type instead of one broad property bag.
 
@@ -69,6 +74,42 @@ Supported expressions:
 - variable references: `variable: calc`.
 - conversion to string: `toString: { variable: calc }`.
 - conversion to string alternative form: `type: toString` with nested `value`, for example `value: { type: toString, value: { variable: calc } }`.
+
+Control-flow comparison expressions:
+
+- comparison types: `isLessThan` / `lessThan`, `equals`, `greaterThan`, `lessThanOrEqual`, and `greaterThanOrEqual`.
+- operands: numeric `literal` or `variable` expressions, currently emitted as `Double` WF expression operands.
+
+Control-flow example:
+
+```yaml
+- type: while
+  condition:
+    type: isLessThan
+    left:
+      variable: counter
+    right:
+      literal: 3
+  actions:
+  - type: writeHistory
+    message:
+      type: toString
+      value:
+        variable: counter
+- type: if
+  condition:
+    type: equals
+    left:
+      variable: counter
+    right:
+      literal: 3
+  then:
+  - type: setStatus
+    status: Then branch
+  else:
+  - type: setStatus
+    status: Else branch
+```
 
 Assignment example:
 
@@ -85,7 +126,9 @@ Assignment example:
       variable: assignedNumber
 ```
 
-Deferred actions for future safe expansion batches: list item mutation/query actions, email, task/process actions, dictionary actions, HTTP/web service actions, person/group and lookup field actions, conditional branching, and loops. These require SharePoint Designer reference XAML before being emitted from YAML.
+Reflection against the SharePoint Designer WebsiteCache proxy assembly confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`.
+
+Deferred actions for future safe expansion batches: list item mutation/query actions, email, task/process actions, dictionary/dynamic-value actions, HTTP/web service actions, person/group and lookup field actions, moderation/check-in/check-out/copy/update/delete actions, and workflow interop. These require SharePoint Designer reference XAML or more complex expression/value-shape validation before being emitted from YAML.
 
 ## Configuration
 

@@ -132,6 +132,32 @@ namespace SPNet.Workflow.WfSerializer
         public override void Validate() => base.Validate();
     }
 
+    public sealed class CommentActionYaml : WorkflowActionYaml
+    {
+        public CommentActionYaml() { Type = "comment"; }
+        public ExpressionYaml Text { get; set; } = new ExpressionYaml();
+
+        public override void Validate() => base.Validate();
+    }
+
+    public sealed class DelayForActionYaml : WorkflowActionYaml
+    {
+        public DelayForActionYaml() { Type = "delayFor"; }
+        public ExpressionYaml Days { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Hours { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Minutes { get; set; } = new ExpressionYaml { Literal = 0 };
+
+        public override void Validate() => base.Validate();
+    }
+
+    public sealed class DelayUntilActionYaml : WorkflowActionYaml
+    {
+        public DelayUntilActionYaml() { Type = "delayUntil"; }
+        public ExpressionYaml Date { get; set; } = new ExpressionYaml();
+
+        public override void Validate() => base.Validate();
+    }
+
     public sealed class AssignActionYaml : WorkflowActionYaml, ITargetedActionYaml
     {
         public AssignActionYaml() { Type = "assign"; }
@@ -142,6 +168,36 @@ namespace SPNet.Workflow.WfSerializer
         {
             base.Validate();
             RequireTo();
+        }
+    }
+
+    public sealed class WhileActionYaml : WorkflowActionYaml
+    {
+        public WhileActionYaml() { Type = "while"; }
+        public ComparisonExpressionYaml Condition { get; set; } = new ComparisonExpressionYaml();
+        public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>();
+
+        public override void Validate()
+        {
+            base.Validate();
+            Condition.Validate(Type);
+            foreach (var action in Actions ?? new List<WorkflowActionYaml>()) action.Validate();
+        }
+    }
+
+    public sealed class IfActionYaml : WorkflowActionYaml
+    {
+        public IfActionYaml() { Type = "if"; }
+        public ComparisonExpressionYaml Condition { get; set; } = new ComparisonExpressionYaml();
+        public List<WorkflowActionYaml> Then { get; set; } = new List<WorkflowActionYaml>();
+        public List<WorkflowActionYaml> Else { get; set; } = new List<WorkflowActionYaml>();
+
+        public override void Validate()
+        {
+            base.Validate();
+            Condition.Validate(Type);
+            foreach (var action in Then ?? new List<WorkflowActionYaml>()) action.Validate();
+            foreach (var action in Else ?? new List<WorkflowActionYaml>()) action.Validate();
         }
     }
 
@@ -157,7 +213,12 @@ namespace SPNet.Workflow.WfSerializer
             if (actionType == "calc") action = new CalcActionYaml { Type = yamlObject.Type ?? string.Empty, LValue = yamlObject.LValue ?? new ExpressionYaml(), RValue = yamlObject.RValue ?? new ExpressionYaml(), Operator = yamlObject.Operator ?? "Add", To = yamlObject.To ?? string.Empty };
             else if (actionType == "writehistory") action = new WriteHistoryActionYaml { Type = yamlObject.Type ?? string.Empty, Message = yamlObject.Message ?? new ExpressionYaml() };
             else if (actionType == "setstatus") action = new SetStatusActionYaml { Type = yamlObject.Type ?? string.Empty, Status = yamlObject.Status ?? string.Empty };
+            else if (actionType == "comment") action = new CommentActionYaml { Type = yamlObject.Type ?? string.Empty, Text = yamlObject.Text ?? yamlObject.Message ?? new ExpressionYaml() };
+            else if (actionType == "delayfor") action = new DelayForActionYaml { Type = yamlObject.Type ?? string.Empty, Days = yamlObject.Days ?? new ExpressionYaml { Literal = 0 }, Hours = yamlObject.Hours ?? new ExpressionYaml { Literal = 0 }, Minutes = yamlObject.Minutes ?? new ExpressionYaml { Literal = 0 } };
+            else if (actionType == "delayuntil") action = new DelayUntilActionYaml { Type = yamlObject.Type ?? string.Empty, Date = yamlObject.Date ?? new ExpressionYaml() };
             else if (actionType == "assign" || actionType == "setvariable") action = new AssignActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty, Value = yamlObject.Value };
+            else if (actionType == "while" || actionType == "loop") action = new WhileActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Actions = yamlObject.Actions ?? new List<WorkflowActionYaml>() };
+            else if (actionType == "if") action = new IfActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Then = yamlObject.Then ?? new List<WorkflowActionYaml>(), Else = yamlObject.Else ?? new List<WorkflowActionYaml>() };
             else throw new InvalidOperationException("Unsupported action type: " + yamlObject.Type);
             return action;
         }
@@ -177,9 +238,29 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", status.Type); WriteScalar(emitter, "status", status.Status);
             }
+            else if (value is CommentActionYaml comment)
+            {
+                WriteScalar(emitter, "type", comment.Type); WriteObject(emitter, serializer, "text", comment.Text);
+            }
+            else if (value is DelayForActionYaml delayFor)
+            {
+                WriteScalar(emitter, "type", delayFor.Type); WriteObject(emitter, serializer, "days", delayFor.Days); WriteObject(emitter, serializer, "hours", delayFor.Hours); WriteObject(emitter, serializer, "minutes", delayFor.Minutes);
+            }
+            else if (value is DelayUntilActionYaml delayUntil)
+            {
+                WriteScalar(emitter, "type", delayUntil.Type); WriteObject(emitter, serializer, "date", delayUntil.Date);
+            }
             else if (value is AssignActionYaml assign)
             {
                 WriteScalar(emitter, "type", assign.Type); WriteScalar(emitter, "to", assign.To); WriteObject(emitter, serializer, "value", assign.Value);
+            }
+            else if (value is WhileActionYaml whileAction)
+            {
+                WriteScalar(emitter, "type", whileAction.Type); WriteObject(emitter, serializer, "condition", whileAction.Condition); WriteObject(emitter, serializer, "actions", whileAction.Actions);
+            }
+            else if (value is IfActionYaml ifAction)
+            {
+                WriteScalar(emitter, "type", ifAction.Type); WriteObject(emitter, serializer, "condition", ifAction.Condition); WriteObject(emitter, serializer, "then", ifAction.Then); WriteObject(emitter, serializer, "else", ifAction.Else);
             }
             else throw new InvalidOperationException("Unsupported action model: " + (value?.GetType().FullName ?? "<null>"));
             emitter.Emit(new MappingEnd());
@@ -207,6 +288,29 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml? Value { get; set; }
             public ExpressionYaml Message { get; set; } = new ExpressionYaml();
             public string Status { get; set; } = string.Empty;
+            public ExpressionYaml Text { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Days { get; set; } = new ExpressionYaml { Literal = 0 };
+            public ExpressionYaml Hours { get; set; } = new ExpressionYaml { Literal = 0 };
+            public ExpressionYaml Minutes { get; set; } = new ExpressionYaml { Literal = 0 };
+            public ExpressionYaml Date { get; set; } = new ExpressionYaml();
+            public ComparisonExpressionYaml Condition { get; set; } = new ComparisonExpressionYaml();
+            public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>();
+            public List<WorkflowActionYaml> Then { get; set; } = new List<WorkflowActionYaml>();
+            public List<WorkflowActionYaml> Else { get; set; } = new List<WorkflowActionYaml>();
+        }
+    }
+
+    public sealed class ComparisonExpressionYaml
+    {
+        public string Type { get; set; } = "isLessThan";
+        public string Operator { get; set; } = string.Empty;
+        public ExpressionYaml Left { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Right { get; set; } = new ExpressionYaml();
+
+        public void Validate(string owner)
+        {
+            var comparison = string.IsNullOrWhiteSpace(Operator) ? Type : Operator;
+            if (string.IsNullOrWhiteSpace(comparison)) throw new InvalidOperationException(owner + " action requires condition.type or condition.operator.");
         }
     }
 

@@ -1,0 +1,38 @@
+schemaVersion: spnet.workflow/v1
+name: YamlExpandedActionsSmoke
+start:
+  manual: true
+target:
+  type: Site
+variables:
+  - name: calc
+    type: Double
+stages:
+  - name: Expanded Actions Smoke
+    actions:
+      - type: comment
+        text:
+          literal: "Designer-only comment emitted through the reflected Comment activity."
+      - type: writeHistory
+        message:
+          literal: "Starting expanded action smoke."
+      - type: delayFor
+        days:
+          literal: 0
+        hours:
+          literal: 0
+        minutes:
+          literal: 1
+      - type: calc
+        lValue:
+          literal: 2
+        operator: Add
+        rValue:
+          literal: 3
+        to: calc
+      - type: writeHistory
+        message:
+          toString:
+            variable: calc
+      - type: setStatus
+        status: "Expanded actions smoke completed"
