@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>false</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <PackageId>SPNet.Workflow.WfSerializer</PackageId>
+    <Title>SPNet Workflow WF Serializer</Title>
+    <Description>.NET Framework 4.8 compatibility tool for Windows Workflow Foundation ActivityBuilder/XAML serialization using SharePoint Designer proxy activity assemblies.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+    <Reference Include="System.Activities" />
+    <Reference Include="System.Xaml" />
+  </ItemGroup>
+
+</Project>

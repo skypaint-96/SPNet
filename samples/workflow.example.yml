@@ -1,0 +1,26 @@
+schemaVersion: spnet.workflow/v1
+name: YamlFirstSmoke
+technicalName: YamlFirstSmoke.MTW
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: Site
+variables:
+  - name: calc
+    type: Double
+stages:
+  - name: Stage 1
+    actions:
+      - type: calc
+        lValue:
+          literal: 1
+        rValue:
+          literal: 1
+        operator: Add
+        to: calc
+      - type: writeHistory
+        message:
+          toString:
+            variable: calc

@@ -1,0 +1,53 @@
+# Build output
+bin/
+obj/
+**/bin/
+**/obj/
+
+# Visual Studio / local IDE state
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local machine configuration and secrets
+config/spnet.local.yml
+config/*.local.yml
+*.secret.yml
+*.secrets.yml
+*.local.ps1
+.env
+.env.*
+
+# Generated workflow artifacts and diagnostics
+artifacts/**
+!artifacts/
+!artifacts/.gitkeep
+*.downloaded.xaml
+*.exported.yml
+*.inspect.txt
+workflow-diagnostics.json
+sharepoint-workflow-diagnostics/
+
+# SharePoint Designer WebsiteCache / proxy DLL copies
+**/WebsiteCache/**
+**/wf-serializer-cache/**
+**/*.Proxy.dll
+**/Microsoft.Web.Design.Client.dll
+**/Microsoft.Web.Authoring*.dll
+
+# Publish/package backups and temporary files
+*.bak
+*.backup
+*.tmp
+*.temp
+*.log
+*.zip
+*.nupkg
+*.snupkg
+TestResults/
+coverage/
+
+# Accidental scratch files
+`n

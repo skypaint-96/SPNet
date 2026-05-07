@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SPNet.Workflow.WfSerializer/SPNet.Workflow.WfSerializer.csproj" />
+  </Folder>
+</Solution>
