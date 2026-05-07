@@ -211,6 +211,36 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    public sealed class CallHttpWebServiceActionYaml : WorkflowActionYaml
+    {
+        public CallHttpWebServiceActionYaml() { Type = "callHttpWebService"; }
+        public ExpressionYaml Address { get; set; } = new ExpressionYaml();
+        public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "GET" };
+        public string ResponseStatusCodeTo { get; set; } = string.Empty;
+        public string ResponseContentTo { get; set; } = string.Empty;
+        public string ResponseHeadersTo { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (string.IsNullOrWhiteSpace(ResponseStatusCodeTo) && string.IsNullOrWhiteSpace(ResponseContentTo) && string.IsNullOrWhiteSpace(ResponseHeadersTo)) throw new InvalidOperationException(Type + " action requires at least one response target: responseStatusCodeTo, responseContentTo, or responseHeadersTo.");
+        }
+    }
+
+    public sealed class LookupRestPropertyNameActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public LookupRestPropertyNameActionYaml() { Type = "lookupRestPropertyName"; }
+        public ExpressionYaml ListId { get; set; } = new ExpressionYaml();
+        public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireTo();
+        }
+    }
+
     public sealed class WhileActionYaml : WorkflowActionYaml
     {
         public WhileActionYaml() { Type = "while"; }
@@ -257,10 +287,12 @@ namespace SPNet.Workflow.WfSerializer
             else if (actionType == "delayfor") action = new DelayForActionYaml { Type = yamlObject.Type ?? string.Empty, Days = yamlObject.Days ?? new ExpressionYaml { Literal = 0 }, Hours = yamlObject.Hours ?? new ExpressionYaml { Literal = 0 }, Minutes = yamlObject.Minutes ?? new ExpressionYaml { Literal = 0 } };
             else if (actionType == "delayuntil") action = new DelayUntilActionYaml { Type = yamlObject.Type ?? string.Empty, Date = yamlObject.Date ?? new ExpressionYaml() };
             else if (actionType == "assign" || actionType == "setvariable") action = new AssignActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty, Value = yamlObject.Value };
-            else if (actionType == "lookupworkflowcontext" || actionType == "lookupcontextproperty") action = new LookupWorkflowContextActionYaml { Type = yamlObject.Type ?? string.Empty, PropertyName = yamlObject.PropertyName ?? string.Empty, To = yamlObject.To ?? string.Empty };
+            else if (actionType == "lookupworkflowcontext" || actionType == "lookupcontextproperty") action = new LookupWorkflowContextActionYaml { Type = yamlObject.Type ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "getcurrentlistid") action = new GetCurrentListIdActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "getcurrentitemguid") action = new GetCurrentItemGuidActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "setfield") action = new SetFieldActionYaml { Type = yamlObject.Type ?? string.Empty, FieldName = yamlObject.FieldName ?? string.Empty, Value = yamlObject.Value ?? new ExpressionYaml() };
+            else if (actionType == "callhttpwebservice" || actionType == "callhttp" || actionType == "http") action = new CallHttpWebServiceActionYaml { Type = yamlObject.Type ?? string.Empty, Address = yamlObject.Address ?? new ExpressionYaml(), RequestType = yamlObject.RequestType ?? new ExpressionYaml { Literal = "GET" }, ResponseStatusCodeTo = yamlObject.ResponseStatusCodeTo ?? yamlObject.StatusCodeTo ?? string.Empty, ResponseContentTo = yamlObject.ResponseContentTo ?? yamlObject.ContentTo ?? string.Empty, ResponseHeadersTo = yamlObject.ResponseHeadersTo ?? yamlObject.HeadersTo ?? string.Empty };
+            else if (actionType == "lookuprestpropertyname" || actionType == "lookupspgetitempropertynameinrest") action = new LookupRestPropertyNameActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml(), PropertyName = yamlObject.PropertyName ?? new ExpressionYaml(), To = yamlObject.To ?? string.Empty };
             else if (actionType == "while" || actionType == "loop") action = new WhileActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Actions = yamlObject.Actions ?? new List<WorkflowActionYaml>() };
             else if (actionType == "if") action = new IfActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Then = yamlObject.Then ?? new List<WorkflowActionYaml>(), Else = yamlObject.Else ?? new List<WorkflowActionYaml>() };
             else throw new InvalidOperationException("Unsupported action type: " + yamlObject.Type);
@@ -314,6 +346,14 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", setField.Type); WriteScalar(emitter, "fieldName", setField.FieldName); WriteObject(emitter, serializer, "value", setField.Value);
             }
+            else if (value is CallHttpWebServiceActionYaml callHttp)
+            {
+                WriteScalar(emitter, "type", callHttp.Type); WriteObject(emitter, serializer, "address", callHttp.Address); WriteObject(emitter, serializer, "requestType", callHttp.RequestType); WriteScalar(emitter, "responseStatusCodeTo", callHttp.ResponseStatusCodeTo); WriteScalar(emitter, "responseContentTo", callHttp.ResponseContentTo); WriteScalar(emitter, "responseHeadersTo", callHttp.ResponseHeadersTo);
+            }
+            else if (value is LookupRestPropertyNameActionYaml restProperty)
+            {
+                WriteScalar(emitter, "type", restProperty.Type); WriteObject(emitter, serializer, "listId", restProperty.ListId); WriteObject(emitter, serializer, "propertyName", restProperty.PropertyName); WriteScalar(emitter, "to", restProperty.To);
+            }
             else if (value is WhileActionYaml whileAction)
             {
                 WriteScalar(emitter, "type", whileAction.Type); WriteObject(emitter, serializer, "condition", whileAction.Condition); WriteObject(emitter, serializer, "actions", whileAction.Actions);
@@ -345,9 +385,18 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml RValue { get; set; } = new ExpressionYaml();
             public string Operator { get; set; } = "Add";
             public string To { get; set; } = string.Empty;
-            public string PropertyName { get; set; } = string.Empty;
+            public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
             public string FieldName { get; set; } = string.Empty;
             public ExpressionYaml? Value { get; set; }
+            public ExpressionYaml Address { get; set; } = new ExpressionYaml();
+            public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "GET" };
+            public ExpressionYaml ListId { get; set; } = new ExpressionYaml();
+            public string ResponseStatusCodeTo { get; set; } = string.Empty;
+            public string ResponseContentTo { get; set; } = string.Empty;
+            public string ResponseHeadersTo { get; set; } = string.Empty;
+            public string StatusCodeTo { get; set; } = string.Empty;
+            public string ContentTo { get; set; } = string.Empty;
+            public string HeadersTo { get; set; } = string.Empty;
             public ExpressionYaml Message { get; set; } = new ExpressionYaml();
             public string Status { get; set; } = string.Empty;
             public ExpressionYaml Text { get; set; } = new ExpressionYaml();

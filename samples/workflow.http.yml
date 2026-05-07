@@ -1,0 +1,35 @@
+schemaVersion: spnet.workflow/v1
+name: YamlHttpWorkflow
+target:
+  type: Site
+variables:
+  - name: currentListId
+    type: Guid
+  - name: restListEntityTypeName
+    type: String
+  - name: httpStatusCode
+    type: String
+stages:
+  - name: HTTP call
+    actions:
+      - type: assign
+        to: currentListId
+        value:
+          type: getCurrentListId
+      - type: lookupRestPropertyName
+        listId:
+          variable: currentListId
+        propertyName:
+          literal: ListItemEntityTypeFullName
+        to: restListEntityTypeName
+      - type: callHttpWebService
+        address:
+          literal: "[%Workflow Context:Current Site URL%]/_api/web/currentuser"
+        requestType:
+          literal: GET
+        responseStatusCodeTo: httpStatusCode
+        responseContentTo: httpResponseContent
+        responseHeadersTo: httpResponseHeaders
+      - type: writeHistory
+        message:
+          variable: httpStatusCode
