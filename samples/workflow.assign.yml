@@ -1,0 +1,41 @@
+schemaVersion: spnet.workflow/v1
+name: YamlAssignSmoke
+technicalName: YamlAssignSmoke.MTW
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: Site
+variables:
+  - name: calc
+    type: Double
+  - name: assignedNumber
+    type: Double
+  - name: assignedText
+    type: String
+stages:
+  - name: Assign Stage
+    actions:
+      - type: calc
+        lValue:
+          literal: 40
+        rValue:
+          literal: 2
+        operator: Add
+        to: calc
+      - type: assign
+        to: assignedNumber
+        value:
+          variable: calc
+      - type: setVariable
+        to: assignedText
+        value:
+          type: toString
+          value:
+            variable: assignedNumber
+      - type: setStatus
+        status: Assignment complete
+      - type: writeHistory
+        message:
+          variable: assignedText

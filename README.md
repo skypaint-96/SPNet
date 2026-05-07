@@ -51,12 +51,13 @@ Supported top-level fields:
 - `technicalName`: optional WF class name; defaults to `name + .MTW`.
 - `start`: `manual`, `autoStartCreate`, `autoStartChange` metadata for authoring/publish tooling.
 - `target`: `type` and optional `listTitle` metadata for publish tooling.
-- `variables`: typed variables currently mapped to WF dynamic activity properties; `Double` and `String` are supported.
+- `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, and `Boolean`/`Bool` are supported.
 - `stages`: one or more stages, each with supported actions.
 
 Supported actions:
 
 - `calc`: emits SharePoint `Calc`, with `lValue`, `rValue`, `operator`, and `to`.
+- `assign` / `setVariable`: emits WF `Assign<T>` against an existing YAML variable, with `to` and `value`.
 - `writeHistory`: emits SharePoint `WriteToHistory`, with `message`.
 - `setStatus`: emits SharePoint `SetWorkflowStatus`, with `status`.
 
@@ -65,6 +66,24 @@ Supported expressions:
 - literal values: `literal: 1` or `literal: "text"`.
 - variable references: `variable: calc`.
 - conversion to string: `toString: { variable: calc }`.
+- conversion to string alternative form: `type: toString` with nested `value`, for example `value: { type: toString, value: { variable: calc } }`.
+
+Assignment example:
+
+```yaml
+- type: assign
+  to: assignedNumber
+  value:
+    literal: 123
+- type: setVariable
+  to: assignedText
+  value:
+    type: toString
+    value:
+      variable: assignedNumber
+```
+
+Deferred actions for future safe expansion batches: list item mutation/query actions, email, task/process actions, dictionary actions, HTTP/web service actions, person/group and lookup field actions, conditional branching, and loops. These require SharePoint Designer reference XAML before being emitted from YAML.
 
 ## Configuration
 

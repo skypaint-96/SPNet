@@ -1,0 +1,88 @@
+schemaVersion: spnet.workflow/v1
+name: YamlComplexSmoke
+technicalName: YamlComplexSmoke.MTW
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: Site
+variables:
+  - name: baseTotal
+    type: Double
+  - name: adjustment
+    type: Double
+  - name: runningTotal
+    type: Double
+  - name: reviewTotal
+    type: Double
+stages:
+  - name: Initialise totals
+    actions:
+      - type: setStatus
+        status: Initialising YAML complex smoke workflow
+      - type: calc
+        lValue:
+          literal: 10
+        rValue:
+          literal: 5
+        operator: Add
+        to: baseTotal
+      - type: writeHistory
+        message:
+          toString:
+            variable: baseTotal
+      - type: calc
+        lValue:
+          variable: baseTotal
+        rValue:
+          literal: 3
+        operator: Add
+        to: adjustment
+      - type: writeHistory
+        message:
+          toString:
+            variable: adjustment
+  - name: Calculate running total
+    actions:
+      - type: setStatus
+        status: Calculating running total
+      - type: calc
+        lValue:
+          variable: baseTotal
+        rValue:
+          variable: adjustment
+        operator: Add
+        to: runningTotal
+      - type: writeHistory
+        message:
+          toString:
+            variable: runningTotal
+      - type: calc
+        lValue:
+          variable: runningTotal
+        rValue:
+          literal: 2
+        operator: Add
+        to: reviewTotal
+      - type: writeHistory
+        message:
+          toString:
+            variable: reviewTotal
+  - name: Complete smoke test
+    actions:
+      - type: setStatus
+        status: Completing YAML complex smoke workflow
+      - type: calc
+        lValue:
+          variable: reviewTotal
+        rValue:
+          literal: 1
+        operator: Add
+        to: runningTotal
+      - type: writeHistory
+        message:
+          toString:
+            variable: runningTotal
+      - type: setStatus
+        status: YAML complex smoke workflow complete

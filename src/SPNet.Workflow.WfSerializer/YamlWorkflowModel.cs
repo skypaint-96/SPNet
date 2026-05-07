@@ -82,14 +82,15 @@ namespace SPNet.Workflow.WfSerializer
         public ExpressionYaml RValue { get; set; } = new ExpressionYaml();
         public string Operator { get; set; } = "Add";
         public string To { get; set; } = string.Empty;
+        public ExpressionYaml Value { get; set; } = null;
         public ExpressionYaml Message { get; set; } = new ExpressionYaml();
         public string Status { get; set; } = string.Empty;
 
         public void Validate()
         {
             var t = (Type ?? string.Empty).ToLowerInvariant();
-            if (t != "calc" && t != "writehistory" && t != "setstatus") throw new InvalidOperationException("Unsupported action type: " + Type);
-            if (t == "calc" && string.IsNullOrWhiteSpace(To)) throw new InvalidOperationException("calc action requires 'to'.");
+            if (t != "calc" && t != "writehistory" && t != "setstatus" && t != "assign" && t != "setvariable") throw new InvalidOperationException("Unsupported action type: " + Type);
+            if ((t == "calc" || t == "assign" || t == "setvariable") && string.IsNullOrWhiteSpace(To)) throw new InvalidOperationException(Type + " action requires 'to'.");
         }
     }
 
@@ -97,6 +98,8 @@ namespace SPNet.Workflow.WfSerializer
     {
         public object Literal { get; set; } = null;
         public string Variable { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public ExpressionYaml Value { get; set; } = null;
         public ExpressionYaml ToString { get; set; } = null;
     }
 }

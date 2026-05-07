@@ -108,12 +108,16 @@ namespace SPNet.Workflow.WfSerializer
                 var setStatusType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.SetWorkflowStatus");
                 var toStringType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToString");
 
+                var variableTypes = workflow.Variables?.ToDictionary(v => v.Name, v => MapVariableType(v.Type), StringComparer.OrdinalIgnoreCase) ?? new System.Collections.Generic.Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<ActionYaml>()).Where(a => string.Equals(a.Type, "calc", StringComparison.OrdinalIgnoreCase)).Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(double);
+                ValidateAssignments(workflow, variableTypes);
+
                 var flowchart = new Flowchart();
                 FlowStep previous = null;
                 foreach (var stageModel in workflow.Stages)
                 {
                     var sequence = new Sequence { DisplayName = string.IsNullOrWhiteSpace(stageModel.Name) ? "Stage" : stageModel.Name };
-                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<ActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, toStringType));
+                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<ActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, toStringType, variableTypes));
                     var step = new FlowStep { Action = sequence };
                     flowchart.Nodes.Add(step);
                     if (flowchart.StartNode == null) flowchart.StartNode = step;
@@ -125,21 +129,18 @@ namespace SPNet.Workflow.WfSerializer
                 flowchart.DisplayName = workflow.Name;
                 outerSequence.Activities.Add(flowchart);
                 var builder = new ActivityBuilder { Name = string.IsNullOrWhiteSpace(workflow.TechnicalName) ? GetDottedWorkflowClassName(workflow.Name) : workflow.TechnicalName, Implementation = outerSequence };
-                foreach (var variable in workflow.Variables ?? new System.Collections.Generic.List<VariableYaml>())
+                foreach (var variable in variableTypes)
                 {
-                    builder.Properties.Add(new DynamicActivityProperty { Name = variable.Name, Type = typeof(InArgument<>).MakeGenericType(MapVariableType(variable.Type)) });
-                }
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<ActionYaml>()).Where(a => string.Equals(a.Type, "calc", StringComparison.OrdinalIgnoreCase)).Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !builder.Properties.Any(p => p.Name == t)))
-                {
-                    builder.Properties.Add(new DynamicActivityProperty { Name = target, Type = typeof(InArgument<double>) });
+                    builder.Properties.Add(new DynamicActivityProperty { Name = variable.Key, Type = typeof(InArgument<>).MakeGenericType(variable.Value) });
                 }
                 return builder;
             }
         }
 
-        private static Activity BuildAction(ActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type toStringType)
+        private static Activity BuildAction(ActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type toStringType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
-            if (string.Equals(action.Type, "calc", StringComparison.OrdinalIgnoreCase))
+            var actionType = (action.Type ?? string.Empty).ToLowerInvariant();
+            if (actionType == "calc")
             {
                 var calc = Create(calcType);
                 SetProperty(calc, "LValue", ToInArgument<double>(action.LValue, toStringType));
@@ -148,24 +149,43 @@ namespace SPNet.Workflow.WfSerializer
                 SetProperty(calc, "To", new OutArgument<double>(new ArgumentReference<double>(action.To)));
                 return (Activity)calc;
             }
-            if (string.Equals(action.Type, "writeHistory", StringComparison.OrdinalIgnoreCase))
+            if (actionType == "writehistory")
             {
                 var write = Create(writeToHistoryType);
                 SetProperty(write, "Message", ToInArgument<string>(action.Message, toStringType));
                 return (Activity)write;
             }
-            if (string.Equals(action.Type, "setStatus", StringComparison.OrdinalIgnoreCase))
+            if (actionType == "setstatus")
             {
                 var status = Create(setStatusType);
-                SetProperty(status, "Status", action.Status ?? string.Empty);
+                SetProperty(status, "Status", new InArgument<string>(action.Status ?? string.Empty));
                 return (Activity)status;
             }
+            if (actionType == "assign" || actionType == "setvariable") return BuildAssign(action, toStringType, variableTypes);
             throw new InvalidOperationException("Unsupported action type: " + action.Type);
+        }
+
+        private static void ValidateAssignments(WorkflowYaml workflow, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            foreach (var action in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<ActionYaml>()).Where(a => string.Equals(a.Type, "assign", StringComparison.OrdinalIgnoreCase) || string.Equals(a.Type, "setVariable", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!variableTypes.ContainsKey(action.To ?? string.Empty)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + action.To);
+            }
+        }
+
+        private static Activity BuildAssign(ActionYaml action, Type toStringType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException("assign action target variable is not declared: " + action.To);
+            var value = action.Value ?? action.RValue;
+            if (targetType == typeof(double)) return new Assign<double> { To = new OutArgument<double>(new ArgumentReference<double>(action.To)), Value = ToInArgument<double>(value, toStringType) };
+            if (targetType == typeof(bool)) return new Assign<bool> { To = new OutArgument<bool>(new ArgumentReference<bool>(action.To)), Value = ToInArgument<bool>(value, toStringType) };
+            return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, toStringType) };
         }
 
         private static InArgument<T> ToInArgument<T>(ExpressionYaml expression, Type toStringType)
         {
             expression = expression ?? new ExpressionYaml();
+            if (string.Equals(expression.Type, "toString", StringComparison.OrdinalIgnoreCase) && expression.Value != null) expression = new ExpressionYaml { ToString = expression.Value };
             if (!string.IsNullOrWhiteSpace(expression.Variable)) return new InArgument<T>(new ArgumentValue<T>(expression.Variable));
             if (expression.ToString != null)
             {
@@ -183,9 +203,14 @@ namespace SPNet.Workflow.WfSerializer
             return new InArgument<double>(Convert.ToDouble(expression.Literal ?? 0d));
         }
 
-        private static object DefaultLiteral(Type type) => type == typeof(string) ? string.Empty : 0d;
+        private static object DefaultLiteral(Type type) => type == typeof(string) ? string.Empty : type == typeof(bool) ? false : 0d;
 
-        private static Type MapVariableType(string type) => string.Equals(type, "Double", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase) ? typeof(double) : typeof(string);
+        private static Type MapVariableType(string type)
+        {
+            if (string.Equals(type, "Double", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
+            if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Bool", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
+            return typeof(string);
+        }
 
         public static string InspectWorkflowXaml(string inputXamlPath, string cacheFolder)
         {
