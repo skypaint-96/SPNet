@@ -180,8 +180,7 @@ namespace SPNet.Workflow.WfSerializer
         public override void Validate()
         {
             base.Validate();
-            RequireTo();
-            if (string.IsNullOrWhiteSpace(PropertyName)) throw new InvalidOperationException(Type + " action requires 'propertyName'.");
+            throw new InvalidOperationException(Type + " is not SPD-safe as a top-level action. Use an assign/setVariable action with value: { type: lookupWorkflowContext, propertyName: ... } instead.");
         }
     }
 
@@ -189,14 +188,14 @@ namespace SPNet.Workflow.WfSerializer
     {
         public GetCurrentListIdActionYaml() { Type = "getCurrentListId"; }
         public string To { get; set; } = string.Empty;
-        public override void Validate() { base.Validate(); RequireTo(); }
+        public override void Validate() { base.Validate(); throw new InvalidOperationException(Type + " is not SPD-safe as a top-level action. Use an assign/setVariable action with value: { type: getCurrentListId } instead."); }
     }
 
     public sealed class GetCurrentItemGuidActionYaml : WorkflowActionYaml, ITargetedActionYaml
     {
         public GetCurrentItemGuidActionYaml() { Type = "getCurrentItemGuid"; }
         public string To { get; set; } = string.Empty;
-        public override void Validate() { base.Validate(); RequireTo(); }
+        public override void Validate() { base.Validate(); throw new InvalidOperationException(Type + " is not SPD-safe as a top-level action. Use an assign/setVariable action with value: { type: getCurrentItemGuid } instead."); }
     }
 
     public sealed class SetFieldActionYaml : WorkflowActionYaml
@@ -382,6 +381,7 @@ namespace SPNet.Workflow.WfSerializer
         public object? Literal { get; set; }
         public string Variable { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
+        public string PropertyName { get; set; } = string.Empty;
         public ExpressionYaml? Value { get; set; }
         public new ExpressionYaml? ToString { get; set; }
     }

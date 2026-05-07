@@ -1,9 +1,9 @@
 schemaVersion: spnet.workflow/v1
-name: YamlLookupSmoke
+name: YamlLookupFixedSmoke
 start:
   manual: true
 target:
-  type: List
+  type: Site
 variables:
 - name: currentWebUrl
   type: String
@@ -18,16 +18,24 @@ stages:
   actions:
   - type: setStatus
     status: Lookup Smoke
-  - type: lookupWorkflowContext
-    propertyName: CurrentWebUrl
+  - type: assign
     to: currentWebUrl
-  - type: lookupContextProperty
-    propertyName: CurrentItemUrl
+    value:
+      type: lookupWorkflowContext
+      propertyName: CurrentWebUrl
+  - type: assign
     to: currentItemUrl
-  - type: getCurrentListId
+    value:
+      type: lookupContextProperty
+      propertyName: CurrentItemUrl
+  - type: assign
     to: currentListId
-  - type: getCurrentItemGuid
+    value:
+      type: getCurrentListId
+  - type: assign
     to: currentItemGuid
+    value:
+      type: getCurrentItemGuid
   - type: writeHistory
     message:
       variable: currentWebUrl

@@ -65,10 +65,10 @@ Supported actions:
 - `delayUntil`: emits SharePoint `DelayUntil`, with a `date` expression. Prefer an explicit ISO-like date literal or a declared `DateTime` variable.
 - `while` / `loop`: emits WF `While`, with a comparison `condition` and nested `actions` sequence.
 - `if`: emits WF `If`, with a comparison `condition`, nested `then` sequence, and optional nested `else` sequence.
-- `lookupWorkflowContext` / `lookupContextProperty`: emits SharePoint `LookupWorkflowContextProperty`, with `propertyName` and string `to` output. Reference XAML confirms scalar context properties such as `CurrentWebUrl` and `CurrentItemUrl`.
-- `getCurrentListId`: emits SharePoint `GetCurrentListId`, with Guid `to` output.
-- `getCurrentItemGuid`: emits SharePoint `GetCurrentItemGuid`, with Guid `to` output.
-  - Note: Guid variables are safe as lookup outputs, but generic `toString` expression conversion for Guid variables is deferred; write scalar string context values directly to history.
+- Lookup activities are supported only as expression values inside another activity, normally `assign` / `setVariable`. Top-level `lookupWorkflowContext` / `lookupContextProperty`, `getCurrentListId`, and `getCurrentItemGuid` actions are deprecated because SharePoint Designer can render them as blank actions and crash when their properties are selected.
+- `lookupWorkflowContext` / `lookupContextProperty` expressions emit SharePoint `LookupWorkflowContextProperty` inside an `InArgument`, with `propertyName`. Reference XAML confirms scalar context lookups such as `CurrentWebUrl` are nested expression activities rather than standalone stage actions.
+- `getCurrentListId` and `getCurrentItemGuid` expressions emit nested SharePoint `GetCurrentListId` / `GetCurrentItemGuid` inside Guid `InArgument` values.
+  - Note: Guid variables are safe as lookup assignment outputs, but generic `toString` expression conversion for Guid variables is deferred; write scalar string context values directly to history.
 - `setField`: emits SharePoint `SetField` for the current item only, with `fieldName` and scalar/object `value`. This is a mutating list workflow action; use only on intentional test list items or controlled list workflow contexts.
 
 The external YAML shape is intentionally stable. Internally, action YAML is deserialized into a discriminated action hierarchy (`calc`, `writeHistory`, `setStatus`, and assignment actions) so action-specific validation and WF activity construction stay scoped to the supported action type instead of one broad property bag.
@@ -79,15 +79,20 @@ Supported expressions:
 - variable references: `variable: calc`.
 - conversion to string: `toString: { variable: calc }`.
 - conversion to string alternative form: `type: toString` with nested `value`, for example `value: { type: toString, value: { variable: calc } }`.
+- lookup expressions for assignment values: `type: lookupWorkflowContext` / `lookupContextProperty` with `propertyName`, `type: getCurrentListId`, and `type: getCurrentItemGuid`.
 
 Lookup example:
 
 ```yaml
-- type: lookupWorkflowContext
-  propertyName: CurrentWebUrl
+- type: assign
   to: currentWebUrl
-- type: getCurrentListId
+  value:
+    type: lookupWorkflowContext
+    propertyName: CurrentWebUrl
+- type: assign
   to: currentListId
+  value:
+    type: getCurrentListId
 - type: writeHistory
   message:
     variable: currentWebUrl
@@ -153,7 +158,7 @@ List action example:
     literal: SPNet YAML list-action smoke
 ```
 
-Reflection/reference inspection against the SharePoint Designer WebsiteCache proxy assembly and downloaded PMteamblog XAML confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`. The second expansion batch adds current workflow/list/item lookup activities with clear scalar output shapes: `LookupWorkflowContextProperty.PropertyName`/`Result`, `GetCurrentListId.Result`, and `GetCurrentItemGuid.Result`. The third expansion batch adds only current-item `SetField` because downloaded reference XAML shows a clear safe current-item shape, for example `SetField FieldName="Title"` with current item `AppliesTo` metadata and an object `FieldValue` argument.
+Reflection/reference inspection against the SharePoint Designer WebsiteCache proxy assembly and downloaded PMteamblog XAML confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`. The lookup expansion now emits current workflow/list/item lookup activities only as nested expression activities in `InArgument` values (`LookupWorkflowContextProperty.PropertyName`, nested `GetCurrentListId`, and nested `GetCurrentItemGuid`), matching the downloaded SharePoint Designer XAML pattern and avoiding known SPD-crashing blank top-level lookup actions. The third expansion batch adds only current-item `SetField` because downloaded reference XAML shows a clear safe current-item shape, for example `SetField FieldName="Title"` with current item `AppliesTo` metadata and an object `FieldValue` argument.
 
 Deferred actions for future safe expansion batches: `updateListItem`, `createListItem`, `deleteListItem`, `copyItem`, `checkInItem`, `checkOutItem`, `undoCheckOutItem`, `setModerationStatus`, `waitForFieldChange`, `waitForItemEvent`, email, task/process actions, dictionary/dynamic-value actions, HTTP/web service actions, person/group and lookup field actions, workflow interop, arbitrary list item field lookups such as `LookupSPListItemStringProperty`, and principal lookups. These require more property/value-shape validation before being emitted from YAML.
 

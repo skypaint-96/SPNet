@@ -116,6 +116,7 @@ namespace SPNet.Workflow.WfSerializer
                 var setFieldType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.SetField");
                 var toStringType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToString");
                 var expressionTypes = new ComparisonExpressionTypes(microsoftActivitiesAssembly);
+                var valueExpressionTypes = new ValueExpressionTypes(toStringType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType);
 
                 var variableTypes = workflow.Variables?.ToDictionary(v => v.Name, v => MapVariableType(v.Type), StringComparer.OrdinalIgnoreCase) ?? new System.Collections.Generic.Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
                 foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<CalcActionYaml>().Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(double);
@@ -126,7 +127,7 @@ namespace SPNet.Workflow.WfSerializer
                 foreach (var stageModel in workflow.Stages)
                 {
                     var sequence = new Sequence { DisplayName = string.IsNullOrWhiteSpace(stageModel.Name) ? "Stage" : stageModel.Name };
-                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, toStringType, expressionTypes, variableTypes));
+                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, valueExpressionTypes, expressionTypes, variableTypes));
                     var step = new FlowStep { Action = sequence };
                     flowchart.Nodes.Add(step);
                     if (flowchart.StartNode == null) flowchart.StartNode = step;
@@ -146,57 +147,57 @@ namespace SPNet.Workflow.WfSerializer
             }
         }
 
-        private static Activity BuildAction(WorkflowActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, Type toStringType, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildAction(WorkflowActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
-            if (action is CalcActionYaml calcAction) return BuildCalc(calcAction, calcType, toStringType);
-            if (action is WriteHistoryActionYaml historyAction) return BuildWriteHistory(historyAction, writeToHistoryType, toStringType);
+            if (action is CalcActionYaml calcAction) return BuildCalc(calcAction, calcType, valueExpressionTypes);
+            if (action is WriteHistoryActionYaml historyAction) return BuildWriteHistory(historyAction, writeToHistoryType, valueExpressionTypes);
             if (action is SetStatusActionYaml statusAction) return BuildSetStatus(statusAction, setStatusType);
-            if (action is CommentActionYaml commentAction) return BuildComment(commentAction, commentType, toStringType);
-            if (action is DelayForActionYaml delayForAction) return BuildDelayFor(delayForAction, delayForType, toStringType);
-            if (action is DelayUntilActionYaml delayUntilAction) return BuildDelayUntil(delayUntilAction, delayUntilType, toStringType);
-            if (action is AssignActionYaml assignAction) return BuildAssign(assignAction, toStringType, variableTypes);
+            if (action is CommentActionYaml commentAction) return BuildComment(commentAction, commentType, valueExpressionTypes);
+            if (action is DelayForActionYaml delayForAction) return BuildDelayFor(delayForAction, delayForType, valueExpressionTypes);
+            if (action is DelayUntilActionYaml delayUntilAction) return BuildDelayUntil(delayUntilAction, delayUntilType, valueExpressionTypes);
+            if (action is AssignActionYaml assignAction) return BuildAssign(assignAction, valueExpressionTypes, variableTypes);
             if (action is LookupWorkflowContextActionYaml contextAction) return BuildLookupWorkflowContext(contextAction, lookupWorkflowContextType);
             if (action is GetCurrentListIdActionYaml listIdAction) return BuildGetCurrentListId(listIdAction, getCurrentListIdType);
             if (action is GetCurrentItemGuidActionYaml itemGuidAction) return BuildGetCurrentItemGuid(itemGuidAction, getCurrentItemGuidType);
-            if (action is SetFieldActionYaml setFieldAction) return BuildSetField(setFieldAction, setFieldType, toStringType);
-            if (action is WhileActionYaml whileAction) return BuildWhile(whileAction, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, toStringType, expressionTypes, variableTypes);
-            if (action is IfActionYaml ifAction) return BuildIf(ifAction, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, toStringType, expressionTypes, variableTypes);
+            if (action is SetFieldActionYaml setFieldAction) return BuildSetField(setFieldAction, setFieldType, valueExpressionTypes);
+            if (action is WhileActionYaml whileAction) return BuildWhile(whileAction, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, valueExpressionTypes, expressionTypes, variableTypes);
+            if (action is IfActionYaml ifAction) return BuildIf(ifAction, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, valueExpressionTypes, expressionTypes, variableTypes);
             throw new InvalidOperationException("Unsupported action type: " + action.Type);
         }
 
-        private static Activity BuildWhile(WhileActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, Type toStringType, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildWhile(WhileActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
             return new While
             {
                 DisplayName = string.Equals(action.Type, "loop", StringComparison.OrdinalIgnoreCase) ? "loop" : "while",
-                Condition = BuildBooleanExpression(action.Condition, toStringType, expressionTypes),
-                Body = BuildSequence(action.Actions, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, toStringType, expressionTypes, variableTypes)
+                Condition = BuildBooleanExpression(action.Condition, valueExpressionTypes, expressionTypes),
+                Body = BuildSequence(action.Actions, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, valueExpressionTypes, expressionTypes, variableTypes)
             };
         }
 
-        private static Activity BuildIf(IfActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, Type toStringType, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildIf(IfActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
             return new If
             {
                 DisplayName = "if",
-                Condition = BuildBooleanExpression(action.Condition, toStringType, expressionTypes),
-                Then = BuildSequence(action.Then, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, toStringType, expressionTypes, variableTypes),
-                Else = action.Else == null || action.Else.Count == 0 ? null : BuildSequence(action.Else, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, toStringType, expressionTypes, variableTypes)
+                Condition = BuildBooleanExpression(action.Condition, valueExpressionTypes, expressionTypes),
+                Then = BuildSequence(action.Then, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, valueExpressionTypes, expressionTypes, variableTypes),
+                Else = action.Else == null || action.Else.Count == 0 ? null : BuildSequence(action.Else, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, valueExpressionTypes, expressionTypes, variableTypes)
             };
         }
 
-        private static Sequence BuildSequence(System.Collections.Generic.IEnumerable<WorkflowActionYaml> actions, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, Type toStringType, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Sequence BuildSequence(System.Collections.Generic.IEnumerable<WorkflowActionYaml> actions, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
             var sequence = new Sequence();
-            foreach (var child in actions ?? Enumerable.Empty<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(child, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, toStringType, expressionTypes, variableTypes));
+            foreach (var child in actions ?? Enumerable.Empty<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(child, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, valueExpressionTypes, expressionTypes, variableTypes));
             return sequence;
         }
 
-        private static Activity BuildSetField(SetFieldActionYaml action, Type setFieldType, Type toStringType)
+        private static Activity BuildSetField(SetFieldActionYaml action, Type setFieldType, ValueExpressionTypes valueExpressionTypes)
         {
             var setField = Create(setFieldType);
             SetProperty(setField, "FieldName", new InArgument<string>(action.FieldName ?? string.Empty));
-            SetProperty(setField, "FieldValue", ToInArgument<object>(action.Value, toStringType));
+            SetProperty(setField, "FieldValue", ToInArgument<object>(action.Value, valueExpressionTypes));
             return (Activity)setField;
         }
 
@@ -222,20 +223,20 @@ namespace SPNet.Workflow.WfSerializer
             return (Activity)lookup;
         }
 
-        private static Activity BuildCalc(CalcActionYaml action, Type calcType, Type toStringType)
+        private static Activity BuildCalc(CalcActionYaml action, Type calcType, ValueExpressionTypes valueExpressionTypes)
         {
             var calc = Create(calcType);
-            SetProperty(calc, "LValue", ToInArgument<double>(action.LValue, toStringType));
-            SetProperty(calc, "RValue", ToInArgument<double>(action.RValue, toStringType));
+            SetProperty(calc, "LValue", ToInArgument<double>(action.LValue, valueExpressionTypes));
+            SetProperty(calc, "RValue", ToInArgument<double>(action.RValue, valueExpressionTypes));
             SetProperty(calc, "Operator", new InArgument<string>(action.Operator ?? "Add"));
             SetProperty(calc, "To", new OutArgument<double>(new ArgumentReference<double>(action.To)));
             return (Activity)calc;
         }
 
-        private static Activity BuildWriteHistory(WriteHistoryActionYaml action, Type writeToHistoryType, Type toStringType)
+        private static Activity BuildWriteHistory(WriteHistoryActionYaml action, Type writeToHistoryType, ValueExpressionTypes valueExpressionTypes)
         {
             var write = Create(writeToHistoryType);
-            SetProperty(write, "Message", ToInArgument<string>(action.Message, toStringType));
+            SetProperty(write, "Message", ToInArgument<string>(action.Message, valueExpressionTypes));
             return (Activity)write;
         }
 
@@ -246,26 +247,26 @@ namespace SPNet.Workflow.WfSerializer
             return (Activity)status;
         }
 
-        private static Activity BuildComment(CommentActionYaml action, Type commentType, Type toStringType)
+        private static Activity BuildComment(CommentActionYaml action, Type commentType, ValueExpressionTypes valueExpressionTypes)
         {
             var comment = Create(commentType);
-            SetProperty(comment, "CommentText", ToInArgument<string>(action.Text, toStringType));
+            SetProperty(comment, "CommentText", ToInArgument<string>(action.Text, valueExpressionTypes));
             return (Activity)comment;
         }
 
-        private static Activity BuildDelayFor(DelayForActionYaml action, Type delayForType, Type toStringType)
+        private static Activity BuildDelayFor(DelayForActionYaml action, Type delayForType, ValueExpressionTypes valueExpressionTypes)
         {
             var delay = Create(delayForType);
-            SetProperty(delay, "Days", ToInArgument<double>(action.Days, toStringType));
-            SetProperty(delay, "Hours", ToInArgument<double>(action.Hours, toStringType));
-            SetProperty(delay, "Minutes", ToInArgument<double>(action.Minutes, toStringType));
+            SetProperty(delay, "Days", ToInArgument<double>(action.Days, valueExpressionTypes));
+            SetProperty(delay, "Hours", ToInArgument<double>(action.Hours, valueExpressionTypes));
+            SetProperty(delay, "Minutes", ToInArgument<double>(action.Minutes, valueExpressionTypes));
             return (Activity)delay;
         }
 
-        private static Activity BuildDelayUntil(DelayUntilActionYaml action, Type delayUntilType, Type toStringType)
+        private static Activity BuildDelayUntil(DelayUntilActionYaml action, Type delayUntilType, ValueExpressionTypes valueExpressionTypes)
         {
             var delay = Create(delayUntilType);
-            SetProperty(delay, "Date", ToInArgument<DateTime>(action.Date, toStringType));
+            SetProperty(delay, "Date", ToInArgument<DateTime>(action.Date, valueExpressionTypes));
             return (Activity)delay;
         }
 
@@ -277,36 +278,52 @@ namespace SPNet.Workflow.WfSerializer
             }
         }
 
-        private static Activity BuildAssign(AssignActionYaml action, Type toStringType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildAssign(AssignActionYaml action, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
             if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException("assign action target variable is not declared: " + action.To);
             var value = action.Value ?? new ExpressionYaml();
-            if (targetType == typeof(double)) return new Assign<double> { To = new OutArgument<double>(new ArgumentReference<double>(action.To)), Value = ToInArgument<double>(value, toStringType) };
-            if (targetType == typeof(bool)) return new Assign<bool> { To = new OutArgument<bool>(new ArgumentReference<bool>(action.To)), Value = ToInArgument<bool>(value, toStringType) };
-            if (targetType == typeof(DateTime)) return new Assign<DateTime> { To = new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)), Value = ToInArgument<DateTime>(value, toStringType) };
-            if (targetType == typeof(Guid)) return new Assign<Guid> { To = new OutArgument<Guid>(new ArgumentReference<Guid>(action.To)), Value = ToInArgument<Guid>(value, toStringType) };
-            if (targetType == typeof(int)) return new Assign<int> { To = new OutArgument<int>(new ArgumentReference<int>(action.To)), Value = ToInArgument<int>(value, toStringType) };
-            return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, toStringType) };
+            if (targetType == typeof(double)) return new Assign<double> { To = new OutArgument<double>(new ArgumentReference<double>(action.To)), Value = ToInArgument<double>(value, valueExpressionTypes) };
+            if (targetType == typeof(bool)) return new Assign<bool> { To = new OutArgument<bool>(new ArgumentReference<bool>(action.To)), Value = ToInArgument<bool>(value, valueExpressionTypes) };
+            if (targetType == typeof(DateTime)) return new Assign<DateTime> { To = new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)), Value = ToInArgument<DateTime>(value, valueExpressionTypes) };
+            if (targetType == typeof(Guid)) return new Assign<Guid> { To = new OutArgument<Guid>(new ArgumentReference<Guid>(action.To)), Value = ToInArgument<Guid>(value, valueExpressionTypes) };
+            if (targetType == typeof(int)) return new Assign<int> { To = new OutArgument<int>(new ArgumentReference<int>(action.To)), Value = ToInArgument<int>(value, valueExpressionTypes) };
+            return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, valueExpressionTypes) };
         }
 
-        private static Activity<bool> BuildBooleanExpression(ComparisonExpressionYaml condition, Type toStringType, ComparisonExpressionTypes expressionTypes)
+        private static Activity<bool> BuildBooleanExpression(ComparisonExpressionYaml condition, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes)
         {
             condition = condition ?? new ComparisonExpressionYaml();
             var op = (string.IsNullOrWhiteSpace(condition.Operator) ? condition.Type : condition.Operator).Replace("_", string.Empty).Replace("-", string.Empty).ToLowerInvariant();
-            if (op == "islessthan" || op == "lessthan") return CreateComparison(expressionTypes.IsLessThan, condition, toStringType);
-            if (op == "greaterthan" || op == "isgreaterthan") return CreateComparison(expressionTypes.IsGreaterThan, condition, toStringType);
-            if (op == "equals" || op == "equal" || op == "isequal") return CreateComparison(expressionTypes.IsEqualNumber, condition, toStringType);
-            if (op == "lessthanorequal" || op == "islessthanorequal") return CreateComparison(expressionTypes.IsLessThanOrEqual, condition, toStringType);
-            if (op == "greaterthanorequal" || op == "isgreaterthanorequal") return CreateComparison(expressionTypes.IsGreaterThanOrEqual, condition, toStringType);
+            if (op == "islessthan" || op == "lessthan") return CreateComparison(expressionTypes.IsLessThan, condition, valueExpressionTypes);
+            if (op == "greaterthan" || op == "isgreaterthan") return CreateComparison(expressionTypes.IsGreaterThan, condition, valueExpressionTypes);
+            if (op == "equals" || op == "equal" || op == "isequal") return CreateComparison(expressionTypes.IsEqualNumber, condition, valueExpressionTypes);
+            if (op == "lessthanorequal" || op == "islessthanorequal") return CreateComparison(expressionTypes.IsLessThanOrEqual, condition, valueExpressionTypes);
+            if (op == "greaterthanorequal" || op == "isgreaterthanorequal") return CreateComparison(expressionTypes.IsGreaterThanOrEqual, condition, valueExpressionTypes);
             throw new InvalidOperationException("Unsupported comparison condition: " + (condition.Operator ?? condition.Type));
         }
 
-        private static Activity<bool> CreateComparison(Type comparisonType, ComparisonExpressionYaml condition, Type toStringType)
+        private static Activity<bool> CreateComparison(Type comparisonType, ComparisonExpressionYaml condition, ValueExpressionTypes valueExpressionTypes)
         {
             var comparison = Create(comparisonType);
-            SetProperty(comparison, "Left", ToInArgument<double>(condition.Left, toStringType));
-            SetProperty(comparison, "Right", ToInArgument<double>(condition.Right, toStringType));
+            SetProperty(comparison, "Left", ToInArgument<double>(condition.Left, valueExpressionTypes));
+            SetProperty(comparison, "Right", ToInArgument<double>(condition.Right, valueExpressionTypes));
             return (Activity<bool>)comparison;
+        }
+
+        private sealed class ValueExpressionTypes
+        {
+            public ValueExpressionTypes(Type toString, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid)
+            {
+                ToStringExpression = toString;
+                LookupWorkflowContext = lookupWorkflowContext;
+                GetCurrentListId = getCurrentListId;
+                GetCurrentItemGuid = getCurrentItemGuid;
+            }
+
+            public Type ToStringExpression { get; }
+            public Type LookupWorkflowContext { get; }
+            public Type GetCurrentListId { get; }
+            public Type GetCurrentItemGuid { get; }
         }
 
         private sealed class ComparisonExpressionTypes
@@ -329,18 +346,47 @@ namespace SPNet.Workflow.WfSerializer
             private static Type GetGenericComparisonType(Assembly assembly, string typeName) => GetRequiredType(assembly, typeName).MakeGenericType(typeof(double));
         }
 
-        private static InArgument<T> ToInArgument<T>(ExpressionYaml expression, Type toStringType)
+        private static InArgument<T> ToInArgument<T>(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
         {
             expression = expression ?? new ExpressionYaml();
             if (string.Equals(expression.Type, "toString", StringComparison.OrdinalIgnoreCase) && expression.Value != null) expression = new ExpressionYaml { ToString = expression.Value };
             if (!string.IsNullOrWhiteSpace(expression.Variable)) return new InArgument<T>(new ArgumentValue<T>(expression.Variable));
             if (expression.ToString != null)
             {
-                var toString = Create(toStringType);
+                var toString = Create(valueExpressionTypes.ToStringExpression);
                 SetProperty(toString, "Object", CreateToStringObjectArgument(expression.ToString));
                 return (InArgument<T>)CreateInArgument(typeof(T), toString);
             }
+            var expressionActivity = CreateLookupExpressionActivity(expression, typeof(T), valueExpressionTypes);
+            if (expressionActivity != null) return (InArgument<T>)CreateInArgument(typeof(T), expressionActivity);
             return new InArgument<T>((T)Convert.ChangeType(expression.Literal ?? DefaultLiteral(typeof(T)), typeof(T)));
+        }
+
+        private static object? CreateLookupExpressionActivity(ExpressionYaml expression, Type resultType, ValueExpressionTypes valueExpressionTypes)
+        {
+            var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+            if (type == "lookupworkflowcontext" || type == "lookupcontextproperty")
+            {
+                if (resultType != typeof(string) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to String/Object arguments.");
+                if (string.IsNullOrWhiteSpace(expression.PropertyName)) throw new InvalidOperationException(expression.Type + " expression requires 'propertyName'.");
+                var lookup = Create(valueExpressionTypes.LookupWorkflowContext);
+                SetProperty(lookup, "PropertyName", new InArgument<string>(expression.PropertyName));
+                return lookup;
+            }
+
+            if (type == "getcurrentlistid")
+            {
+                if (resultType != typeof(Guid) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to Guid/Object arguments.");
+                return Create(valueExpressionTypes.GetCurrentListId);
+            }
+
+            if (type == "getcurrentitemguid")
+            {
+                if (resultType != typeof(Guid) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to Guid/Object arguments.");
+                return Create(valueExpressionTypes.GetCurrentItemGuid);
+            }
+
+            return null;
         }
 
         private static object CreateToStringObjectArgument(ExpressionYaml expression)
