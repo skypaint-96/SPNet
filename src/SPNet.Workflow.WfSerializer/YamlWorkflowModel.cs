@@ -199,6 +199,19 @@ namespace SPNet.Workflow.WfSerializer
         public override void Validate() { base.Validate(); RequireTo(); }
     }
 
+    public sealed class SetFieldActionYaml : WorkflowActionYaml
+    {
+        public SetFieldActionYaml() { Type = "setField"; }
+        public string FieldName { get; set; } = string.Empty;
+        public ExpressionYaml Value { get; set; } = new ExpressionYaml();
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (string.IsNullOrWhiteSpace(FieldName)) throw new InvalidOperationException(Type + " action requires 'fieldName'.");
+        }
+    }
+
     public sealed class WhileActionYaml : WorkflowActionYaml
     {
         public WhileActionYaml() { Type = "while"; }
@@ -248,6 +261,7 @@ namespace SPNet.Workflow.WfSerializer
             else if (actionType == "lookupworkflowcontext" || actionType == "lookupcontextproperty") action = new LookupWorkflowContextActionYaml { Type = yamlObject.Type ?? string.Empty, PropertyName = yamlObject.PropertyName ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "getcurrentlistid") action = new GetCurrentListIdActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "getcurrentitemguid") action = new GetCurrentItemGuidActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
+            else if (actionType == "setfield") action = new SetFieldActionYaml { Type = yamlObject.Type ?? string.Empty, FieldName = yamlObject.FieldName ?? string.Empty, Value = yamlObject.Value ?? new ExpressionYaml() };
             else if (actionType == "while" || actionType == "loop") action = new WhileActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Actions = yamlObject.Actions ?? new List<WorkflowActionYaml>() };
             else if (actionType == "if") action = new IfActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Then = yamlObject.Then ?? new List<WorkflowActionYaml>(), Else = yamlObject.Else ?? new List<WorkflowActionYaml>() };
             else throw new InvalidOperationException("Unsupported action type: " + yamlObject.Type);
@@ -297,6 +311,10 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", itemGuid.Type); WriteScalar(emitter, "to", itemGuid.To);
             }
+            else if (value is SetFieldActionYaml setField)
+            {
+                WriteScalar(emitter, "type", setField.Type); WriteScalar(emitter, "fieldName", setField.FieldName); WriteObject(emitter, serializer, "value", setField.Value);
+            }
             else if (value is WhileActionYaml whileAction)
             {
                 WriteScalar(emitter, "type", whileAction.Type); WriteObject(emitter, serializer, "condition", whileAction.Condition); WriteObject(emitter, serializer, "actions", whileAction.Actions);
@@ -329,6 +347,7 @@ namespace SPNet.Workflow.WfSerializer
             public string Operator { get; set; } = "Add";
             public string To { get; set; } = string.Empty;
             public string PropertyName { get; set; } = string.Empty;
+            public string FieldName { get; set; } = string.Empty;
             public ExpressionYaml? Value { get; set; }
             public ExpressionYaml Message { get; set; } = new ExpressionYaml();
             public string Status { get; set; } = string.Empty;

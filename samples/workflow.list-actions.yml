@@ -1,0 +1,29 @@
+schemaVersion: spnet.workflow/v1
+name: YamlListActionsBuildOnly
+technicalName: YamlListActionsBuildOnly.MTW
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: List
+  listTitle: Workflow Test
+variables:
+- name: currentListId
+  type: Guid
+- name: currentItemGuid
+  type: Guid
+stages:
+- name: List actions
+  actions:
+  - type: getCurrentListId
+    to: currentListId
+  - type: getCurrentItemGuid
+    to: currentItemGuid
+  - type: setField
+    fieldName: Title
+    value:
+      literal: SPNet YAML list-action smoke
+  - type: writeHistory
+    message:
+      literal: Set current item Title using safe setField action.
