@@ -70,6 +70,8 @@ Supported actions:
 - `getCurrentListId` and `getCurrentItemGuid` expressions emit nested SharePoint `GetCurrentListId` / `GetCurrentItemGuid` inside Guid `InArgument` values.
   - Note: Guid variables are safe as lookup assignment outputs, but generic `toString` expression conversion for Guid variables is deferred; write scalar string context values directly to history.
 - `setField`: emits SharePoint `SetField` for the current item only, with `fieldName` and scalar/object `value`. This is a mutating list workflow action; use only on intentional test list items or controlled list workflow contexts.
+- `callHttpWebService` / `callHttp` / `http`: emits SharePoint `CallHTTPWebService` with `address`, `requestType`, and any response targets: `responseStatusCodeTo`, `responseContentTo`, and `responseHeadersTo`. Literal methods accept `GET`, `POST`, `PUT`, `DELETE` and `HTTPGET`, `HTTPPOST`, `HTTPPUT`, `HTTPDELETE`; aliases are normalized to the `HTTP*` values SharePoint Designer expects.
+- `lookupRestPropertyName` / `lookupSPListItemPropertyNameInREST`: emits SharePoint `LookupSPListItemPropertyNameInREST` with `listId`, `propertyName`, and `to`.
 
 The external YAML shape is intentionally stable. Internally, action YAML is deserialized into a discriminated action hierarchy (`calc`, `writeHistory`, `setStatus`, and assignment actions) so action-specific validation and WF activity construction stay scoped to the supported action type instead of one broad property bag.
 
@@ -158,9 +160,44 @@ List action example:
     literal: SPNet YAML list-action smoke
 ```
 
-Reflection/reference inspection against the SharePoint Designer WebsiteCache proxy assembly and downloaded PMteamblog XAML confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`. The lookup expansion now emits current workflow/list/item lookup activities only as nested expression activities in `InArgument` values (`LookupWorkflowContextProperty.PropertyName`, nested `GetCurrentListId`, and nested `GetCurrentItemGuid`), matching the downloaded SharePoint Designer XAML pattern and avoiding known SPD-crashing blank top-level lookup actions. The third expansion batch adds only current-item `SetField` because downloaded reference XAML shows a clear safe current-item shape, for example `SetField FieldName="Title"` with current item `AppliesTo` metadata and an object `FieldValue` argument.
+HTTP/web service example:
 
-Deferred actions for future safe expansion batches: `updateListItem`, `createListItem`, `deleteListItem`, `copyItem`, `checkInItem`, `checkOutItem`, `undoCheckOutItem`, `setModerationStatus`, `waitForFieldChange`, `waitForItemEvent`, email, task/process actions, dictionary/dynamic-value actions, HTTP/web service actions, person/group and lookup field actions, workflow interop, arbitrary list item field lookups such as `LookupSPListItemStringProperty`, and principal lookups. These require more property/value-shape validation before being emitted from YAML.
+```yaml
+- type: callHttpWebService
+  address:
+    type: formatString
+    literal: "{0}/_api/web/currentuser"
+    value:
+      type: lookupWorkflowContext
+      propertyName: CurrentWebUrl
+  requestType:
+    literal: GET
+  responseStatusCodeTo: httpStatusCode
+  responseContentTo: httpResponseContent
+  responseHeadersTo: httpResponseHeaders
+```
+
+HTTP response content and headers are emitted as SharePoint Designer proxy `DynamicValue` variables at build time; they do not need to be declared in YAML, and declaring arbitrary `DynamicValue` variables is intentionally rejected. `RequestContent` and `RequestHeaders` are initialized to empty `DynamicValue` references so Designer can render the HTTP action. This HTTP shape was publish-validated against PMteamblog and opens with the expected display in SharePoint Designer. Known caveat: using top-level lookup actions can still leave an invisible previous action in Designer; keep lookup activities nested inside expressions such as the `CurrentWebUrl` URL construction above.
+
+Reflection/reference inspection against the SharePoint Designer WebsiteCache proxy assembly and downloaded PMteamblog XAML confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`. The lookup expansion now emits current workflow/list/item lookup activities only as nested expression activities in `InArgument` values (`LookupWorkflowContextProperty.PropertyName`, nested `GetCurrentListId`, and nested `GetCurrentItemGuid`), matching the downloaded SharePoint Designer XAML pattern and avoiding known SPD-crashing blank top-level lookup actions. The third expansion batch adds only current-item `SetField` because downloaded reference XAML shows a clear safe current-item shape, for example `SetField FieldName="Title"` with current item `AppliesTo` metadata and an object `FieldValue` argument. The HTTP batch adds Designer-rendered `CallHTTPWebService`, `LookupSPListItemPropertyNameInREST`, request method normalization, and guarded `DynamicValue` response plumbing.
+
+Deferred actions for future safe expansion batches: `updateListItem`, `createListItem`, `deleteListItem`, `copyItem`, `checkInItem`, `checkOutItem`, `undoCheckOutItem`, `setModerationStatus`, `waitForFieldChange`, `waitForItemEvent`, email, task/process actions, general dictionary/dynamic-value mutation actions, person/group and lookup field actions, workflow interop, arbitrary list item field lookups such as `LookupSPListItemStringProperty`, and principal lookups. These require more property/value-shape validation before being emitted from YAML.
+
+## Safe live workflow listing and cleanup
+
+Use read-only listing before any cleanup:
+
+```powershell
+.\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action List -SiteUrl https://tenant/sites/site -WorkflowNamePrefix SPNetYamlHttp -IncludeSubscriptions
+```
+
+Cleanup is guarded and refuses to run unless `-Force` is supplied. Prefix cleanup also requires a prefix of at least eight characters; exact-name cleanup can use `-WorkflowName`.
+
+```powershell
+.\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Cleanup -SiteUrl https://tenant/sites/site -WorkflowNamePrefix SPNetYamlHttpSmoke -Force
+```
+
+Do not use cleanup against production names such as `New Leave Request`. If a publish fails after saving a definition but before subscription creation, the publish result reports `PartialDefinitionSaved` or `PartialDefinitionPublished` plus the definition ID when available; run `List` by the exact test name or prefix first, then clean only the confirmed test artifacts.
 
 ## Configuration
 

@@ -45,4 +45,28 @@ foreach ($marker in $forbiddenMarkers) {
     if ($xaml -like "*$marker*") { throw "Golden regression marker must not appear in ${XamlPath}: $marker" }
 }
 
+if ($Workflow -like '*workflow.http.yml') {
+    $httpRequiredMarkers = @(
+        'CallHTTPWebService',
+        'LookupSPListItemPropertyNameInREST',
+        'DynamicValue',
+        'RequestContent',
+        'RequestHeaders',
+        'ResponseStatusCode',
+        'HTTPGET',
+        'GetDynamicValueProperty',
+        'PropertyName="Title"',
+        'currentUserTitle',
+        'LookupWorkflowContextProperty',
+        'PropertyName="CurrentWebUrl"',
+        '{0}/_api/web/currentuser'
+    )
+
+    foreach ($marker in $httpRequiredMarkers) {
+        if ($xaml -notlike "*$marker*") { throw "HTTP golden regression marker missing from ${XamlPath}: $marker" }
+    }
+
+    if ($xaml -like '*literal: GET*') { throw "HTTP request method was not normalized in ${XamlPath}." }
+}
+
 Write-Host "Golden YAML-first workflow regression passed: $XamlPath"

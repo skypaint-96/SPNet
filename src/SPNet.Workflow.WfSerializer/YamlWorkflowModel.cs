@@ -215,7 +215,7 @@ namespace SPNet.Workflow.WfSerializer
     {
         public CallHttpWebServiceActionYaml() { Type = "callHttpWebService"; }
         public ExpressionYaml Address { get; set; } = new ExpressionYaml();
-        public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "GET" };
+        public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "HTTPGET" };
         public string ResponseStatusCodeTo { get; set; } = string.Empty;
         public string ResponseContentTo { get; set; } = string.Empty;
         public string ResponseHeadersTo { get; set; } = string.Empty;
@@ -224,6 +224,27 @@ namespace SPNet.Workflow.WfSerializer
         {
             base.Validate();
             if (string.IsNullOrWhiteSpace(ResponseStatusCodeTo) && string.IsNullOrWhiteSpace(ResponseContentTo) && string.IsNullOrWhiteSpace(ResponseHeadersTo)) throw new InvalidOperationException(Type + " action requires at least one response target: responseStatusCodeTo, responseContentTo, or responseHeadersTo.");
+            if (RequestType != null && string.IsNullOrWhiteSpace(RequestType.Variable) && string.IsNullOrWhiteSpace(RequestType.Type) && RequestType.ToString == null && RequestType.Value == null)
+            {
+                var value = Convert.ToString(RequestType.Literal ?? string.Empty)?.Trim() ?? string.Empty;
+                var normalized = value.Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToUpperInvariant();
+                if (normalized != "GET" && normalized != "POST" && normalized != "PUT" && normalized != "DELETE" && normalized != "HTTPGET" && normalized != "HTTPPOST" && normalized != "HTTPPUT" && normalized != "HTTPDELETE") throw new InvalidOperationException(Type + " requestType must be GET, POST, PUT, DELETE, HTTPGET, HTTPPOST, HTTPPUT, or HTTPDELETE for literal methods.");
+            }
+        }
+    }
+
+    public sealed class GetDynamicValuePropertyActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public GetDynamicValuePropertyActionYaml() { Type = "getDynamicValueProperty"; }
+        public string Source { get; set; } = string.Empty;
+        public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (string.IsNullOrWhiteSpace(Source)) throw new InvalidOperationException(Type + " action requires 'source'.");
+            RequireTo();
         }
     }
 
@@ -292,6 +313,7 @@ namespace SPNet.Workflow.WfSerializer
             else if (actionType == "getcurrentitemguid") action = new GetCurrentItemGuidActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "setfield") action = new SetFieldActionYaml { Type = yamlObject.Type ?? string.Empty, FieldName = yamlObject.FieldName ?? string.Empty, Value = yamlObject.Value ?? new ExpressionYaml() };
             else if (actionType == "callhttpwebservice" || actionType == "callhttp" || actionType == "http") action = new CallHttpWebServiceActionYaml { Type = yamlObject.Type ?? string.Empty, Address = yamlObject.Address ?? new ExpressionYaml(), RequestType = yamlObject.RequestType ?? new ExpressionYaml { Literal = "GET" }, ResponseStatusCodeTo = yamlObject.ResponseStatusCodeTo ?? yamlObject.StatusCodeTo ?? string.Empty, ResponseContentTo = yamlObject.ResponseContentTo ?? yamlObject.ContentTo ?? string.Empty, ResponseHeadersTo = yamlObject.ResponseHeadersTo ?? yamlObject.HeadersTo ?? string.Empty };
+            else if (actionType == "getdynamicvalueproperty" || actionType == "getdictionaryitem" || actionType == "getdictionaryvalue" || actionType == "getresponseproperty") action = new GetDynamicValuePropertyActionYaml { Type = yamlObject.Type ?? string.Empty, Source = yamlObject.Source ?? yamlObject.From ?? string.Empty, PropertyName = yamlObject.PropertyName ?? yamlObject.Key ?? new ExpressionYaml(), To = yamlObject.To ?? string.Empty };
             else if (actionType == "lookuprestpropertyname" || actionType == "lookupspgetitempropertynameinrest") action = new LookupRestPropertyNameActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml(), PropertyName = yamlObject.PropertyName ?? new ExpressionYaml(), To = yamlObject.To ?? string.Empty };
             else if (actionType == "while" || actionType == "loop") action = new WhileActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Actions = yamlObject.Actions ?? new List<WorkflowActionYaml>() };
             else if (actionType == "if") action = new IfActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Then = yamlObject.Then ?? new List<WorkflowActionYaml>(), Else = yamlObject.Else ?? new List<WorkflowActionYaml>() };
@@ -350,6 +372,10 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", callHttp.Type); WriteObject(emitter, serializer, "address", callHttp.Address); WriteObject(emitter, serializer, "requestType", callHttp.RequestType); WriteScalar(emitter, "responseStatusCodeTo", callHttp.ResponseStatusCodeTo); WriteScalar(emitter, "responseContentTo", callHttp.ResponseContentTo); WriteScalar(emitter, "responseHeadersTo", callHttp.ResponseHeadersTo);
             }
+            else if (value is GetDynamicValuePropertyActionYaml dynamicProperty)
+            {
+                WriteScalar(emitter, "type", dynamicProperty.Type); WriteScalar(emitter, "source", dynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", dynamicProperty.PropertyName); WriteScalar(emitter, "to", dynamicProperty.To);
+            }
             else if (value is LookupRestPropertyNameActionYaml restProperty)
             {
                 WriteScalar(emitter, "type", restProperty.Type); WriteObject(emitter, serializer, "listId", restProperty.ListId); WriteObject(emitter, serializer, "propertyName", restProperty.PropertyName); WriteScalar(emitter, "to", restProperty.To);
@@ -386,10 +412,13 @@ namespace SPNet.Workflow.WfSerializer
             public string Operator { get; set; } = "Add";
             public string To { get; set; } = string.Empty;
             public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Key { get; set; } = new ExpressionYaml();
             public string FieldName { get; set; } = string.Empty;
+            public string Source { get; set; } = string.Empty;
+            public string From { get; set; } = string.Empty;
             public ExpressionYaml? Value { get; set; }
             public ExpressionYaml Address { get; set; } = new ExpressionYaml();
-            public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "GET" };
+            public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "HTTPGET" };
             public ExpressionYaml ListId { get; set; } = new ExpressionYaml();
             public string ResponseStatusCodeTo { get; set; } = string.Empty;
             public string ResponseContentTo { get; set; } = string.Empty;

@@ -9,6 +9,8 @@ variables:
     type: String
   - name: httpStatusCode
     type: String
+  - name: currentUserTitle
+    type: String
 stages:
   - name: HTTP call
     actions:
@@ -24,12 +26,24 @@ stages:
         to: restListEntityTypeName
       - type: callHttpWebService
         address:
-          literal: "[%Workflow Context:Current Site URL%]/_api/web/currentuser"
+          type: formatString
+          literal: "{0}/_api/web/currentuser"
+          value:
+            type: lookupWorkflowContext
+            propertyName: CurrentWebUrl
         requestType:
           literal: GET
         responseStatusCodeTo: httpStatusCode
         responseContentTo: httpResponseContent
         responseHeadersTo: httpResponseHeaders
+      - type: getDynamicValueProperty
+        source: httpResponseContent
+        propertyName:
+          literal: Title
+        to: currentUserTitle
       - type: writeHistory
         message:
-          variable: httpStatusCode
+          type: formatString
+          literal: "HTTP status/user: {0}"
+          value:
+            variable: currentUserTitle

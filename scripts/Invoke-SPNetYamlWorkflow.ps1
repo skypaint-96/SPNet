@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Build','Export','Inspect','Publish','Download','ValidateConfig')]
+    [ValidateSet('Build','Export','Inspect','Publish','Download','List','Cleanup','ValidateConfig')]
     [string]$Action = 'Build',
     [string]$Workflow = 'samples\workflow.example.yml',
     [string]$XamlPath = 'artifacts\workflow.xaml',
@@ -8,9 +8,12 @@ param(
     [string]$CacheFolder = '',
     [string]$SiteUrl = '',
     [string]$WorkflowName = '',
+    [string]$WorkflowNamePrefix = '',
     [string]$TargetType = 'Site',
     [switch]$NoBuild,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$IncludeSubscriptions,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,5 +58,19 @@ switch ($Action) {
     'Download' {
         if (-not $Out) { $Out = $XamlPath }
         & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') -Action Download -SiteUrl $SiteUrl -WorkflowName $WorkflowName -OutputXamlPath $Out
+    }
+    'List' {
+        $listArgs = @{ Action = 'List'; SiteUrl = $SiteUrl }
+        if (-not [string]::IsNullOrWhiteSpace($WorkflowName)) { $listArgs.WorkflowName = $WorkflowName }
+        if (-not [string]::IsNullOrWhiteSpace($WorkflowNamePrefix)) { $listArgs.WorkflowNamePrefix = $WorkflowNamePrefix }
+        if ($IncludeSubscriptions) { $listArgs.IncludeSubscriptions = $true }
+        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @listArgs
+    }
+    'Cleanup' {
+        $cleanupArgs = @{ Action = 'Cleanup'; SiteUrl = $SiteUrl }
+        if (-not [string]::IsNullOrWhiteSpace($WorkflowName)) { $cleanupArgs.WorkflowName = $WorkflowName }
+        if (-not [string]::IsNullOrWhiteSpace($WorkflowNamePrefix)) { $cleanupArgs.WorkflowNamePrefix = $WorkflowNamePrefix }
+        if ($Force) { $cleanupArgs.Force = $true }
+        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @cleanupArgs
     }
 }

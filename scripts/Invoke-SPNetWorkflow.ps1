@@ -8,11 +8,10 @@ This is the intentionally explicit PowerShell boundary for live SharePoint opera
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Publish', 'Download')]
+    [ValidateSet('Publish', 'Download', 'List', 'Cleanup')]
     [string]$Action,
     [Parameter(Mandatory = $true)]
     [string]$SiteUrl,
-    [Parameter(Mandatory = $true)]
     [string]$WorkflowName,
     [string]$XamlPath,
     [string]$OutputXamlPath,
@@ -28,7 +27,10 @@ param(
     [ValidateSet('Update', 'CreateNew', 'Fail')]
     [string]$IfExists = 'Update',
     [string]$ExpectedDefinitionId,
-    [string]$BackupDirectory
+    [string]$BackupDirectory,
+    [string]$WorkflowNamePrefix,
+    [switch]$IncludeSubscriptions,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -125,6 +127,47 @@ function Get-SPNetWorkflowDefinitionsByName {
     }
 }
 
+function Get-SPNetWorkflowDefinitionsByFilter {
+    param([string]$Name, [string]$Prefix)
+    if ([string]::IsNullOrWhiteSpace($Name) -and [string]::IsNullOrWhiteSpace($Prefix)) { throw '-WorkflowName or -WorkflowNamePrefix is required for List/Cleanup.' }
+    $definitions = $deploymentService.EnumerateDefinitions($true)
+    $context.Load($definitions)
+    $context.ExecuteQuery()
+    @($definitions | Where-Object {
+        $_ -and (
+            (-not [string]::IsNullOrWhiteSpace($Name) -and $_.DisplayName -eq $Name) -or
+            (-not [string]::IsNullOrWhiteSpace($Prefix) -and $_.DisplayName -like ($Prefix + '*'))
+        )
+    })
+}
+
+function Get-SPNetWorkflowSubscriptionsForDefinition {
+    param($DefinitionInfo)
+    try {
+        $subscriptionCollection = $subscriptionService.EnumerateSubscriptionsByDefinition($DefinitionInfo.Id)
+        $context.Load($subscriptionCollection)
+        $context.ExecuteQuery()
+        return @($subscriptionCollection)
+    } catch {
+        Write-Verbose ('Unable to enumerate subscriptions for workflow definition ' + $DefinitionInfo.Id + ': ' + $_.Exception.Message)
+        return @()
+    }
+}
+
+function Convert-SPNetWorkflowDefinitionToResult {
+    param($DefinitionInfo, [switch]$WithSubscriptions)
+    $subscriptions = if ($WithSubscriptions) { Get-SPNetWorkflowSubscriptionsForDefinition -DefinitionInfo $DefinitionInfo } else { @() }
+    @{
+        Name = $DefinitionInfo.DisplayName
+        DefinitionId = $DefinitionInfo.Id.ToString()
+        Published = $DefinitionInfo.Published
+        RestrictToType = $DefinitionInfo.RestrictToType
+        RestrictToScope = $DefinitionInfo.RestrictToScope
+        SubscriptionIds = @($subscriptions | ForEach-Object { $_.Id.ToString() })
+        SubscriptionCount = $subscriptions.Count
+    }
+}
+
 function New-SPNetSafeBackupPath {
     param([string]$Name, [string]$Directory)
     $safeName = [Regex]::Replace($Name, '[^A-Za-z0-9._-]+', '-')
@@ -192,13 +235,7 @@ function Get-SPNetSubscriptionMetadataValue {
 
 function Remove-SPNetWorkflowDefinitionAndSubscriptions {
     param($DefinitionInfo)
-    $subscriptions = @()
-    try {
-        $subscriptionCollection = $subscriptionService.EnumerateSubscriptionsByDefinition($DefinitionInfo.Id)
-        $context.Load($subscriptionCollection)
-        $context.ExecuteQuery()
-        $subscriptions = @($subscriptionCollection)
-    } catch { $subscriptions = @() }
+    $subscriptions = Get-SPNetWorkflowSubscriptionsForDefinition -DefinitionInfo $DefinitionInfo
     foreach ($existingSubscription in $subscriptions) {
         $subscriptionService.DeleteSubscription($existingSubscription.Id)
         $context.ExecuteQuery()
@@ -208,7 +245,28 @@ function Remove-SPNetWorkflowDefinitionAndSubscriptions {
     $subscriptions
 }
 
+if ($Action -eq 'List') {
+    $matches = Get-SPNetWorkflowDefinitionsByFilter -Name $WorkflowName -Prefix $WorkflowNamePrefix
+    Write-SPNetResult @{ Action = 'List'; WorkflowName = $WorkflowName; WorkflowNamePrefix = $WorkflowNamePrefix; Count = $matches.Count; Workflows = @($matches | ForEach-Object { Convert-SPNetWorkflowDefinitionToResult -DefinitionInfo $_ -WithSubscriptions:$IncludeSubscriptions }) }
+    return
+}
+
+if ($Action -eq 'Cleanup') {
+    if (-not $Force) { throw 'Cleanup is guarded. Re-run with -Force after first running -Action List with the same exact name/prefix filter.' }
+    if ([string]::IsNullOrWhiteSpace($WorkflowName) -and ([string]::IsNullOrWhiteSpace($WorkflowNamePrefix) -or $WorkflowNamePrefix.Length -lt 8)) { throw 'Cleanup by prefix requires -WorkflowNamePrefix of at least 8 characters, or use an exact -WorkflowName.' }
+    $matches = Get-SPNetWorkflowDefinitionsByFilter -Name $WorkflowName -Prefix $WorkflowNamePrefix
+    if ($matches.Count -eq 0) { Write-SPNetResult @{ Action = 'Cleanup'; WorkflowName = $WorkflowName; WorkflowNamePrefix = $WorkflowNamePrefix; Count = 0; Deleted = @(); Status = 'NoMatches' }; return }
+    $deleted = @()
+    foreach ($match in $matches) {
+        $subscriptions = Remove-SPNetWorkflowDefinitionAndSubscriptions -DefinitionInfo $match
+        $deleted += @{ Name = $match.DisplayName; DefinitionId = $match.Id.ToString(); SubscriptionIds = @($subscriptions | ForEach-Object { $_.Id.ToString() }) }
+    }
+    Write-SPNetResult @{ Action = 'Cleanup'; WorkflowName = $WorkflowName; WorkflowNamePrefix = $WorkflowNamePrefix; Count = $deleted.Count; Deleted = $deleted; Status = 'Deleted' }
+    return
+}
+
 if ($Action -eq 'Download') {
+    if ([string]::IsNullOrWhiteSpace($WorkflowName)) { throw '-WorkflowName is required for Download.' }
     if ([string]::IsNullOrWhiteSpace($OutputXamlPath)) { throw '-OutputXamlPath is required for Download.' }
     $definitions = $deploymentService.EnumerateDefinitions($true)
     $context.Load($definitions)
@@ -245,6 +303,7 @@ if ($Action -eq 'Download') {
 }
 
 if ([string]::IsNullOrWhiteSpace($XamlPath)) { throw '-XamlPath is required for Publish.' }
+if ([string]::IsNullOrWhiteSpace($WorkflowName)) { throw '-WorkflowName is required for Publish.' }
 $xamlContent = Get-Content -Path $XamlPath -Raw
 $existingDefinitions = Get-SPNetWorkflowDefinitionsByName -Name $WorkflowName
 if ($existingDefinitions.Count -gt 0 -and $IfExists -eq 'Fail') {
