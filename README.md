@@ -51,7 +51,7 @@ Supported top-level fields:
 - `technicalName`: optional WF class name; defaults to `name + .MTW`.
 - `start`: `manual`, `autoStartCreate`, `autoStartChange` metadata for authoring/publish tooling.
 - `target`: `type` and optional `listTitle` metadata for publish tooling.
-- `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, `Boolean`/`Bool`, `Int32`/`Int`/`Integer`, and `DateTime`/`Date` are supported.
+- `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, `Boolean`/`Bool`, `Int32`/`Int`/`Integer`, `Guid`, and `DateTime`/`Date` are supported.
 - `stages`: one or more stages, each with supported actions.
 
 Supported actions:
@@ -65,6 +65,10 @@ Supported actions:
 - `delayUntil`: emits SharePoint `DelayUntil`, with a `date` expression. Prefer an explicit ISO-like date literal or a declared `DateTime` variable.
 - `while` / `loop`: emits WF `While`, with a comparison `condition` and nested `actions` sequence.
 - `if`: emits WF `If`, with a comparison `condition`, nested `then` sequence, and optional nested `else` sequence.
+- `lookupWorkflowContext` / `lookupContextProperty`: emits SharePoint `LookupWorkflowContextProperty`, with `propertyName` and string `to` output. Reference XAML confirms scalar context properties such as `CurrentWebUrl` and `CurrentItemUrl`.
+- `getCurrentListId`: emits SharePoint `GetCurrentListId`, with Guid `to` output.
+- `getCurrentItemGuid`: emits SharePoint `GetCurrentItemGuid`, with Guid `to` output.
+  - Note: Guid variables are safe as lookup outputs, but generic `toString` expression conversion for Guid variables is deferred; write scalar string context values directly to history.
 
 The external YAML shape is intentionally stable. Internally, action YAML is deserialized into a discriminated action hierarchy (`calc`, `writeHistory`, `setStatus`, and assignment actions) so action-specific validation and WF activity construction stay scoped to the supported action type instead of one broad property bag.
 
@@ -74,6 +78,19 @@ Supported expressions:
 - variable references: `variable: calc`.
 - conversion to string: `toString: { variable: calc }`.
 - conversion to string alternative form: `type: toString` with nested `value`, for example `value: { type: toString, value: { variable: calc } }`.
+
+Lookup example:
+
+```yaml
+- type: lookupWorkflowContext
+  propertyName: CurrentWebUrl
+  to: currentWebUrl
+- type: getCurrentListId
+  to: currentListId
+- type: writeHistory
+  message:
+    variable: currentWebUrl
+```
 
 Control-flow comparison expressions:
 
@@ -126,9 +143,9 @@ Assignment example:
       variable: assignedNumber
 ```
 
-Reflection against the SharePoint Designer WebsiteCache proxy assembly confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`.
+Reflection/reference inspection against the SharePoint Designer WebsiteCache proxy assembly and downloaded PMteamblog XAML confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`. The second expansion batch adds current workflow/list/item lookup activities with clear scalar output shapes: `LookupWorkflowContextProperty.PropertyName`/`Result`, `GetCurrentListId.Result`, and `GetCurrentItemGuid.Result`.
 
-Deferred actions for future safe expansion batches: list item mutation/query actions, email, task/process actions, dictionary/dynamic-value actions, HTTP/web service actions, person/group and lookup field actions, moderation/check-in/check-out/copy/update/delete actions, and workflow interop. These require SharePoint Designer reference XAML or more complex expression/value-shape validation before being emitted from YAML.
+Deferred actions for future safe expansion batches: list item mutation/query actions, email, task/process actions, dictionary/dynamic-value actions, HTTP/web service actions, person/group and lookup field actions, moderation/check-in/check-out/copy/update/delete actions, workflow interop, arbitrary list item field lookups such as `LookupSPListItemStringProperty`, and principal lookups. These require more property/value-shape validation before being emitted from YAML.
 
 ## Configuration
 

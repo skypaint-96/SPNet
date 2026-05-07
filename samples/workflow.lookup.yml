@@ -1,0 +1,38 @@
+schemaVersion: spnet.workflow/v1
+name: YamlLookupSmoke
+start:
+  manual: true
+target:
+  type: List
+variables:
+- name: currentWebUrl
+  type: String
+- name: currentItemUrl
+  type: String
+- name: currentListId
+  type: Guid
+- name: currentItemGuid
+  type: Guid
+stages:
+- name: Lookup Smoke
+  actions:
+  - type: setStatus
+    status: Lookup Smoke
+  - type: lookupWorkflowContext
+    propertyName: CurrentWebUrl
+    to: currentWebUrl
+  - type: lookupContextProperty
+    propertyName: CurrentItemUrl
+    to: currentItemUrl
+  - type: getCurrentListId
+    to: currentListId
+  - type: getCurrentItemGuid
+    to: currentItemGuid
+  - type: writeHistory
+    message:
+      variable: currentWebUrl
+  - type: writeHistory
+    message:
+      variable: currentItemUrl
+  - type: setStatus
+    status: Lookup Smoke Complete

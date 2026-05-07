@@ -171,6 +171,34 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    public sealed class LookupWorkflowContextActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public LookupWorkflowContextActionYaml() { Type = "lookupWorkflowContext"; }
+        public string PropertyName { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireTo();
+            if (string.IsNullOrWhiteSpace(PropertyName)) throw new InvalidOperationException(Type + " action requires 'propertyName'.");
+        }
+    }
+
+    public sealed class GetCurrentListIdActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public GetCurrentListIdActionYaml() { Type = "getCurrentListId"; }
+        public string To { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); RequireTo(); }
+    }
+
+    public sealed class GetCurrentItemGuidActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public GetCurrentItemGuidActionYaml() { Type = "getCurrentItemGuid"; }
+        public string To { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); RequireTo(); }
+    }
+
     public sealed class WhileActionYaml : WorkflowActionYaml
     {
         public WhileActionYaml() { Type = "while"; }
@@ -217,6 +245,9 @@ namespace SPNet.Workflow.WfSerializer
             else if (actionType == "delayfor") action = new DelayForActionYaml { Type = yamlObject.Type ?? string.Empty, Days = yamlObject.Days ?? new ExpressionYaml { Literal = 0 }, Hours = yamlObject.Hours ?? new ExpressionYaml { Literal = 0 }, Minutes = yamlObject.Minutes ?? new ExpressionYaml { Literal = 0 } };
             else if (actionType == "delayuntil") action = new DelayUntilActionYaml { Type = yamlObject.Type ?? string.Empty, Date = yamlObject.Date ?? new ExpressionYaml() };
             else if (actionType == "assign" || actionType == "setvariable") action = new AssignActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty, Value = yamlObject.Value };
+            else if (actionType == "lookupworkflowcontext" || actionType == "lookupcontextproperty") action = new LookupWorkflowContextActionYaml { Type = yamlObject.Type ?? string.Empty, PropertyName = yamlObject.PropertyName ?? string.Empty, To = yamlObject.To ?? string.Empty };
+            else if (actionType == "getcurrentlistid") action = new GetCurrentListIdActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
+            else if (actionType == "getcurrentitemguid") action = new GetCurrentItemGuidActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "while" || actionType == "loop") action = new WhileActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Actions = yamlObject.Actions ?? new List<WorkflowActionYaml>() };
             else if (actionType == "if") action = new IfActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Then = yamlObject.Then ?? new List<WorkflowActionYaml>(), Else = yamlObject.Else ?? new List<WorkflowActionYaml>() };
             else throw new InvalidOperationException("Unsupported action type: " + yamlObject.Type);
@@ -254,6 +285,18 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", assign.Type); WriteScalar(emitter, "to", assign.To); WriteObject(emitter, serializer, "value", assign.Value);
             }
+            else if (value is LookupWorkflowContextActionYaml context)
+            {
+                WriteScalar(emitter, "type", context.Type); WriteScalar(emitter, "propertyName", context.PropertyName); WriteScalar(emitter, "to", context.To);
+            }
+            else if (value is GetCurrentListIdActionYaml listId)
+            {
+                WriteScalar(emitter, "type", listId.Type); WriteScalar(emitter, "to", listId.To);
+            }
+            else if (value is GetCurrentItemGuidActionYaml itemGuid)
+            {
+                WriteScalar(emitter, "type", itemGuid.Type); WriteScalar(emitter, "to", itemGuid.To);
+            }
             else if (value is WhileActionYaml whileAction)
             {
                 WriteScalar(emitter, "type", whileAction.Type); WriteObject(emitter, serializer, "condition", whileAction.Condition); WriteObject(emitter, serializer, "actions", whileAction.Actions);
@@ -285,6 +328,7 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml RValue { get; set; } = new ExpressionYaml();
             public string Operator { get; set; } = "Add";
             public string To { get; set; } = string.Empty;
+            public string PropertyName { get; set; } = string.Empty;
             public ExpressionYaml? Value { get; set; }
             public ExpressionYaml Message { get; set; } = new ExpressionYaml();
             public string Status { get; set; } = string.Empty;
