@@ -122,6 +122,56 @@ namespace SPNet.Workflow.WfSerializer
             if (targetType == typeof(int)) return new Assign<int> { To = new OutArgument<int>(new ArgumentReference<int>(action.To)), Value = ToInArgument<int>(value, valueExpressionTypes) };
             return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, valueExpressionTypes) };
         }
+
+        private static Activity BuildStringReplace(StringReplaceActionYaml action, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateStringManipulationTarget(action, variableTypes);
+            var replace = ActivityReflectionWriter.Create(valueExpressionTypes.ReplaceStringExpression);
+            ActivityReflectionWriter.SetProperty(replace, "Input", ToInArgument<string>(action.Text, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(replace, "Pattern", ToInArgument<string>(action.OldValue, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(replace, "Replacement", ToInArgument<string>(action.NewValue, valueExpressionTypes));
+            return new Assign<string>
+            {
+                To = new OutArgument<string>(new ArgumentReference<string>(action.To)),
+                Value = ActivityReflectionWriter.CreateStringInArgumentFromActivity(replace)
+            };
+        }
+
+        private static Activity BuildStringSubstring(StringSubstringActionYaml action, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateStringManipulationTarget(action, variableTypes);
+            var hasLength = HasStringExpression(action.Length);
+            var substring = ActivityReflectionWriter.Create(valueExpressionTypes.SubstringExpression);
+            ActivityReflectionWriter.SetProperty(substring, "Input", ToInArgument<string>(action.Text, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(substring, "StartIndex", ToInArgument<int>(action.StartIndex, valueExpressionTypes));
+            if (hasLength) ActivityReflectionWriter.SetProperty(substring, "Length", ToInArgument<int>(action.Length, valueExpressionTypes));
+            return new Assign<string>
+            {
+                To = new OutArgument<string>(new ArgumentReference<string>(action.To)),
+                Value = ActivityReflectionWriter.CreateStringInArgumentFromActivity(substring)
+            };
+        }
+
+        private static Activity BuildStringTrim(StringTrimActionYaml action, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateStringManipulationTarget(action, variableTypes);
+            var trim = ActivityReflectionWriter.Create(valueExpressionTypes.TrimExpression);
+            ActivityReflectionWriter.SetProperty(trim, "Input", ToInArgument<string>(action.Text, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(trim, "Characters", new InArgument<string>(string.Empty));
+            return new Assign<string>
+            {
+                To = new OutArgument<string>(new ArgumentReference<string>(action.To)),
+                Value = ActivityReflectionWriter.CreateStringInArgumentFromActivity(trim)
+            };
+        }
+
+        private static void ValidateStringManipulationTarget(ITargetedActionYaml action, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException(action.GetType().Name + " target variable is not declared: " + action.To);
+            if (targetType != typeof(string)) throw new InvalidOperationException(action.GetType().Name + " target variable must be String: " + action.To);
+        }
+
+        private static bool HasStringExpression(ExpressionYaml expression) => expression != null && (!string.IsNullOrWhiteSpace(expression.Variable) || !string.IsNullOrWhiteSpace(expression.Type) || expression.ToString != null || expression.Value != null || expression.Literal != null);
     }
 }
 

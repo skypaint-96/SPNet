@@ -1,0 +1,45 @@
+schemaVersion: spnet.workflow/v1
+name: YamlStringActionsSmoke
+start:
+  manual: true
+target:
+  type: Site
+variables:
+  - name: sourceText
+    type: String
+  - name: replacedText
+    type: String
+  - name: substringText
+    type: String
+  - name: trimmedText
+    type: String
+stages:
+  - name: String Actions Smoke
+    actions:
+      - type: assign
+        to: sourceText
+        value: "  Alpha Beta  "
+      - type: replaceString
+        text:
+          variable: sourceText
+        oldValue: Alpha
+        newValue: Gamma
+        to: replacedText
+      - type: substring
+        text:
+          variable: replacedText
+        startIndex: 2
+        length: 5
+        to: substringText
+      - type: trimString
+        text:
+          variable: replacedText
+        to: trimmedText
+      - type: writeHistory
+        message:
+          type: formatString
+          literal: "String actions result: {0} / {1} / {2}"
+          values:
+            - variable: replacedText
+            - variable: substringText
+            - variable: trimmedText

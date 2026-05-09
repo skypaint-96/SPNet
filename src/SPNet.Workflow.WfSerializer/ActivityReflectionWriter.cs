@@ -31,6 +31,12 @@ namespace SPNet.Workflow.WfSerializer
             return Activator.CreateInstance(argumentType, expressionType.IsInstanceOfType(expressionActivity) ? expressionActivity : throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<" + resultType.Name + ">."))!;
         }
 
+        public static InArgument<string> CreateStringInArgumentFromActivity(object expressionActivity)
+        {
+            if (!(expressionActivity is Activity<string> stringActivity)) throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<String>.");
+            return new InArgument<string>(stringActivity);
+        }
+
         public static object CreateOutArgument(Type resultType, string variableName)
         {
             var argumentReferenceType = typeof(ArgumentReference<>).MakeGenericType(resultType);

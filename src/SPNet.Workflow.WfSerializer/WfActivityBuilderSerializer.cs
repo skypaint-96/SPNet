@@ -123,6 +123,9 @@ namespace SPNet.Workflow.WfSerializer
             Register<DelayForActionYaml>(builders, (action, context) => BuildDelayFor(action, context.GetProxyActivityType("DelayFor"), context.ValueExpressionTypes));
             Register<DelayUntilActionYaml>(builders, (action, context) => BuildDelayUntil(action, context.GetProxyActivityType("DelayUntil"), context.ValueExpressionTypes));
             Register<AssignActionYaml>(builders, (action, context) => BuildAssign(action, context.ValueExpressionTypes, context.VariableTypes));
+            Register<StringReplaceActionYaml>(builders, (action, context) => BuildStringReplace(action, context.ValueExpressionTypes, context.VariableTypes));
+            Register<StringSubstringActionYaml>(builders, (action, context) => BuildStringSubstring(action, context.ValueExpressionTypes, context.VariableTypes));
+            Register<StringTrimActionYaml>(builders, (action, context) => BuildStringTrim(action, context.ValueExpressionTypes, context.VariableTypes));
             Register<LookupWorkflowContextActionYaml>(builders, (action, context) => BuildLookupWorkflowContext(action, context.GetProxyActivityType("LookupWorkflowContextProperty")));
             Register<GetCurrentListIdActionYaml>(builders, (action, context) => BuildGetCurrentListId(action, context.GetProxyActivityType("GetCurrentListId")));
             Register<GetCurrentItemGuidActionYaml>(builders, (action, context) => BuildGetCurrentItemGuid(action, context.GetProxyActivityType("GetCurrentItemGuid")));

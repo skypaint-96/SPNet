@@ -220,6 +220,49 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    public sealed class StringReplaceActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public StringReplaceActionYaml() { Type = "replaceString"; }
+        public ExpressionYaml Text { get; set; } = new ExpressionYaml();
+        public ExpressionYaml OldValue { get; set; } = new ExpressionYaml();
+        public ExpressionYaml NewValue { get; set; } = new ExpressionYaml { Literal = string.Empty };
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireTo();
+        }
+    }
+
+    public sealed class StringSubstringActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public StringSubstringActionYaml() { Type = "substring"; }
+        public ExpressionYaml Text { get; set; } = new ExpressionYaml();
+        public ExpressionYaml StartIndex { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Length { get; set; } = new ExpressionYaml();
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireTo();
+        }
+    }
+
+    public sealed class StringTrimActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public StringTrimActionYaml() { Type = "trimString"; }
+        public ExpressionYaml Text { get; set; } = new ExpressionYaml();
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireTo();
+        }
+    }
+
     public sealed class LookupWorkflowContextActionYaml : WorkflowActionYaml, ITargetedActionYaml
     {
         public LookupWorkflowContextActionYaml() { Type = "lookupWorkflowContext"; }
@@ -523,6 +566,9 @@ namespace SPNet.Workflow.WfSerializer
             Register(factories, y => new DelayForActionYaml { Type = y.Type ?? string.Empty, Days = y.Days ?? new ExpressionYaml { Literal = 0 }, Hours = y.Hours ?? new ExpressionYaml { Literal = 0 }, Minutes = y.Minutes ?? new ExpressionYaml { Literal = 0 } }, "delayFor");
             Register(factories, y => new DelayUntilActionYaml { Type = y.Type ?? string.Empty, Date = y.Date ?? new ExpressionYaml() }, "delayUntil");
             Register(factories, y => new AssignActionYaml { Type = y.Type ?? string.Empty, To = ReadString(y.To), Value = y.Value }, "assign", "setVariable");
+            Register(factories, y => new StringReplaceActionYaml { Type = y.Type ?? string.Empty, Text = y.Text ?? y.Value ?? new ExpressionYaml(), OldValue = y.OldValue ?? y.Find ?? new ExpressionYaml(), NewValue = y.NewValue ?? y.ReplaceWith ?? new ExpressionYaml { Literal = string.Empty }, To = ReadString(y.To) }, "replaceString", "stringReplace");
+            Register(factories, y => new StringSubstringActionYaml { Type = y.Type ?? string.Empty, Text = y.Text ?? y.Value ?? new ExpressionYaml(), StartIndex = y.StartIndex ?? new ExpressionYaml { Literal = 0 }, Length = y.Length ?? new ExpressionYaml(), To = ReadString(y.To) }, "substring", "substringString");
+            Register(factories, y => new StringTrimActionYaml { Type = y.Type ?? string.Empty, Text = y.Text ?? y.Value ?? new ExpressionYaml(), To = ReadString(y.To) }, "trimString", "stringTrim");
             Register(factories, y => new LookupWorkflowContextActionYaml { Type = y.Type ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupWorkflowContext", "lookupContextProperty");
             Register(factories, y => new GetCurrentListIdActionYaml { Type = y.Type ?? string.Empty, To = ReadString(y.To) }, "getCurrentListId");
             Register(factories, y => new GetCurrentItemGuidActionYaml { Type = y.Type ?? string.Empty, To = ReadString(y.To) }, "getCurrentItemGuid");
@@ -578,6 +624,18 @@ namespace SPNet.Workflow.WfSerializer
             else if (value is AssignActionYaml assign)
             {
                 WriteScalar(emitter, "type", assign.Type); WriteScalar(emitter, "to", assign.To); WriteObject(emitter, serializer, "value", assign.Value);
+            }
+            else if (value is StringReplaceActionYaml replaceString)
+            {
+                WriteScalar(emitter, "type", replaceString.Type); WriteObject(emitter, serializer, "text", replaceString.Text); WriteObject(emitter, serializer, "oldValue", replaceString.OldValue); WriteObject(emitter, serializer, "newValue", replaceString.NewValue); WriteScalar(emitter, "to", replaceString.To);
+            }
+            else if (value is StringSubstringActionYaml substring)
+            {
+                WriteScalar(emitter, "type", substring.Type); WriteObject(emitter, serializer, "text", substring.Text); WriteObject(emitter, serializer, "startIndex", substring.StartIndex); WriteObject(emitter, serializer, "length", substring.Length); WriteScalar(emitter, "to", substring.To);
+            }
+            else if (value is StringTrimActionYaml trimString)
+            {
+                WriteScalar(emitter, "type", trimString.Type); WriteObject(emitter, serializer, "text", trimString.Text); WriteScalar(emitter, "to", trimString.To);
             }
             else if (value is LookupWorkflowContextActionYaml context)
             {
@@ -705,6 +763,12 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml Message { get; set; } = new ExpressionYaml();
             public string Status { get; set; } = string.Empty;
             public ExpressionYaml Text { get; set; } = new ExpressionYaml();
+            public ExpressionYaml OldValue { get; set; } = new ExpressionYaml();
+            public ExpressionYaml NewValue { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Find { get; set; } = new ExpressionYaml();
+            public ExpressionYaml ReplaceWith { get; set; } = new ExpressionYaml();
+            public ExpressionYaml StartIndex { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Length { get; set; } = new ExpressionYaml();
             public ExpressionYaml Days { get; set; } = new ExpressionYaml { Literal = 0 };
             public ExpressionYaml Hours { get; set; } = new ExpressionYaml { Literal = 0 };
             public ExpressionYaml Minutes { get; set; } = new ExpressionYaml { Literal = 0 };
@@ -787,7 +851,54 @@ namespace SPNet.Workflow.WfSerializer
                 : new ExpressionYaml();
         }
 
-        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer) => serializer(value);
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
+        {
+            var expression = value as ExpressionYaml ?? new ExpressionYaml();
+            if (IsSimpleLiteral(expression))
+            {
+                serializer(expression.Literal);
+                return;
+            }
+
+            emitter.Emit(new MappingStart(null, null, false, MappingStyle.Block));
+            if (expression.Literal != null) WriteObject(emitter, serializer, "literal", expression.Literal);
+            if (!string.IsNullOrWhiteSpace(expression.Variable)) WriteScalar(emitter, "variable", expression.Variable);
+            if (!string.IsNullOrWhiteSpace(expression.Type)) WriteScalar(emitter, "type", expression.Type);
+            if (!string.IsNullOrWhiteSpace(expression.PropertyName)) WriteScalar(emitter, "propertyName", expression.PropertyName);
+            if (!string.IsNullOrWhiteSpace(expression.FieldName)) WriteScalar(emitter, "fieldName", expression.FieldName);
+            if (expression.ListId != null) WriteObject(emitter, serializer, "listId", expression.ListId);
+            if (expression.ItemId != null) WriteObject(emitter, serializer, "itemId", expression.ItemId);
+            if (expression.ItemGuid != null) WriteObject(emitter, serializer, "itemGuid", expression.ItemGuid);
+            if (expression.Value != null) WriteObject(emitter, serializer, "value", expression.Value);
+            if (expression.Values != null && expression.Values.Count > 0) WriteObject(emitter, serializer, "values", expression.Values);
+            if (expression.ToString != null) WriteObject(emitter, serializer, "toString", expression.ToString);
+            emitter.Emit(new MappingEnd());
+        }
+
+        private static bool IsSimpleLiteral(ExpressionYaml expression) =>
+            expression.Literal != null &&
+            string.IsNullOrWhiteSpace(expression.Variable) &&
+            string.IsNullOrWhiteSpace(expression.Type) &&
+            string.IsNullOrWhiteSpace(expression.PropertyName) &&
+            string.IsNullOrWhiteSpace(expression.FieldName) &&
+            expression.ListId == null &&
+            expression.ItemId == null &&
+            expression.ItemGuid == null &&
+            expression.Value == null &&
+            (expression.Values == null || expression.Values.Count == 0) &&
+            expression.ToString == null;
+
+        private static void WriteScalar(IEmitter emitter, string name, string value)
+        {
+            emitter.Emit(new Scalar(name));
+            emitter.Emit(new Scalar(value ?? string.Empty));
+        }
+
+        private static void WriteObject(IEmitter emitter, ObjectSerializer serializer, string name, object? value)
+        {
+            emitter.Emit(new Scalar(name));
+            serializer(value);
+        }
 
         private sealed class ExpressionYamlSurrogate
         {

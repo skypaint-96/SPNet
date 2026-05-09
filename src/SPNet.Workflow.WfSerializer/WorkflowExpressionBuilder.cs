@@ -15,9 +15,12 @@ namespace SPNet.Workflow.WfSerializer
 
         internal sealed class ValueExpressionTypes
         {
-            public ValueExpressionTypes(Type toString, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type buildDictionary)
+            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type buildDictionary)
             {
                 ToStringExpression = toString;
+                ReplaceStringExpression = replaceString;
+                SubstringExpression = substring;
+                TrimExpression = trim;
                 LookupWorkflowContext = lookupWorkflowContext;
                 GetCurrentListId = getCurrentListId;
                 GetCurrentItemGuid = getCurrentItemGuid;
@@ -26,6 +29,9 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             public Type ToStringExpression { get; }
+            public Type ReplaceStringExpression { get; }
+            public Type SubstringExpression { get; }
+            public Type TrimExpression { get; }
             public Type LookupWorkflowContext { get; }
             public Type GetCurrentListId { get; }
             public Type GetCurrentItemGuid { get; }

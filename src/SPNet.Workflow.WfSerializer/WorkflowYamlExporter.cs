@@ -48,6 +48,10 @@ namespace SPNet.Workflow.WfSerializer
                     var action = TryExportSharePointAction(child);
                     if (action != null) stage.Actions.Add(action);
                 }
+                foreach (var assign in stageElement.Elements(ActivitiesNamespace + "Assign").Select(TryExportStringAssignAction))
+                {
+                    if (assign != null) stage.Actions.Add(assign);
+                }
                 if (stage.Actions.Count > 0) workflow.Stages.Add(stage);
             }
             workflow.ExportWarnings.Add("Partial structural export: supported SharePoint actions are listed, but expressions and list dictionaries may be placeholders when WF deserialization is not used.");
@@ -66,11 +70,31 @@ namespace SPNet.Workflow.WfSerializer
             if (child.Name.LocalName == "SetField") return new SetFieldActionYaml { FieldName = ReadStringAttributeOrPlaceholder(child, "FieldName"), Value = ReadExpressionAttributeOrPlaceholder(child, "FieldValue") };
             if (child.Name.LocalName == "Email") return new SendEmailActionYaml { To = new ExpressionYaml { Literal = "<exported recipients>" }, Cc = new ExpressionYaml { Literal = "<exported recipients>" }, Subject = ReadExpressionAttributeOrPlaceholder(child, "Subject"), Body = ReadExpressionAttributeOrPlaceholder(child, "Body") };
             if (child.Name.LocalName == "CallHTTPWebService") return new CallHttpWebServiceActionYaml { Address = ReadExpressionAttributeOrPlaceholder(child, "Address"), RequestType = ReadExpressionAttributeOrPlaceholder(child, "RequestType"), ResponseStatusCodeTo = ReadOutArgumentTargetOrPlaceholder(child, "ResponseStatusCode") };
-            if (child.Name.LocalName == "CreateListItem") return new CreateListItemActionYaml { ListId = new ExpressionYaml { Literal = "<exported list id>" }, Fields = ReadListItemPropertyKeys(child), ItemIdTo = ReadOutArgumentTarget(child, "ItemId"), ItemGuidTo = ReadOutArgumentTarget(child, "ItemGuid") };
-            if (child.Name.LocalName == "UpdateListItem") return new UpdateListItemActionYaml { ListId = new ExpressionYaml { Literal = "<exported list id>" }, ItemId = new ExpressionYaml { Literal = "<exported item id>" }, ItemGuid = new ExpressionYaml(), Fields = ReadListItemPropertyKeys(child) };
-            if (child.Name.LocalName == "DeleteListItem") return new DeleteListItemActionYaml { ListId = new ExpressionYaml { Literal = "<exported list id>" }, ItemId = new ExpressionYaml { Literal = "<exported item id>" } };
+            if (child.Name.LocalName == "SingleTask") return new SingleTaskActionYaml { AssignedTo = ReadExpressionAttributeOrPlaceholder(child, "AssignedTo"), Title = ReadExpressionAttributeOrPlaceholder(child, "Title"), Body = ReadExpressionAttributeOrPlaceholder(child, "Body"), DueDate = ReadExpressionAttributeOrPlaceholder(child, "DueDate"), TaskIdTo = ReadOutArgumentTarget(child, "TaskId"), OutcomeTo = ReadOutArgumentTarget(child, "Outcome") };
+            if (child.Name.LocalName == "CreateListItem") return new CreateListItemActionYaml { ListId = CurrentListIdExpression(), Fields = ReadListItemPropertyKeys(child), ItemIdTo = ReadOutArgumentTarget(child, "ItemId"), ItemGuidTo = ReadOutArgumentTarget(child, "ItemGuid") };
+            if (child.Name.LocalName == "UpdateListItem") return new UpdateListItemActionYaml { ListId = CurrentListIdExpression(), ItemId = ExportedItemIdExpression(), ItemGuid = new ExpressionYaml(), Fields = ReadListItemPropertyKeys(child) };
+            if (child.Name.LocalName == "DeleteListItem") return new DeleteListItemActionYaml { ListId = CurrentListIdExpression(), ItemId = ExportedItemIdExpression() };
             return null;
         }
+
+        private static WorkflowActionYaml? TryExportStringAssignAction(XElement assign)
+        {
+            var target = assign.Element(ActivitiesNamespace + "Assign.To")?.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(target)) return null;
+
+            var valueElement = assign.Element(ActivitiesNamespace + "Assign.Value");
+            var expressionText = valueElement?.Descendants().FirstOrDefault(e => e.Name.LocalName == "VisualBasicValue")?.Attribute("ExpressionText")?.Value ?? string.Empty;
+            if (expressionText.IndexOf(".Replace(", StringComparison.OrdinalIgnoreCase) >= 0) return new StringReplaceActionYaml { Text = ExportedStringExpression(), OldValue = ExportedStringExpression(), NewValue = ExportedStringExpression(), To = target };
+            if (expressionText.IndexOf(".Substring(", StringComparison.OrdinalIgnoreCase) >= 0) return new StringSubstringActionYaml { Text = ExportedStringExpression(), StartIndex = new ExpressionYaml { Literal = 0 }, Length = new ExpressionYaml(), To = target };
+            if (expressionText.IndexOf(".Trim()", StringComparison.OrdinalIgnoreCase) >= 0 || expressionText.IndexOf(".Trim(", StringComparison.OrdinalIgnoreCase) >= 0) return new StringTrimActionYaml { Text = ExportedStringExpression(), To = target };
+            return null;
+        }
+
+        private static ExpressionYaml CurrentListIdExpression() => new ExpressionYaml { Type = "getCurrentListId" };
+
+        private static ExpressionYaml ExportedItemIdExpression() => new ExpressionYaml { Literal = 1 };
+
+        private static ExpressionYaml ExportedStringExpression() => new ExpressionYaml { Literal = "<exported expression>" };
 
         private static ExpressionYaml ReadExpressionAttributeOrPlaceholder(XElement element, string attributeName) => new ExpressionYaml { Literal = ReadStringAttributeOrPlaceholder(element, attributeName) };
 
