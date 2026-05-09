@@ -98,4 +98,45 @@ if ($Workflow -like '*workflow.list-actions.yml') {
     }
 }
 
+if ($Workflow -like '*workflow.list-lifecycle.yml') {
+    $lifecycleRequiredMarkers = @(
+        'SPNetYamlListLifecycleManual.MTW',
+        'CreateListItem',
+        'UpdateListItem',
+        'ListItemProperties',
+        'GetCurrentListId',
+        'createdItemId',
+        'createdItemGuid',
+        'SPNet lifecycle create',
+        'SPNet lifecycle updated'
+    )
+
+    foreach ($marker in $lifecycleRequiredMarkers) {
+        if ($xaml -notlike "*$marker*") { throw "List lifecycle golden regression marker missing from ${XamlPath}: $marker" }
+    }
+
+    if ($xaml -like '*Literal x:TypeArguments="x:Object"*' -or $xaml -like '*Literal&lt;x:Object&gt;*') { throw "List lifecycle XAML emitted invalid object literal in ${XamlPath}." }
+}
+
+if ($Workflow -like '*workflow.list-item-lookup.yml') {
+    $lookupRequiredMarkers = @(
+        'SPNetYamlListItemLookupManual.MTW',
+        'CreateListItem',
+        'UpdateListItem',
+        'Assign',
+        'LookupSPListItemStringProperty',
+        'PropertyName',
+        'Title',
+        'readBackTitle',
+        'SPNet lookup readback updated',
+        'Read back TestList Title'
+    )
+
+    foreach ($marker in $lookupRequiredMarkers) {
+        if ($xaml -notlike "*$marker*") { throw "List item lookup golden regression marker missing from ${XamlPath}: $marker" }
+    }
+
+    if ($xaml -like '*LookupSPListItemStringProperty.Result*') { throw "List item lookup sample must not emit top-level LookupSPListItemStringProperty Result output in ${XamlPath}. Keep the lookup nested inside assign/setVariable." }
+}
+
 Write-Host "Golden YAML-first workflow regression passed: $XamlPath"

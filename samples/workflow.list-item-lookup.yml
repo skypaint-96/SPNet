@@ -1,0 +1,52 @@
+schemaVersion: spnet.workflow/v1
+name: SPNetYamlListItemLookupManual
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: List
+  listTitle: TestList
+variables:
+  - name: createdItemId
+    type: Int32
+  - name: createdItemGuid
+    type: Guid
+  - name: readBackTitle
+    type: String
+stages:
+  - name: Safe list item lookup
+    actions:
+      - type: createListItem
+        listId:
+          type: getCurrentListId
+        itemIdTo: createdItemId
+        itemGuidTo: createdItemGuid
+        fields:
+          Title:
+            literal: SPNet lookup readback create
+      - type: updateListItem
+        listId:
+          type: getCurrentListId
+        itemId:
+          variable: createdItemId
+        fields:
+          Title:
+            literal: SPNet lookup readback updated
+      # SharePoint Designer renders LookupSPListItemStringProperty as an invisible/crashing action
+      # when it is emitted as a top-level stage action. Keep it nested inside assign/setVariable.
+      - type: assign
+        to: readBackTitle
+        value:
+          type: lookupListItemStringProperty
+          listId:
+            type: getCurrentListId
+          itemId:
+            variable: createdItemId
+          fieldName: Title
+      - type: writeHistory
+        message:
+          type: formatString
+          literal: "{}Read back TestList Title: {0}"
+          value:
+            variable: readBackTitle

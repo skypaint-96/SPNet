@@ -259,6 +259,116 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    public abstract class ListItemLifecycleActionYaml : WorkflowActionYaml
+    {
+        public ExpressionYaml ListId { get; set; } = new ExpressionYaml { Type = "getCurrentListId" };
+        public Dictionary<string, ExpressionYaml> Fields { get; set; } = new Dictionary<string, ExpressionYaml>(StringComparer.OrdinalIgnoreCase);
+
+        protected void RequireFields()
+        {
+            if (Fields == null || Fields.Count == 0) throw new InvalidOperationException(Type + " action requires at least one field in 'fields'.");
+            if (Fields.Keys.Any(string.IsNullOrWhiteSpace)) throw new InvalidOperationException(Type + " action field names cannot be empty.");
+        }
+
+        protected void RequireListId()
+        {
+            if (ListId == null) throw new InvalidOperationException(Type + " action requires 'listId' or a current-list default.");
+        }
+    }
+
+    public sealed class CreateListItemActionYaml : ListItemLifecycleActionYaml
+    {
+        public CreateListItemActionYaml() { Type = "createListItem"; }
+        public string ItemIdTo { get; set; } = string.Empty;
+        public string ItemGuidTo { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireListId();
+            RequireFields();
+        }
+    }
+
+    public abstract class TargetedListItemActionYaml : ListItemLifecycleActionYaml
+    {
+        public ExpressionYaml ItemId { get; set; } = new ExpressionYaml();
+        public ExpressionYaml ItemGuid { get; set; } = new ExpressionYaml();
+
+        protected void RequireItemIdentity()
+        {
+            var hasId = ItemId != null && (!string.IsNullOrWhiteSpace(ItemId.Variable) || !string.IsNullOrWhiteSpace(ItemId.Type) || ItemId.ToString != null || ItemId.Value != null || ItemId.Literal != null);
+            var hasGuid = ItemGuid != null && (!string.IsNullOrWhiteSpace(ItemGuid.Variable) || !string.IsNullOrWhiteSpace(ItemGuid.Type) || ItemGuid.ToString != null || ItemGuid.Value != null || ItemGuid.Literal != null);
+            if (!hasId && !hasGuid) throw new InvalidOperationException(Type + " action requires 'itemId' or 'itemGuid'.");
+        }
+    }
+
+    public sealed class UpdateListItemActionYaml : TargetedListItemActionYaml
+    {
+        public UpdateListItemActionYaml() { Type = "updateListItem"; }
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireListId();
+            RequireItemIdentity();
+            RequireFields();
+        }
+    }
+
+    public sealed class DeleteListItemActionYaml : TargetedListItemActionYaml
+    {
+        public DeleteListItemActionYaml() { Type = "deleteListItem"; }
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireListId();
+            RequireItemIdentity();
+        }
+    }
+
+    public abstract class LookupListItemPropertyActionYaml : TargetedListItemActionYaml, ITargetedActionYaml
+    {
+        public string FieldName { get; set; } = string.Empty;
+        public string PropertyName { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+
+        public void ValidateExpressionShape()
+        {
+            RequireListId();
+            RequireItemIdentity();
+            RequirePropertyName();
+        }
+
+        protected void RequirePropertyName()
+        {
+            if (string.IsNullOrWhiteSpace(FieldName) && string.IsNullOrWhiteSpace(PropertyName)) throw new InvalidOperationException(Type + " action requires 'fieldName' or 'propertyName'.");
+        }
+    }
+
+    public sealed class LookupListItemStringPropertyActionYaml : LookupListItemPropertyActionYaml
+    {
+        public LookupListItemStringPropertyActionYaml() { Type = "lookupListItemStringProperty"; }
+
+        public override void Validate()
+        {
+            base.Validate();
+            throw new InvalidOperationException(Type + " is not SPD-safe as a top-level action. Use an assign/setVariable action with value: { type: lookupListItemStringProperty, listId: { type: getCurrentListId }, itemId: ..., fieldName: ... } instead.");
+        }
+    }
+
+    public sealed class LookupListItemIntPropertyActionYaml : LookupListItemPropertyActionYaml
+    {
+        public LookupListItemIntPropertyActionYaml() { Type = "lookupListItemIntProperty"; }
+
+        public override void Validate()
+        {
+            base.Validate();
+            throw new InvalidOperationException(Type + " is not SPD-safe as a top-level action, and the tested PMteamblog WebsiteCache proxy does not expose LookupSPListItemIntProperty. Do not publish this action as a visible stage action.");
+        }
+    }
+
     public sealed class CallHttpWebServiceActionYaml : WorkflowActionYaml
     {
         public CallHttpWebServiceActionYaml() { Type = "callHttpWebService"; }
@@ -365,6 +475,11 @@ namespace SPNet.Workflow.WfSerializer
             else if (actionType == "getcurrentlistid") action = new GetCurrentListIdActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "getcurrentitemguid") action = new GetCurrentItemGuidActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "setfield") action = new SetFieldActionYaml { Type = yamlObject.Type ?? string.Empty, FieldName = yamlObject.FieldName ?? string.Empty, Value = yamlObject.Value ?? new ExpressionYaml() };
+            else if (actionType == "createlistitem") action = new CreateListItemActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, Fields = yamlObject.Fields ?? new Dictionary<string, ExpressionYaml>(StringComparer.OrdinalIgnoreCase), ItemIdTo = yamlObject.ItemIdTo ?? string.Empty, ItemGuidTo = yamlObject.ItemGuidTo ?? string.Empty };
+            else if (actionType == "updatelistitem") action = new UpdateListItemActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml(), Fields = yamlObject.Fields ?? new Dictionary<string, ExpressionYaml>(StringComparer.OrdinalIgnoreCase) };
+            else if (actionType == "deletelistitem") action = new DeleteListItemActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml() };
+            else if (actionType == "lookuplistitemstringproperty" || actionType == "lookupsplistitemstringproperty") action = new LookupListItemStringPropertyActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml(), FieldName = yamlObject.FieldName ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = yamlObject.To ?? string.Empty };
+            else if (actionType == "lookuplistitemintproperty" || actionType == "lookupsplistitemintproperty") action = new LookupListItemIntPropertyActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml(), FieldName = yamlObject.FieldName ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = yamlObject.To ?? string.Empty };
             else if (actionType == "callhttpwebservice" || actionType == "callhttp" || actionType == "http") action = new CallHttpWebServiceActionYaml { Type = yamlObject.Type ?? string.Empty, Address = yamlObject.Address ?? new ExpressionYaml(), RequestType = yamlObject.RequestType ?? new ExpressionYaml { Literal = "GET" }, ResponseStatusCodeTo = yamlObject.ResponseStatusCodeTo ?? yamlObject.StatusCodeTo ?? string.Empty, ResponseContentTo = yamlObject.ResponseContentTo ?? yamlObject.ContentTo ?? string.Empty, ResponseHeadersTo = yamlObject.ResponseHeadersTo ?? yamlObject.HeadersTo ?? string.Empty };
             else if (actionType == "getdynamicvalueproperty" || actionType == "getdictionaryitem" || actionType == "getdictionaryvalue" || actionType == "getresponseproperty") action = new GetDynamicValuePropertyActionYaml { Type = yamlObject.Type ?? string.Empty, Source = yamlObject.Source ?? yamlObject.From ?? string.Empty, PropertyName = yamlObject.PropertyName ?? yamlObject.Key ?? new ExpressionYaml(), To = yamlObject.To ?? string.Empty };
             else if (actionType == "lookuprestpropertyname" || actionType == "lookupspgetitempropertynameinrest") action = new LookupRestPropertyNameActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml(), PropertyName = yamlObject.PropertyName ?? new ExpressionYaml(), To = yamlObject.To ?? string.Empty };
@@ -422,6 +537,22 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", setField.Type); WriteScalar(emitter, "fieldName", setField.FieldName); WriteObject(emitter, serializer, "value", setField.Value);
             }
+            else if (value is CreateListItemActionYaml createListItem)
+            {
+                WriteScalar(emitter, "type", createListItem.Type); WriteObject(emitter, serializer, "listId", createListItem.ListId); WriteObject(emitter, serializer, "fields", createListItem.Fields); WriteScalar(emitter, "itemIdTo", createListItem.ItemIdTo); WriteScalar(emitter, "itemGuidTo", createListItem.ItemGuidTo);
+            }
+            else if (value is UpdateListItemActionYaml updateListItem)
+            {
+                WriteScalar(emitter, "type", updateListItem.Type); WriteObject(emitter, serializer, "listId", updateListItem.ListId); WriteObject(emitter, serializer, "itemId", updateListItem.ItemId); WriteObject(emitter, serializer, "itemGuid", updateListItem.ItemGuid); WriteObject(emitter, serializer, "fields", updateListItem.Fields);
+            }
+            else if (value is DeleteListItemActionYaml deleteListItem)
+            {
+                WriteScalar(emitter, "type", deleteListItem.Type); WriteObject(emitter, serializer, "listId", deleteListItem.ListId); WriteObject(emitter, serializer, "itemId", deleteListItem.ItemId); WriteObject(emitter, serializer, "itemGuid", deleteListItem.ItemGuid);
+            }
+            else if (value is LookupListItemPropertyActionYaml lookupListItemProperty)
+            {
+                WriteScalar(emitter, "type", lookupListItemProperty.Type); WriteObject(emitter, serializer, "listId", lookupListItemProperty.ListId); WriteObject(emitter, serializer, "itemId", lookupListItemProperty.ItemId); WriteObject(emitter, serializer, "itemGuid", lookupListItemProperty.ItemGuid); WriteScalar(emitter, "fieldName", lookupListItemProperty.FieldName); WriteScalar(emitter, "propertyName", lookupListItemProperty.PropertyName); WriteScalar(emitter, "to", lookupListItemProperty.To);
+            }
             else if (value is CallHttpWebServiceActionYaml callHttp)
             {
                 WriteScalar(emitter, "type", callHttp.Type); WriteObject(emitter, serializer, "address", callHttp.Address); WriteObject(emitter, serializer, "requestType", callHttp.RequestType); WriteScalar(emitter, "responseStatusCodeTo", callHttp.ResponseStatusCodeTo); WriteScalar(emitter, "responseContentTo", callHttp.ResponseContentTo); WriteScalar(emitter, "responseHeadersTo", callHttp.ResponseHeadersTo);
@@ -471,6 +602,11 @@ namespace SPNet.Workflow.WfSerializer
             public string Source { get; set; } = string.Empty;
             public string From { get; set; } = string.Empty;
             public ExpressionYaml? Value { get; set; }
+            public Dictionary<string, ExpressionYaml> Fields { get; set; } = new Dictionary<string, ExpressionYaml>(StringComparer.OrdinalIgnoreCase);
+            public ExpressionYaml ItemId { get; set; } = new ExpressionYaml();
+            public ExpressionYaml ItemGuid { get; set; } = new ExpressionYaml();
+            public string ItemIdTo { get; set; } = string.Empty;
+            public string ItemGuidTo { get; set; } = string.Empty;
             public ExpressionYaml Address { get; set; } = new ExpressionYaml();
             public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "HTTPGET" };
             public ExpressionYaml ListId { get; set; } = new ExpressionYaml();
@@ -532,6 +668,14 @@ namespace SPNet.Workflow.WfSerializer
         public string Type { get; set; } = string.Empty;
         /// <summary>Gets or sets a SharePoint context or REST property name for lookup expressions.</summary>
         public string PropertyName { get; set; } = string.Empty;
+        /// <summary>Gets or sets a SharePoint list field internal/display name for list item lookup expressions.</summary>
+        public string FieldName { get; set; } = string.Empty;
+        /// <summary>Gets or sets the list Guid expression for list item lookup expressions.</summary>
+        public ExpressionYaml? ListId { get; set; }
+        /// <summary>Gets or sets the list item integer ID expression for list item lookup expressions.</summary>
+        public ExpressionYaml? ItemId { get; set; }
+        /// <summary>Gets or sets the list item Guid expression for list item lookup expressions.</summary>
+        public ExpressionYaml? ItemGuid { get; set; }
         /// <summary>Gets or sets a nested expression value used by expression wrappers such as formatting and string conversion.</summary>
         public ExpressionYaml? Value { get; set; }
         /// <summary>Gets or sets a nested expression to convert to string.</summary>

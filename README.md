@@ -77,6 +77,11 @@ Supported actions:
 - `getCurrentListId` and `getCurrentItemGuid` expressions emit nested SharePoint `GetCurrentListId` / `GetCurrentItemGuid` inside Guid `InArgument` values.
   - Note: Guid variables are safe as lookup assignment outputs, but generic `toString` expression conversion for Guid variables is deferred; write scalar string context values directly to history.
 - `setField`: emits SharePoint `SetField` for the current item only, with `fieldName` and scalar/object `value`. This is a mutating list workflow action; use only on intentional test list items or controlled list workflow contexts.
+- `createListItem`: emits SharePoint `CreateListItem`, with `listId` (defaults to `type: getCurrentListId`), non-empty `fields`, and optional `itemIdTo` / `itemGuidTo` outputs. Target-by-title is publish metadata only; the proxy activity requires a Guid `ListId` argument.
+- `updateListItem`: emits SharePoint `UpdateListItem`, with `listId`, exactly the item identity you provide via `itemId` and/or `itemGuid`, and non-empty `fields`.
+- `deleteListItem`: emits SharePoint `DeleteListItem`, with `listId` plus `itemId` and/or `itemGuid`. Delete is supported by the proxy metadata but intentionally omitted from the safe list lifecycle sample.
+- `lookupListItemStringProperty` / `lookupSPListItemStringProperty`: supported only as a nested string expression inside another visible action, normally `assign` / `setVariable`. It emits SharePoint `LookupSPListItemStringProperty`, with `listId` (defaults to `type: getCurrentListId`), `itemId` and/or `itemGuid`, and `fieldName` or `propertyName`. Top-level list item lookup actions are rejected because SharePoint Designer can render them as invisible actions and crash when properties are opened.
+- `lookupListItemIntProperty` / `lookupSPListItemIntProperty`: YAML shape and Int32 `to` validation are present, but the tested PMteamblog WebsiteCache proxy assembly does not contain `LookupSPListItemIntProperty`; using it with that cache fails fast at build time and is documented as unsupported for that environment.
 - `callHttpWebService` / `callHttp` / `http`: emits SharePoint `CallHTTPWebService` with `address`, `requestType`, and any response targets: `responseStatusCodeTo`, `responseContentTo`, and `responseHeadersTo`. Literal methods accept `GET`, `POST`, `PUT`, `DELETE` and `HTTPGET`, `HTTPPOST`, `HTTPPUT`, `HTTPDELETE`; aliases are normalized to the `HTTP*` values SharePoint Designer expects.
 - `lookupRestPropertyName` / `lookupSPListItemPropertyNameInREST`: emits SharePoint `LookupSPListItemPropertyNameInREST` with `listId`, `propertyName`, and `to`.
 - `getDynamicValueProperty` / `getDictionaryItem` / `getDictionaryValue` / `getResponseProperty`: extracts a string property from a `DynamicValue` HTTP response variable, with `source`, `propertyName`, and `to`.
@@ -168,6 +173,55 @@ List action example:
     literal: SPNet YAML list-action smoke
 ```
 
+List item lifecycle example:
+
+```yaml
+- type: createListItem
+  listId:
+    type: getCurrentListId
+  itemIdTo: createdItemId
+  itemGuidTo: createdItemGuid
+  fields:
+    Title:
+      literal: SPNet lifecycle create
+- type: updateListItem
+  listId:
+    type: getCurrentListId
+  itemId:
+    variable: createdItemId
+  fields:
+    Title:
+      literal: SPNet lifecycle updated
+```
+
+List item property lookup example:
+
+```yaml
+- type: assign
+  to: readBackTitle
+  value:
+    type: lookupListItemStringProperty
+    listId:
+      type: getCurrentListId
+    itemId:
+      variable: createdItemId
+    fieldName: Title
+```
+
+SharePoint Designer safety caveat: `LookupSPListItemStringProperty` passed server/publish validation as a direct stage child, but the published `SPNetYamlListItemLookupManual-20260509-1607` workflow opened with the lookup action invisible and Designer crashed when its properties were selected. Treat direct/top-level list item lookup actions as SPD-unsafe even when publish validation succeeds; keep the lookup nested inside an assignment or another visible action argument.
+
+SharePoint Designer rendering caveat: lifecycle actions can show misleading local/designer UI state even when the generated workflow is valid. Manual inspection of `SPNetYamlListLifecycleManual-20260509-1535`, published to `TestList`, showed that Designer did not expose every generated part cleanly: the created item ID output was not visibly represented as an integer output in the action builder, some later action builders/lookups did not show the `itemIdTo` variable cleanly, and Designer drew red boxes around actions as if local designer validation had concerns. Despite those visual quirks, Designer `Check for Errors` reported no errors, publishing remained allowed, and runtime execution succeeded: the workflow created a list item and then updated that newly created item's title through the returned `createdItemId`. Treat Designer visual/local rendering for `createListItem` / `updateListItem` / `deleteListItem` as potentially misleading; server validation and runtime execution are the source of truth for the tested create/update flow. In particular, `itemIdTo` / created-item ID outputs can be functional even when SharePoint Designer does not expose the variable cleanly in builders or lookup pickers.
+
+Delete shape, for workflows that intentionally delete a known safe item:
+
+```yaml
+- type: deleteListItem
+  listId:
+    type: getCurrentListId
+  itemId:
+    variable: createdItemId
+```
+
 HTTP/web service example:
 
 ```yaml
@@ -197,9 +251,9 @@ DynamicValue extraction example:
   to: currentUserTitle
 ```
 
-Reflection/reference inspection against the SharePoint Designer WebsiteCache proxy assembly and downloaded PMteamblog XAML confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`. The lookup expansion now emits current workflow/list/item lookup activities only as nested expression activities in `InArgument` values (`LookupWorkflowContextProperty.PropertyName`, nested `GetCurrentListId`, and nested `GetCurrentItemGuid`), matching the downloaded SharePoint Designer XAML pattern and avoiding known SPD-crashing blank top-level lookup actions. The third expansion batch adds only current-item `SetField` because downloaded reference XAML shows a clear safe current-item shape, for example `SetField FieldName="Title"` with current item `AppliesTo` metadata and an object `FieldValue` argument. The HTTP batch adds Designer-rendered `CallHTTPWebService`, `LookupSPListItemPropertyNameInREST`, request method normalization, and guarded `DynamicValue` response plumbing.
+Reflection/reference inspection against the SharePoint Designer WebsiteCache proxy assembly and downloaded PMteamblog XAML confirmed many additional SharePoint activity types. The first expansion batch is intentionally limited to scalar/low-risk activities whose writable proxy properties map directly to typed WF arguments: `Comment.CommentText`, `DelayFor.Days`/`Hours`/`Minutes`, and `DelayUntil.Date`. The lookup expansion now emits current workflow/list/item lookup activities only as nested expression activities in `InArgument` values (`LookupWorkflowContextProperty.PropertyName`, nested `GetCurrentListId`, and nested `GetCurrentItemGuid`), matching the downloaded SharePoint Designer XAML pattern and avoiding known SPD-crashing blank top-level lookup actions. The third expansion batch adds only current-item `SetField` because downloaded reference XAML shows a clear safe current-item shape, for example `SetField FieldName="Title"` with current item `AppliesTo` metadata and an object `FieldValue` argument. The HTTP batch adds Designer-rendered `CallHTTPWebService`, `LookupSPListItemPropertyNameInREST`, request method normalization, and guarded `DynamicValue` response plumbing. The list item lifecycle batch is based on reflected WebsiteCache proxy types `CreateListItem`, `UpdateListItem`, and `DeleteListItem`: all expose `ListId`, `ItemGuid`, `ItemId`, and dictionary `ListItemProperties` where applicable; `CreateListItem` is `Activity<Guid>` and additionally exposes `ItemGuid` as `InOutArgument<Guid>` plus `ItemId` as `OutArgument<int>`. Runtime validation for `SPNetYamlListLifecycleManual-20260509-1535` confirmed the create/update sequence against `TestList` even though SharePoint Designer rendered red local-validation boxes and did not show the returned item ID variable cleanly in all UI surfaces.
 
-Deferred actions for future safe expansion batches: `updateListItem`, `createListItem`, `deleteListItem`, `copyItem`, `checkInItem`, `checkOutItem`, `undoCheckOutItem`, `setModerationStatus`, `waitForFieldChange`, `waitForItemEvent`, email, task/process actions, general dictionary/dynamic-value mutation actions, person/group and lookup field actions, workflow interop, arbitrary list item field lookups such as `LookupSPListItemStringProperty`, and principal lookups. These require more property/value-shape validation before being emitted from YAML.
+Deferred actions for future safe expansion batches: `copyItem`, `checkInItem`, `checkOutItem`, `undoCheckOutItem`, `setModerationStatus`, `waitForFieldChange`, `waitForItemEvent`, email, task/process actions, general dictionary/dynamic-value mutation actions, person/group and lookup field actions, workflow interop, arbitrary list item field lookups such as `LookupSPListItemStringProperty`, and principal lookups. These require more property/value-shape validation before being emitted from YAML.
 
 ## CSOM publishing, listing, and cleanup
 
@@ -241,7 +295,7 @@ External dependencies are not packaged: SharePoint Designer WebsiteCache DLLs, O
 
 ## Validation
 
-The YAML-first baseline has been validated end-to-end in SharePoint Designer with `YamlFirstSmoke`: the workflow opens in Designer, the stage/action structure is visible, and Designer `Check for Errors` reports no errors. HTTP actions, DynamicValue property extraction, current-item list field updates, local list smoke generation, read-only list workflow listing, and CSOM list publishing have also been validated. Generated artifacts are intentionally ignored by Git; keep only `artifacts/.gitkeep` committed in the workspace.
+The YAML-first baseline has been validated end-to-end in SharePoint Designer with `YamlFirstSmoke`: the workflow opens in Designer, the stage/action structure is visible, and Designer `Check for Errors` reports no errors. HTTP actions, DynamicValue property extraction, current-item list field updates, local list smoke generation, read-only list workflow listing, and CSOM list publishing have also been validated. List lifecycle create/update has been runtime-validated with `SPNetYamlListLifecycleManual-20260509-1535` on `TestList`: Designer showed misleading red boxes and incomplete variable-picker/action-builder rendering for the created item ID, but `Check for Errors` passed and runtime execution created an item and updated that new item's title via the returned ID. Generated artifacts are intentionally ignored by Git; keep only `artifacts/.gitkeep` committed in the workspace.
 
 ```powershell
 dotnet build .\SPNet.slnx
@@ -263,6 +317,6 @@ Live publish validation requires SharePoint auth/session support and pinned Shar
 
 - YAML support is intentionally limited to logs/status/comments, assignment, scalar control flow, current item `setField`, HTTP calls, REST property-name lookup, workflow context/current list/current item expressions, and DynamicValue string property extraction.
 - `DynamicValue` variables are generated only for HTTP response targets; arbitrary YAML-declared `DynamicValue` variables and general dictionary mutation actions are deferred.
-- Top-level lookup actions are rejected because SharePoint Designer can render them as blank/crashing actions; use nested lookup expressions inside assignment or action arguments.
+- Top-level lookup actions are rejected because SharePoint Designer can render them as blank/crashing actions; use nested lookup expressions inside assignment or action arguments. This includes list item property lookups such as `lookupListItemStringProperty`.
 - The CSOM publisher does not overwrite, delete, or migrate existing live workflows; `if-exists` currently fails on name conflicts.
 - Site/list publishing is validated for current SharePoint WorkflowServices scenarios, but broader task/process/email/list-item CRUD actions remain deferred until safe XAML shapes are captured and validated.

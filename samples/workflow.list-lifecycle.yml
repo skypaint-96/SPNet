@@ -1,0 +1,37 @@
+schemaVersion: spnet.workflow/v1
+name: SPNetYamlListLifecycleManual
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: List
+  listTitle: TestList
+variables:
+  - name: createdItemId
+    type: Int32
+  - name: createdItemGuid
+    type: Guid
+stages:
+  - name: List lifecycle
+    actions:
+      - type: createListItem
+        listId:
+          type: getCurrentListId
+        # SPD may not render this output cleanly in builders/lookups, but runtime validation confirmed it can still feed updateListItem.
+        itemIdTo: createdItemId
+        itemGuidTo: createdItemGuid
+        fields:
+          Title:
+            literal: SPNet lifecycle create
+      - type: updateListItem
+        listId:
+          type: getCurrentListId
+        itemId:
+          variable: createdItemId
+        fields:
+          Title:
+            literal: SPNet lifecycle updated
+      - type: writeHistory
+        message:
+          literal: Created and updated a TestList item. Delete shape is documented in README and intentionally omitted from this safe sample.
