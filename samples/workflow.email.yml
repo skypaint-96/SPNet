@@ -1,0 +1,47 @@
+schemaVersion: spnet.workflow/v1
+name: SPNetYamlEmailManual
+technicalName: SPNetYamlEmailManual.MTW
+start:
+  manual: true
+target:
+  type: Site
+variables:
+  - name: placeholderRecipient
+    type: String
+  - name: dynamicSubjectToken
+    type: String
+stages:
+  - name: Email sample
+    actions:
+      - type: assign
+        to: placeholderRecipient
+        value:
+          literal: spnet-workflow-test@example.invalid
+      - type: assign
+        to: dynamicSubjectToken
+        value:
+          type: lookupWorkflowContext
+          propertyName: WorkflowName
+      - type: sendEmail
+        to:
+          type: formatString
+          literal: "{0}"
+          value:
+            variable: placeholderRecipient
+        cc: ""
+        subject:
+          type: formatString
+          literal: "SPNet YAML email smoke test for {0}"
+          value:
+            variable: dynamicSubjectToken
+        body:
+          type: formatString
+          literal: "<html><body><h1>SPNet YAML email smoke test</h1><p>Recipient placeholder: {0}</p><p>Workflow: {1}</p><p>Site: {2}</p></body></html>"
+          values:
+            - variable: placeholderRecipient
+            - variable: dynamicSubjectToken
+            - type: lookupWorkflowContext
+              propertyName: CurrentWebUrl
+      - type: writeHistory
+        message:
+          literal: SPNet YAML email sample serialized successfully.

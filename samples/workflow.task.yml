@@ -1,0 +1,25 @@
+schemaVersion: spnet.workflow/v1
+name: SPNetYamlSingleTaskManual
+technicalName: SPNetYamlSingleTaskManual.MTW
+start:
+  manual: true
+target:
+  type: Site
+stages:
+  - name: Single task sample
+    actions:
+      - type: singleTask
+        assignedTo:
+          literal: spnet-workflow-test@example.invalid
+        title:
+          literal: SPNet YAML task smoke test
+        taskBody:
+          literal: Local/golden validation sample only. Do not publish without replacing the placeholder assignee.
+        waitForTaskCompletion: true
+        waiveAssignmentEmail: true
+        waiveCancelationEmail: true
+        taskIdTo: taskId
+        outcomeTo: taskOutcome
+      - type: writeHistory
+        message:
+          literal: SPNet YAML single task sample serialized successfully.

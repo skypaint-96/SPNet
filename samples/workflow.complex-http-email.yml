@@ -1,0 +1,122 @@
+schemaVersion: spnet.workflow/v1
+name: SPNetYamlComplexHttpEmailManual
+technicalName: SPNetYamlComplexHttpEmailManual.MTW
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: Site
+variables:
+  - name: httpStatusCode
+    type: String
+  - name: currentWebTitle
+    type: String
+  - name: placeholderRecipient
+    type: String
+  - name: loopCounter
+    type: Double
+stages:
+  - name: Collect current web details
+    actions:
+      - type: setStatus
+        status: SPNet complex HTTP/email sample collecting current web details
+      - type: writeHistory
+        message:
+          literal: Starting safe read-only HTTP GET against the current SharePoint web.
+      - type: callHttpWebService
+        address:
+          type: formatString
+          literal: "{0}/_api/web?$select=Title"
+          value:
+            type: lookupWorkflowContext
+            propertyName: CurrentWebUrl
+        requestType:
+          literal: GET
+        responseStatusCodeTo: httpStatusCode
+        responseContentTo: httpResponseContent
+        responseHeadersTo: httpResponseHeaders
+      - type: getDynamicValueProperty
+        source: httpResponseContent
+        propertyName:
+          literal: Title
+        to: currentWebTitle
+      - type: writeHistory
+        message:
+          type: formatString
+          literal: "Current web title resolved from HTTP response: {0}"
+          value:
+            variable: currentWebTitle
+  - name: Control flow and notification draft
+    actions:
+      - type: setStatus
+        status: SPNet complex HTTP/email sample evaluating response
+      - type: assign
+        to: loopCounter
+        value:
+          literal: 0
+      - type: assign
+        to: placeholderRecipient
+        value:
+          literal: spnet-workflow-test@example.invalid
+      - type: while
+        condition:
+          type: isLessThan
+          left:
+            variable: loopCounter
+          right:
+            literal: 2
+        actions:
+          - type: writeHistory
+            message:
+              type: toString
+              value:
+                variable: loopCounter
+          - type: calc
+            lValue:
+              variable: loopCounter
+            operator: Add
+            rValue:
+              literal: 1
+            to: loopCounter
+      - type: if
+        condition:
+          type: equals
+          left:
+            variable: loopCounter
+          right:
+            literal: 2
+        then:
+          - type: writeHistory
+            message:
+              type: formatString
+              literal: "Control flow reached placeholder notification branch after HTTP status: {0}"
+              value:
+                variable: httpStatusCode
+          - type: sendEmail
+            to:
+              variable: placeholderRecipient
+            cc: ""
+            subject:
+              type: formatString
+              literal: "SPNet YAML complex HTTP/email sample for {0}"
+              value:
+                variable: currentWebTitle
+            body:
+              type: formatString
+              literal: "<html><body><h2>SPNet YAML complex HTTP/email sample</h2><p>Current web: {0}</p><p>HTTP status: {1}</p><p>Placeholder recipient: {2}</p></body></html>"
+              values:
+                - variable: currentWebTitle
+                - variable: httpStatusCode
+                - variable: placeholderRecipient
+          - type: setStatus
+            status: SPNet complex HTTP/email sample completed OK branch
+        else:
+          - type: writeHistory
+            message:
+              type: formatString
+              literal: "Control flow did not reach expected loop count. HTTP status value: {0}"
+              value:
+                variable: httpStatusCode
+          - type: setStatus
+            status: SPNet complex HTTP/email sample completed non-OK branch

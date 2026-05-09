@@ -31,7 +31,7 @@ $requiredMarkers = @(
     'SetWorkflowStatus'
 )
 
-if ($Workflow -notlike '*workflow.list-actions.yml') {
+if ($Workflow -notlike '*workflow.list-actions.yml' -and $Workflow -notlike '*workflow.email.yml') {
     $requiredMarkers += 'x:Members'
 }
 
@@ -70,6 +70,79 @@ if ($Workflow -like '*workflow.http.yml') {
     }
 
     if ($xaml -like '*literal: GET*') { throw "HTTP request method was not normalized in ${XamlPath}." }
+}
+
+if ($Workflow -like '*workflow.email.yml') {
+    $emailRequiredMarkers = @(
+        'SPNetYamlEmailManual.MTW',
+        'Email',
+        'ExpandInitFormUsers',
+        'BuildCollection',
+        'FormatString',
+        'Subject',
+        'SPNet YAML email smoke test',
+        'Body',
+        '&lt;html&gt;&lt;body&gt;&lt;h1&gt;',
+        'placeholderRecipient',
+        'dynamicSubjectToken',
+        'LookupWorkflowContextProperty',
+        'PropertyName="CurrentWebUrl"',
+        'spnet-workflow-test@example.invalid',
+        'SPNet YAML email sample serialized successfully.'
+    )
+
+    foreach ($marker in $emailRequiredMarkers) {
+        if ($xaml -notlike "*$marker*") { throw "Email golden regression marker missing from ${XamlPath}: $marker" }
+    }
+}
+
+if ($Workflow -like '*workflow.complex-http-email.yml') {
+    $complexHttpEmailRequiredMarkers = @(
+        'SPNetYamlComplexHttpEmailManual.MTW',
+        'CallHTTPWebService',
+        'DynamicValue',
+        'GetDynamicValueProperty',
+        'PropertyName="Title"',
+        'LookupWorkflowContextProperty',
+        'PropertyName="CurrentWebUrl"',
+        '{0}/_api/web?$select=Title',
+        'While',
+        'If',
+        'Email',
+        'ExpandInitFormUsers',
+        'BuildCollection',
+        'FormatString',
+        '&lt;html&gt;&lt;body&gt;&lt;h2&gt;',
+        'currentWebTitle',
+        'httpStatusCode',
+        'placeholderRecipient',
+        'spnet-workflow-test@example.invalid',
+        'SPNet YAML complex HTTP/email sample'
+    )
+
+    foreach ($marker in $complexHttpEmailRequiredMarkers) {
+        if ($xaml -notlike "*$marker*") { throw "Complex HTTP/email golden regression marker missing from ${XamlPath}: $marker" }
+    }
+
+    if ($xaml -like '*literal: GET*') { throw "Complex HTTP/email request method was not normalized in ${XamlPath}." }
+}
+
+if ($Workflow -like '*workflow.task.yml') {
+    $taskRequiredMarkers = @(
+        'SPNetYamlSingleTaskManual.MTW',
+        'SingleTask',
+        'AssignedTo',
+        'SPNet YAML task smoke test',
+        'WaitForTaskCompletion',
+        'WaiveAssignmentEmail',
+        'TaskId',
+        'Outcome',
+        'SPNet YAML single task sample serialized successfully.'
+    )
+
+    foreach ($marker in $taskRequiredMarkers) {
+        if ($xaml -notlike "*$marker*") { throw "Task golden regression marker missing from ${XamlPath}: $marker" }
+    }
 }
 
 if ($Workflow -like '*workflow.list-actions.yml') {

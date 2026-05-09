@@ -95,13 +95,14 @@ namespace SPNet.Workflow.WfSerializer
         public void Save(string path)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? Environment.CurrentDirectory);
-            var serializer = new SerializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).WithTypeConverter(new WorkflowActionYamlTypeConverter()).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull).Build();
+            var serializer = new SerializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).WithTypeConverter(new WorkflowActionYamlTypeConverter()).WithTypeConverter(new ExpressionYamlTypeConverter()).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull).Build();
             File.WriteAllText(path, serializer.Serialize(this));
         }
 
         private static IDeserializer CreateDeserializer() => new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .WithTypeConverter(new WorkflowActionYamlTypeConverter())
+            .WithTypeConverter(new ExpressionYamlTypeConverter())
             .IgnoreUnmatchedProperties()
             .Build();
 
@@ -391,6 +392,47 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    public sealed class SendEmailActionYaml : WorkflowActionYaml
+    {
+        public SendEmailActionYaml() { Type = "sendEmail"; }
+        public ExpressionYaml To { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Cc { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Subject { get; set; } = new ExpressionYaml { Literal = string.Empty };
+        public ExpressionYaml Body { get; set; } = new ExpressionYaml { Literal = string.Empty };
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (To == null || (string.IsNullOrWhiteSpace(To.Variable) && string.IsNullOrWhiteSpace(To.Type) && To.ToString == null && To.Value == null && To.Literal == null)) throw new InvalidOperationException(Type + " action requires 'to'.");
+        }
+    }
+
+    public sealed class SingleTaskActionYaml : WorkflowActionYaml
+    {
+        public SingleTaskActionYaml() { Type = "singleTask"; }
+        public ExpressionYaml AssignedTo { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Title { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Body { get; set; } = new ExpressionYaml { Literal = string.Empty };
+        public ExpressionYaml DueDate { get; set; } = new ExpressionYaml();
+        public ExpressionYaml AssignmentEmailSubject { get; set; } = new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" };
+        public ExpressionYaml AssignmentEmailBody { get; set; } = new ExpressionYaml { Literal = string.Empty };
+        public bool WaitForTaskCompletion { get; set; } = true;
+        public bool WaiveAssignmentEmail { get; set; } = true;
+        public bool WaiveCancelationEmail { get; set; } = true;
+        public string ContentTypeId { get; set; } = "0x0108003365C4474CAE8C42BCE396314E88E51F";
+        public string OutcomeFieldName { get; set; } = "TaskOutcome";
+        public string CompletedStatus { get; set; } = "Completed";
+        public string TaskIdTo { get; set; } = string.Empty;
+        public string OutcomeTo { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (AssignedTo == null || (string.IsNullOrWhiteSpace(AssignedTo.Variable) && string.IsNullOrWhiteSpace(AssignedTo.Type) && AssignedTo.ToString == null && AssignedTo.Value == null && AssignedTo.Literal == null)) throw new InvalidOperationException(Type + " action requires 'assignedTo'.");
+            if (Title == null || (string.IsNullOrWhiteSpace(Title.Variable) && string.IsNullOrWhiteSpace(Title.Type) && Title.ToString == null && Title.Value == null && Title.Literal == null)) throw new InvalidOperationException(Type + " action requires 'title'.");
+        }
+    }
+
     public sealed class GetDynamicValuePropertyActionYaml : WorkflowActionYaml, ITargetedActionYaml
     {
         public GetDynamicValuePropertyActionYaml() { Type = "getDynamicValueProperty"; }
@@ -464,25 +506,27 @@ namespace SPNet.Workflow.WfSerializer
             var yamlObject = rootDeserializer(typeof(ActionYamlSurrogate)) as ActionYamlSurrogate ?? throw new InvalidOperationException("Action YAML is empty.");
             var actionType = (yamlObject.Type ?? string.Empty).ToLowerInvariant();
             WorkflowActionYaml action;
-            if (actionType == "calc") action = new CalcActionYaml { Type = yamlObject.Type ?? string.Empty, LValue = yamlObject.LValue ?? new ExpressionYaml(), RValue = yamlObject.RValue ?? new ExpressionYaml(), Operator = yamlObject.Operator ?? "Add", To = yamlObject.To ?? string.Empty };
+            if (actionType == "calc") action = new CalcActionYaml { Type = yamlObject.Type ?? string.Empty, LValue = yamlObject.LValue ?? new ExpressionYaml(), RValue = yamlObject.RValue ?? new ExpressionYaml(), Operator = yamlObject.Operator ?? "Add", To = ReadString(yamlObject.To) };
             else if (actionType == "writehistory") action = new WriteHistoryActionYaml { Type = yamlObject.Type ?? string.Empty, Message = yamlObject.Message ?? new ExpressionYaml() };
             else if (actionType == "setstatus") action = new SetStatusActionYaml { Type = yamlObject.Type ?? string.Empty, Status = yamlObject.Status ?? string.Empty };
             else if (actionType == "comment") action = new CommentActionYaml { Type = yamlObject.Type ?? string.Empty, Text = yamlObject.Text ?? yamlObject.Message ?? new ExpressionYaml() };
             else if (actionType == "delayfor") action = new DelayForActionYaml { Type = yamlObject.Type ?? string.Empty, Days = yamlObject.Days ?? new ExpressionYaml { Literal = 0 }, Hours = yamlObject.Hours ?? new ExpressionYaml { Literal = 0 }, Minutes = yamlObject.Minutes ?? new ExpressionYaml { Literal = 0 } };
             else if (actionType == "delayuntil") action = new DelayUntilActionYaml { Type = yamlObject.Type ?? string.Empty, Date = yamlObject.Date ?? new ExpressionYaml() };
-            else if (actionType == "assign" || actionType == "setvariable") action = new AssignActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty, Value = yamlObject.Value };
-            else if (actionType == "lookupworkflowcontext" || actionType == "lookupcontextproperty") action = new LookupWorkflowContextActionYaml { Type = yamlObject.Type ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = yamlObject.To ?? string.Empty };
-            else if (actionType == "getcurrentlistid") action = new GetCurrentListIdActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
-            else if (actionType == "getcurrentitemguid") action = new GetCurrentItemGuidActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? string.Empty };
+            else if (actionType == "assign" || actionType == "setvariable") action = new AssignActionYaml { Type = yamlObject.Type ?? string.Empty, To = ReadString(yamlObject.To), Value = yamlObject.Value };
+            else if (actionType == "lookupworkflowcontext" || actionType == "lookupcontextproperty") action = new LookupWorkflowContextActionYaml { Type = yamlObject.Type ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = ReadString(yamlObject.To) };
+            else if (actionType == "getcurrentlistid") action = new GetCurrentListIdActionYaml { Type = yamlObject.Type ?? string.Empty, To = ReadString(yamlObject.To) };
+            else if (actionType == "getcurrentitemguid") action = new GetCurrentItemGuidActionYaml { Type = yamlObject.Type ?? string.Empty, To = ReadString(yamlObject.To) };
             else if (actionType == "setfield") action = new SetFieldActionYaml { Type = yamlObject.Type ?? string.Empty, FieldName = yamlObject.FieldName ?? string.Empty, Value = yamlObject.Value ?? new ExpressionYaml() };
             else if (actionType == "createlistitem") action = new CreateListItemActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, Fields = yamlObject.Fields ?? new Dictionary<string, ExpressionYaml>(StringComparer.OrdinalIgnoreCase), ItemIdTo = yamlObject.ItemIdTo ?? string.Empty, ItemGuidTo = yamlObject.ItemGuidTo ?? string.Empty };
             else if (actionType == "updatelistitem") action = new UpdateListItemActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml(), Fields = yamlObject.Fields ?? new Dictionary<string, ExpressionYaml>(StringComparer.OrdinalIgnoreCase) };
             else if (actionType == "deletelistitem") action = new DeleteListItemActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml() };
-            else if (actionType == "lookuplistitemstringproperty" || actionType == "lookupsplistitemstringproperty") action = new LookupListItemStringPropertyActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml(), FieldName = yamlObject.FieldName ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = yamlObject.To ?? string.Empty };
-            else if (actionType == "lookuplistitemintproperty" || actionType == "lookupsplistitemintproperty") action = new LookupListItemIntPropertyActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml(), FieldName = yamlObject.FieldName ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = yamlObject.To ?? string.Empty };
+            else if (actionType == "lookuplistitemstringproperty" || actionType == "lookupsplistitemstringproperty") action = new LookupListItemStringPropertyActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml(), FieldName = yamlObject.FieldName ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = ReadString(yamlObject.To) };
+            else if (actionType == "lookuplistitemintproperty" || actionType == "lookupsplistitemintproperty") action = new LookupListItemIntPropertyActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = yamlObject.ItemId ?? new ExpressionYaml(), ItemGuid = yamlObject.ItemGuid ?? new ExpressionYaml(), FieldName = yamlObject.FieldName ?? string.Empty, PropertyName = Convert.ToString(yamlObject.PropertyName?.Literal) ?? string.Empty, To = ReadString(yamlObject.To) };
             else if (actionType == "callhttpwebservice" || actionType == "callhttp" || actionType == "http") action = new CallHttpWebServiceActionYaml { Type = yamlObject.Type ?? string.Empty, Address = yamlObject.Address ?? new ExpressionYaml(), RequestType = yamlObject.RequestType ?? new ExpressionYaml { Literal = "GET" }, ResponseStatusCodeTo = yamlObject.ResponseStatusCodeTo ?? yamlObject.StatusCodeTo ?? string.Empty, ResponseContentTo = yamlObject.ResponseContentTo ?? yamlObject.ContentTo ?? string.Empty, ResponseHeadersTo = yamlObject.ResponseHeadersTo ?? yamlObject.HeadersTo ?? string.Empty };
-            else if (actionType == "getdynamicvalueproperty" || actionType == "getdictionaryitem" || actionType == "getdictionaryvalue" || actionType == "getresponseproperty") action = new GetDynamicValuePropertyActionYaml { Type = yamlObject.Type ?? string.Empty, Source = yamlObject.Source ?? yamlObject.From ?? string.Empty, PropertyName = yamlObject.PropertyName ?? yamlObject.Key ?? new ExpressionYaml(), To = yamlObject.To ?? string.Empty };
-            else if (actionType == "lookuprestpropertyname" || actionType == "lookupspgetitempropertynameinrest") action = new LookupRestPropertyNameActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml(), PropertyName = yamlObject.PropertyName ?? new ExpressionYaml(), To = yamlObject.To ?? string.Empty };
+            else if (actionType == "sendemail" || actionType == "email") action = new SendEmailActionYaml { Type = yamlObject.Type ?? string.Empty, To = yamlObject.To ?? new ExpressionYaml(), Cc = yamlObject.Cc ?? new ExpressionYaml { Literal = string.Empty }, Subject = yamlObject.Subject ?? new ExpressionYaml { Literal = string.Empty }, Body = yamlObject.Body ?? yamlObject.BodyExpression ?? new ExpressionYaml { Literal = string.Empty } };
+            else if (actionType == "singletask" || actionType == "task") action = new SingleTaskActionYaml { Type = yamlObject.Type ?? string.Empty, AssignedTo = yamlObject.AssignedTo ?? new ExpressionYaml(), Title = yamlObject.Title ?? new ExpressionYaml(), Body = yamlObject.TaskBody ?? yamlObject.BodyExpression ?? yamlObject.Body ?? new ExpressionYaml { Literal = string.Empty }, DueDate = yamlObject.DueDate ?? new ExpressionYaml(), AssignmentEmailSubject = yamlObject.AssignmentEmailSubject ?? new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" }, AssignmentEmailBody = yamlObject.AssignmentEmailBody ?? new ExpressionYaml(), WaitForTaskCompletion = yamlObject.WaitForTaskCompletion, WaiveAssignmentEmail = yamlObject.WaiveAssignmentEmail, WaiveCancelationEmail = yamlObject.WaiveCancelationEmail, ContentTypeId = yamlObject.ContentTypeId ?? string.Empty, OutcomeFieldName = yamlObject.OutcomeFieldName ?? string.Empty, CompletedStatus = yamlObject.CompletedStatus ?? string.Empty, TaskIdTo = yamlObject.TaskIdTo ?? string.Empty, OutcomeTo = yamlObject.OutcomeTo ?? string.Empty };
+            else if (actionType == "getdynamicvalueproperty" || actionType == "getdictionaryitem" || actionType == "getdictionaryvalue" || actionType == "getresponseproperty") action = new GetDynamicValuePropertyActionYaml { Type = yamlObject.Type ?? string.Empty, Source = yamlObject.Source ?? yamlObject.From ?? string.Empty, PropertyName = yamlObject.PropertyName ?? yamlObject.Key ?? new ExpressionYaml(), To = ReadString(yamlObject.To) };
+            else if (actionType == "lookuprestpropertyname" || actionType == "lookupspgetitempropertynameinrest") action = new LookupRestPropertyNameActionYaml { Type = yamlObject.Type ?? string.Empty, ListId = yamlObject.ListId ?? new ExpressionYaml(), PropertyName = yamlObject.PropertyName ?? new ExpressionYaml(), To = ReadString(yamlObject.To) };
             else if (actionType == "while" || actionType == "loop") action = new WhileActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Actions = yamlObject.Actions ?? new List<WorkflowActionYaml>() };
             else if (actionType == "if") action = new IfActionYaml { Type = yamlObject.Type ?? string.Empty, Condition = yamlObject.Condition ?? new ComparisonExpressionYaml(), Then = yamlObject.Then ?? new List<WorkflowActionYaml>(), Else = yamlObject.Else ?? new List<WorkflowActionYaml>() };
             else throw new InvalidOperationException("Unsupported action type: " + yamlObject.Type);
@@ -557,6 +601,14 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", callHttp.Type); WriteObject(emitter, serializer, "address", callHttp.Address); WriteObject(emitter, serializer, "requestType", callHttp.RequestType); WriteScalar(emitter, "responseStatusCodeTo", callHttp.ResponseStatusCodeTo); WriteScalar(emitter, "responseContentTo", callHttp.ResponseContentTo); WriteScalar(emitter, "responseHeadersTo", callHttp.ResponseHeadersTo);
             }
+            else if (value is SendEmailActionYaml email)
+            {
+                WriteScalar(emitter, "type", email.Type); WriteObject(emitter, serializer, "to", email.To); WriteObject(emitter, serializer, "cc", email.Cc); WriteObject(emitter, serializer, "subject", email.Subject); WriteObject(emitter, serializer, "body", email.Body);
+            }
+            else if (value is SingleTaskActionYaml singleTask)
+            {
+                WriteScalar(emitter, "type", singleTask.Type); WriteObject(emitter, serializer, "assignedTo", singleTask.AssignedTo); WriteObject(emitter, serializer, "title", singleTask.Title); WriteObject(emitter, serializer, "taskBody", singleTask.Body); WriteObject(emitter, serializer, "dueDate", singleTask.DueDate); WriteScalar(emitter, "waitForTaskCompletion", singleTask.WaitForTaskCompletion.ToString()); WriteScalar(emitter, "waiveAssignmentEmail", singleTask.WaiveAssignmentEmail.ToString()); WriteScalar(emitter, "waiveCancelationEmail", singleTask.WaiveCancelationEmail.ToString()); WriteScalar(emitter, "taskIdTo", singleTask.TaskIdTo); WriteScalar(emitter, "outcomeTo", singleTask.OutcomeTo);
+            }
             else if (value is GetDynamicValuePropertyActionYaml dynamicProperty)
             {
                 WriteScalar(emitter, "type", dynamicProperty.Type); WriteScalar(emitter, "source", dynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", dynamicProperty.PropertyName); WriteScalar(emitter, "to", dynamicProperty.To);
@@ -589,13 +641,33 @@ namespace SPNet.Workflow.WfSerializer
             serializer(value ?? new ExpressionYaml());
         }
 
+        private static string ReadString(ExpressionYaml? value) => Convert.ToString(value?.Literal ?? string.Empty) ?? string.Empty;
+
         private sealed class ActionYamlSurrogate
         {
             public string Type { get; set; } = string.Empty;
             public ExpressionYaml LValue { get; set; } = new ExpressionYaml();
             public ExpressionYaml RValue { get; set; } = new ExpressionYaml();
             public string Operator { get; set; } = "Add";
-            public string To { get; set; } = string.Empty;
+            public ExpressionYaml To { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Cc { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Subject { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Body { get; set; } = new ExpressionYaml();
+            public ExpressionYaml BodyExpression { get; set; } = new ExpressionYaml();
+            public ExpressionYaml TaskBody { get; set; } = new ExpressionYaml();
+            public ExpressionYaml AssignedTo { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Title { get; set; } = new ExpressionYaml();
+            public ExpressionYaml DueDate { get; set; } = new ExpressionYaml();
+            public ExpressionYaml AssignmentEmailSubject { get; set; } = new ExpressionYaml();
+            public ExpressionYaml AssignmentEmailBody { get; set; } = new ExpressionYaml();
+            public bool WaitForTaskCompletion { get; set; } = true;
+            public bool WaiveAssignmentEmail { get; set; } = true;
+            public bool WaiveCancelationEmail { get; set; } = true;
+            public string ContentTypeId { get; set; } = string.Empty;
+            public string OutcomeFieldName { get; set; } = string.Empty;
+            public string CompletedStatus { get; set; } = string.Empty;
+            public string TaskIdTo { get; set; } = string.Empty;
+            public string OutcomeTo { get; set; } = string.Empty;
             public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
             public ExpressionYaml Key { get; set; } = new ExpressionYaml();
             public string FieldName { get; set; } = string.Empty;
@@ -678,7 +750,44 @@ namespace SPNet.Workflow.WfSerializer
         public ExpressionYaml? ItemGuid { get; set; }
         /// <summary>Gets or sets a nested expression value used by expression wrappers such as formatting and string conversion.</summary>
         public ExpressionYaml? Value { get; set; }
+        /// <summary>Gets or sets ordered nested expression values used by formatString.</summary>
+        public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
         /// <summary>Gets or sets a nested expression to convert to string.</summary>
         public new ExpressionYaml? ToString { get; set; }
+    }
+
+    public sealed class ExpressionYamlTypeConverter : IYamlTypeConverter
+    {
+        public bool Accepts(Type type) => type == typeof(ExpressionYaml);
+
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        {
+            if (parser.Current is Scalar scalar)
+            {
+                parser.MoveNext();
+                return new ExpressionYaml { Literal = scalar.Value ?? string.Empty };
+            }
+
+            return rootDeserializer(typeof(ExpressionYamlSurrogate)) is ExpressionYamlSurrogate s
+                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), ToString = s.ToString }
+                : new ExpressionYaml();
+        }
+
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer) => serializer(value);
+
+        private sealed class ExpressionYamlSurrogate
+        {
+            public object? Literal { get; set; }
+            public string Variable { get; set; } = string.Empty;
+            public string Type { get; set; } = string.Empty;
+            public string PropertyName { get; set; } = string.Empty;
+            public string FieldName { get; set; } = string.Empty;
+            public ExpressionYaml? ListId { get; set; }
+            public ExpressionYaml? ItemId { get; set; }
+            public ExpressionYaml? ItemGuid { get; set; }
+            public ExpressionYaml? Value { get; set; }
+            public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
+            public new ExpressionYaml? ToString { get; set; }
+        }
     }
 }
