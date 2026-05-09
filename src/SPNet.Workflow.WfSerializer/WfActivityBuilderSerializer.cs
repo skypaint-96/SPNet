@@ -17,7 +17,7 @@ namespace SPNet.Workflow.WfSerializer
     /// <summary>
     /// Builds SharePoint Designer-compatible WF activity trees from SPNet YAML and serializes them to XAML.
     /// </summary>
-    public static class WfActivityBuilderSerializer
+    public static partial class WfActivityBuilderSerializer
     {
         private const string SharePointProxyAssemblyName = "Microsoft.SharePoint.WorkflowServices.Activities.Proxy.dll";
         private const string MicrosoftActivitiesProxyAssemblyName = "Microsoft.Activities.Proxy.dll";
@@ -56,12 +56,9 @@ namespace SPNet.Workflow.WfSerializer
                 var sharePointAssembly = LoadRequiredAssembly(cacheFolder, SharePointProxyAssemblyName);
                 var microsoftActivitiesAssembly = LoadRequiredAssembly(cacheFolder, MicrosoftActivitiesProxyAssemblyName);
 
-                var calcType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Calc");
-                var writeToHistoryType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.WriteToHistory");
-                var toStringType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToString");
-                var expressionTypes = new ComparisonExpressionTypes(microsoftActivitiesAssembly);
+                var proxyTypes = new ProxyActivityTypeCatalog(sharePointAssembly, microsoftActivitiesAssembly);
 
-                var builder = BuildProofOfConceptWorkflow(options.WorkflowName, GetDottedWorkflowClassName(options.WorkflowName), calcType, writeToHistoryType, toStringType);
+                var builder = new WorkflowActivityBuilder(BuildAction).BuildProofOfConcept(options.WorkflowName, GetDottedWorkflowClassName(options.WorkflowName), proxyTypes.Calc, proxyTypes.WriteToHistory, proxyTypes.ToStringExpression);
                 File.WriteAllText(outputPath, AddSharePointDesignerMetadata(SerializeBuilder(builder), options.WorkflowName));
             }
         }
@@ -84,41 +81,6 @@ namespace SPNet.Workflow.WfSerializer
         /// </summary>
         /// <param name="inputXamlPath">Path to the workflow XAML file.</param>
         /// <param name="outputYamlPath">Path where the exported YAML should be written.</param>
-        public static void ExportWorkflowYaml(string inputXamlPath, string outputYamlPath)
-        {
-            if (!File.Exists(inputXamlPath)) throw new FileNotFoundException("Input XAML not found: " + inputXamlPath, inputXamlPath);
-            var document = XDocument.Parse(File.ReadAllText(inputXamlPath));
-            var root = document.Root ?? throw new InvalidOperationException("Workflow XAML has no root element.");
-            var className = (string?)root.Attribute(XamlNamespace + "Class") ?? "ExportedWorkflow.MTW";
-            var name = className.EndsWith(SpdTechnicalClassSuffix, StringComparison.OrdinalIgnoreCase) ? className.Substring(0, className.Length - SpdTechnicalClassSuffix.Length) : className;
-            var workflow = new WorkflowYaml { Name = name, TechnicalName = className };
-            foreach (var property in root.Element(XamlNamespace + "Members")?.Elements(XamlNamespace + "Property") ?? Enumerable.Empty<XElement>())
-            {
-                workflow.Variables.Add(new VariableYaml { Name = (string?)property.Attribute("Name") ?? "variable", Type = ((string?)property.Attribute("Type") ?? string.Empty).Contains("Double") ? "Double" : "String" });
-            }
-            var stageElements = document.Descendants(ActivitiesNamespace + "Sequence").Where(e => !string.IsNullOrWhiteSpace((string?)e.Attribute("DisplayName"))).ToList();
-            foreach (var stageElement in stageElements.Take(20))
-            {
-                var stage = new StageYaml { Name = (string?)stageElement.Attribute("DisplayName") ?? "Stage" };
-                foreach (var child in stageElement.Elements().Where(e => e.Name.Namespace == SharePointNamespace))
-                {
-                    if (child.Name.LocalName == "Calc") stage.Actions.Add(new CalcActionYaml { To = ReadCalcTarget(child), Operator = "Add", LValue = new ExpressionYaml { Literal = "<exported>" }, RValue = new ExpressionYaml { Literal = "<exported>" } });
-                    else if (child.Name.LocalName == "WriteToHistory") stage.Actions.Add(new WriteHistoryActionYaml { Message = new ExpressionYaml { Literal = "<exported expression>" } });
-                    else if (child.Name.LocalName == "SetWorkflowStatus") stage.Actions.Add(new SetStatusActionYaml { Status = (string?)child.Attribute("Status") ?? "<exported>" });
-                }
-                if (stage.Actions.Count > 0) workflow.Stages.Add(stage);
-            }
-            workflow.ExportWarnings.Add("Partial structural export: supported actions are listed, but expressions may be placeholders when WF deserialization is not used.");
-            if (workflow.Stages.Count == 0) workflow.Stages.Add(new StageYaml { Name = "Unsupported XAML", Actions = new System.Collections.Generic.List<WorkflowActionYaml>() });
-            workflow.Save(outputYamlPath);
-        }
-
-        private static string ReadCalcTarget(XElement calc)
-        {
-            var text = calc.ToString(SaveOptions.DisableFormatting);
-            var marker = "ArgumentReference";
-            return text.Contains(marker) ? "calc" : "<exported>";
-        }
 
         private static ActivityBuilder BuildWorkflowFromYaml(WorkflowYaml workflow, string cacheFolder)
         {
@@ -128,601 +90,68 @@ namespace SPNet.Workflow.WfSerializer
                 LoadManagedDlls(resolvedCacheFolder);
                 var sharePointAssembly = LoadRequiredAssembly(resolvedCacheFolder, SharePointProxyAssemblyName);
                 var microsoftActivitiesAssembly = LoadRequiredAssembly(resolvedCacheFolder, MicrosoftActivitiesProxyAssemblyName);
-                var calcType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Calc");
-                var writeToHistoryType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.WriteToHistory");
-                var setStatusType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.SetWorkflowStatus");
-                var commentType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Comment");
-                var delayForType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.DelayFor");
-                var delayUntilType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.DelayUntil");
-                var lookupWorkflowContextType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupWorkflowContextProperty");
-                var getCurrentListIdType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.GetCurrentListId");
-                var getCurrentItemGuidType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.GetCurrentItemGuid");
-                var setFieldType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.SetField");
-                var createListItemType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.CreateListItem");
-                var updateListItemType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.UpdateListItem");
-                var deleteListItemType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.DeleteListItem");
-                var lookupListItemStringPropertyType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemStringProperty");
-                var lookupListItemIntPropertyType = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemIntProperty");
-                var callHttpWebServiceType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.CallHTTPWebService");
-                var emailType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Email");
-                var expandInitFormUsersType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.ExpandInitFormUsers");
-                var singleTaskType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.SingleTask");
-                var lookupRestPropertyNameType = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemPropertyNameInREST");
-                var getDynamicValuePropertyType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.GetDynamicValueProperty`1").MakeGenericType(typeof(string));
-                var toStringType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToString");
-                var dynamicValueType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.DynamicValue");
-                var expressionTypes = new ComparisonExpressionTypes(microsoftActivitiesAssembly);
-                var buildDictionaryType = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildDictionary`2").MakeGenericType(typeof(string), typeof(object));
-                var valueExpressionTypes = new ValueExpressionTypes(toStringType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, lookupListItemStringPropertyType, buildDictionaryType);
+                var proxyTypes = new ProxyActivityTypeCatalog(sharePointAssembly, microsoftActivitiesAssembly);
+                var valueExpressionTypes = proxyTypes.CreateValueExpressionTypes();
 
-                var variableTypes = workflow.Variables?.ToDictionary(v => v.Name, v => MapVariableType(v.Type), StringComparer.OrdinalIgnoreCase) ?? new System.Collections.Generic.Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<CalcActionYaml>().Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(double);
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<LookupListItemStringPropertyActionYaml>().Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(string);
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<LookupListItemIntPropertyActionYaml>().Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(int);
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<CallHttpWebServiceActionYaml>().SelectMany(a => new[] { a.ResponseContentTo, a.ResponseHeadersTo }).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = dynamicValueType;
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<GetDynamicValuePropertyActionYaml>().Select(a => a.To).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(string);
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<SingleTaskActionYaml>().Select(a => a.TaskIdTo).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(string);
-                foreach (var target in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<SingleTaskActionYaml>().Select(a => a.OutcomeTo).Where(t => !string.IsNullOrWhiteSpace(t) && !variableTypes.ContainsKey(t))) variableTypes[target] = typeof(int);
-                if (workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<CallHttpWebServiceActionYaml>().Any())
-                {
-                    if (!variableTypes.ContainsKey(SpdEmptyDynamicValueArgumentName)) variableTypes[SpdEmptyDynamicValueArgumentName] = dynamicValueType;
-                    if (!variableTypes.ContainsKey(SpdRequestHeadersArgumentName)) variableTypes[SpdRequestHeadersArgumentName] = dynamicValueType;
-                }
+                var variableTypes = WorkflowVariableTypeInferer.Infer(workflow, proxyTypes.DynamicValue, SpdEmptyDynamicValueArgumentName, SpdRequestHeadersArgumentName);
                 ValidateAssignments(workflow, variableTypes);
 
-                var flowchart = new Flowchart();
-                FlowStep previous = null;
-                foreach (var stageModel in workflow.Stages)
-                {
-                    var sequence = new Sequence { DisplayName = string.IsNullOrWhiteSpace(stageModel.Name) ? "Stage" : stageModel.Name };
-                    foreach (var action in stageModel.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(action, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, createListItemType, updateListItemType, deleteListItemType, lookupListItemStringPropertyType, lookupListItemIntPropertyType, callHttpWebServiceType, emailType, expandInitFormUsersType, singleTaskType, lookupRestPropertyNameType, getDynamicValuePropertyType, dynamicValueType, valueExpressionTypes, expressionTypes, variableTypes));
-                    var step = new FlowStep { Action = sequence };
-                    flowchart.Nodes.Add(step);
-                    if (flowchart.StartNode == null) flowchart.StartNode = step;
-                    if (previous != null) previous.Next = step;
-                    previous = step;
-                }
-
-                var outerSequence = new Sequence { DisplayName = workflow.Name };
-                flowchart.DisplayName = workflow.Name;
-                outerSequence.Activities.Add(flowchart);
-                var builder = new ActivityBuilder { Name = string.IsNullOrWhiteSpace(workflow.TechnicalName) ? GetDottedWorkflowClassName(workflow.Name) : workflow.TechnicalName, Implementation = outerSequence };
-                foreach (var variable in variableTypes)
-                {
-                    builder.Properties.Add(new DynamicActivityProperty { Name = variable.Key, Type = typeof(InArgument<>).MakeGenericType(variable.Value) });
-                }
-                return builder;
+                var buildContext = new WorkflowActivityBuildContext(proxyTypes.CreateBuildContextTypes(), valueExpressionTypes, proxyTypes.ComparisonExpressionTypes, proxyTypes.DynamicValue, variableTypes);
+                return new WorkflowActivityBuilder(BuildAction).Build(workflow, buildContext);
             }
         }
 
-        private static Activity BuildAction(WorkflowActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, Type createListItemType, Type updateListItemType, Type deleteListItemType, Type lookupListItemStringPropertyType, Type lookupListItemIntPropertyType, Type callHttpWebServiceType, Type emailType, Type expandInitFormUsersType, Type singleTaskType, Type lookupRestPropertyNameType, Type getDynamicValuePropertyType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildAction(WorkflowActionYaml action, WorkflowActivityBuildContext context)
         {
-            if (action is CalcActionYaml calcAction) return BuildCalc(calcAction, calcType, valueExpressionTypes);
-            if (action is WriteHistoryActionYaml historyAction) return BuildWriteHistory(historyAction, writeToHistoryType, valueExpressionTypes);
-            if (action is SetStatusActionYaml statusAction) return BuildSetStatus(statusAction, setStatusType);
-            if (action is CommentActionYaml commentAction) return BuildComment(commentAction, commentType, valueExpressionTypes);
-            if (action is DelayForActionYaml delayForAction) return BuildDelayFor(delayForAction, delayForType, valueExpressionTypes);
-            if (action is DelayUntilActionYaml delayUntilAction) return BuildDelayUntil(delayUntilAction, delayUntilType, valueExpressionTypes);
-            if (action is AssignActionYaml assignAction) return BuildAssign(assignAction, valueExpressionTypes, variableTypes);
-            if (action is LookupWorkflowContextActionYaml contextAction) return BuildLookupWorkflowContext(contextAction, lookupWorkflowContextType);
-            if (action is GetCurrentListIdActionYaml listIdAction) return BuildGetCurrentListId(listIdAction, getCurrentListIdType);
-            if (action is GetCurrentItemGuidActionYaml itemGuidAction) return BuildGetCurrentItemGuid(itemGuidAction, getCurrentItemGuidType);
-            if (action is SetFieldActionYaml setFieldAction) return BuildSetField(setFieldAction, setFieldType, valueExpressionTypes);
-            if (action is CreateListItemActionYaml createListItemAction) return BuildCreateListItem(createListItemAction, createListItemType, valueExpressionTypes);
-            if (action is UpdateListItemActionYaml updateListItemAction) return BuildUpdateListItem(updateListItemAction, updateListItemType, valueExpressionTypes);
-            if (action is DeleteListItemActionYaml deleteListItemAction) return BuildDeleteListItem(deleteListItemAction, deleteListItemType, valueExpressionTypes);
-            if (action is LookupListItemStringPropertyActionYaml lookupStringAction) return BuildLookupListItemStringProperty(lookupStringAction, lookupListItemStringPropertyType, valueExpressionTypes, variableTypes);
-            if (action is LookupListItemIntPropertyActionYaml lookupIntAction) return BuildLookupListItemIntProperty(lookupIntAction, lookupListItemIntPropertyType, valueExpressionTypes, variableTypes);
-            if (action is CallHttpWebServiceActionYaml httpAction) return BuildCallHttpWebService(httpAction, callHttpWebServiceType, dynamicValueType, valueExpressionTypes);
-            if (action is SendEmailActionYaml emailAction) return BuildSendEmail(emailAction, emailType, expandInitFormUsersType, valueExpressionTypes);
-            if (action is SingleTaskActionYaml singleTaskAction) return BuildSingleTask(singleTaskAction, singleTaskType, valueExpressionTypes);
-            if (action is LookupRestPropertyNameActionYaml restPropertyAction) return BuildLookupRestPropertyName(restPropertyAction, lookupRestPropertyNameType, valueExpressionTypes);
-            if (action is GetDynamicValuePropertyActionYaml dynamicPropertyAction) return BuildGetDynamicValueProperty(dynamicPropertyAction, getDynamicValuePropertyType, dynamicValueType, valueExpressionTypes, variableTypes);
-            if (action is WhileActionYaml whileAction) return BuildWhile(whileAction, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, createListItemType, updateListItemType, deleteListItemType, lookupListItemStringPropertyType, lookupListItemIntPropertyType, callHttpWebServiceType, emailType, expandInitFormUsersType, singleTaskType, lookupRestPropertyNameType, getDynamicValuePropertyType, dynamicValueType, valueExpressionTypes, expressionTypes, variableTypes);
-            if (action is IfActionYaml ifAction) return BuildIf(ifAction, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, createListItemType, updateListItemType, deleteListItemType, lookupListItemStringPropertyType, lookupListItemIntPropertyType, callHttpWebServiceType, emailType, expandInitFormUsersType, singleTaskType, lookupRestPropertyNameType, getDynamicValuePropertyType, dynamicValueType, valueExpressionTypes, expressionTypes, variableTypes);
+            if (action == null) throw new ArgumentNullException(nameof(action));
+            if (context == null) throw new ArgumentNullException(nameof(context));
+            if (ActionBuilders.TryGetValue(action.GetType(), out var builder)) return builder(action, context);
             throw new InvalidOperationException("Unsupported action type: " + action.Type);
         }
 
-        private static Activity BuildWhile(WhileActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, Type createListItemType, Type updateListItemType, Type deleteListItemType, Type lookupListItemStringPropertyType, Type lookupListItemIntPropertyType, Type callHttpWebServiceType, Type emailType, Type expandInitFormUsersType, Type singleTaskType, Type lookupRestPropertyNameType, Type getDynamicValuePropertyType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private delegate Activity ActionBuilder(WorkflowActionYaml action, WorkflowActivityBuildContext context);
+
+        private static readonly IReadOnlyDictionary<Type, ActionBuilder> ActionBuilders = CreateActionBuilders();
+
+        private static IReadOnlyDictionary<Type, ActionBuilder> CreateActionBuilders()
         {
-            return new While
-            {
-                DisplayName = string.Equals(action.Type, "loop", StringComparison.OrdinalIgnoreCase) ? "loop" : "while",
-                Condition = BuildBooleanExpression(action.Condition, valueExpressionTypes, expressionTypes),
-                Body = BuildSequence(action.Actions, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, createListItemType, updateListItemType, deleteListItemType, lookupListItemStringPropertyType, lookupListItemIntPropertyType, callHttpWebServiceType, emailType, expandInitFormUsersType, singleTaskType, lookupRestPropertyNameType, getDynamicValuePropertyType, dynamicValueType, valueExpressionTypes, expressionTypes, variableTypes)
-            };
+            var builders = new Dictionary<Type, ActionBuilder>();
+            Register<CalcActionYaml>(builders, (action, context) => BuildCalc(action, context.GetProxyActivityType("Calc"), context.ValueExpressionTypes));
+            Register<WriteHistoryActionYaml>(builders, (action, context) => BuildWriteHistory(action, context.GetProxyActivityType("WriteToHistory"), context.ValueExpressionTypes));
+            Register<SetStatusActionYaml>(builders, (action, context) => BuildSetStatus(action, context.GetProxyActivityType("SetWorkflowStatus")));
+            Register<CommentActionYaml>(builders, (action, context) => BuildComment(action, context.GetProxyActivityType("Comment"), context.ValueExpressionTypes));
+            Register<DelayForActionYaml>(builders, (action, context) => BuildDelayFor(action, context.GetProxyActivityType("DelayFor"), context.ValueExpressionTypes));
+            Register<DelayUntilActionYaml>(builders, (action, context) => BuildDelayUntil(action, context.GetProxyActivityType("DelayUntil"), context.ValueExpressionTypes));
+            Register<AssignActionYaml>(builders, (action, context) => BuildAssign(action, context.ValueExpressionTypes, context.VariableTypes));
+            Register<LookupWorkflowContextActionYaml>(builders, (action, context) => BuildLookupWorkflowContext(action, context.GetProxyActivityType("LookupWorkflowContextProperty")));
+            Register<GetCurrentListIdActionYaml>(builders, (action, context) => BuildGetCurrentListId(action, context.GetProxyActivityType("GetCurrentListId")));
+            Register<GetCurrentItemGuidActionYaml>(builders, (action, context) => BuildGetCurrentItemGuid(action, context.GetProxyActivityType("GetCurrentItemGuid")));
+            Register<SetFieldActionYaml>(builders, (action, context) => BuildSetField(action, context.GetProxyActivityType("SetField"), context.ValueExpressionTypes));
+            Register<CreateListItemActionYaml>(builders, (action, context) => BuildCreateListItem(action, context.GetProxyActivityType("CreateListItem"), context.ValueExpressionTypes));
+            Register<UpdateListItemActionYaml>(builders, (action, context) => BuildUpdateListItem(action, context.GetProxyActivityType("UpdateListItem"), context.ValueExpressionTypes));
+            Register<DeleteListItemActionYaml>(builders, (action, context) => BuildDeleteListItem(action, context.GetProxyActivityType("DeleteListItem"), context.ValueExpressionTypes));
+            Register<LookupListItemStringPropertyActionYaml>(builders, (action, context) => BuildLookupListItemStringProperty(action, context.GetProxyActivityType("LookupSPListItemStringProperty"), context.ValueExpressionTypes, context.VariableTypes));
+            Register<LookupListItemIntPropertyActionYaml>(builders, (action, context) => BuildLookupListItemIntProperty(action, context.GetOptionalProxyActivityType("LookupSPListItemIntProperty"), context.ValueExpressionTypes, context.VariableTypes));
+            Register<CallHttpWebServiceActionYaml>(builders, (action, context) => BuildCallHttpWebService(action, context.GetProxyActivityType("CallHTTPWebService"), context.DynamicValueType, context.ValueExpressionTypes));
+            Register<SendEmailActionYaml>(builders, (action, context) => BuildSendEmail(action, context.GetProxyActivityType("Email"), context.GetProxyActivityType("ExpandInitFormUsers"), context.ValueExpressionTypes));
+            Register<SingleTaskActionYaml>(builders, (action, context) => BuildSingleTask(action, context.GetProxyActivityType("SingleTask"), context.ValueExpressionTypes));
+            Register<LookupRestPropertyNameActionYaml>(builders, (action, context) => BuildLookupRestPropertyName(action, context.GetProxyActivityType("LookupSPListItemPropertyNameInREST"), context.ValueExpressionTypes));
+            Register<GetDynamicValuePropertyActionYaml>(builders, (action, context) => BuildGetDynamicValueProperty(action, context.GetProxyActivityType("GetDynamicValueProperty"), context.DynamicValueType, context.ValueExpressionTypes, context.VariableTypes));
+            Register<WhileActionYaml>(builders, BuildWhile);
+            Register<IfActionYaml>(builders, BuildIf);
+            return builders;
         }
 
-        private static Activity BuildIf(IfActionYaml action, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, Type createListItemType, Type updateListItemType, Type deleteListItemType, Type lookupListItemStringPropertyType, Type lookupListItemIntPropertyType, Type callHttpWebServiceType, Type emailType, Type expandInitFormUsersType, Type singleTaskType, Type lookupRestPropertyNameType, Type getDynamicValuePropertyType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static void Register<TAction>(IDictionary<Type, ActionBuilder> builders, Func<TAction, WorkflowActivityBuildContext, Activity> builder)
+            where TAction : WorkflowActionYaml
         {
-            return new If
-            {
-                DisplayName = "if",
-                Condition = BuildBooleanExpression(action.Condition, valueExpressionTypes, expressionTypes),
-                Then = BuildSequence(action.Then, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, createListItemType, updateListItemType, deleteListItemType, lookupListItemStringPropertyType, lookupListItemIntPropertyType, callHttpWebServiceType, emailType, expandInitFormUsersType, singleTaskType, lookupRestPropertyNameType, getDynamicValuePropertyType, dynamicValueType, valueExpressionTypes, expressionTypes, variableTypes),
-                Else = action.Else == null || action.Else.Count == 0 ? null : BuildSequence(action.Else, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, createListItemType, updateListItemType, deleteListItemType, lookupListItemStringPropertyType, lookupListItemIntPropertyType, callHttpWebServiceType, emailType, expandInitFormUsersType, singleTaskType, lookupRestPropertyNameType, getDynamicValuePropertyType, dynamicValueType, valueExpressionTypes, expressionTypes, variableTypes)
-            };
+            builders.Add(typeof(TAction), (action, context) => builder((TAction)action, context));
         }
 
-        private static Sequence BuildSequence(System.Collections.Generic.IEnumerable<WorkflowActionYaml> actions, Type calcType, Type writeToHistoryType, Type setStatusType, Type commentType, Type delayForType, Type delayUntilType, Type lookupWorkflowContextType, Type getCurrentListIdType, Type getCurrentItemGuidType, Type setFieldType, Type createListItemType, Type updateListItemType, Type deleteListItemType, Type lookupListItemStringPropertyType, Type lookupListItemIntPropertyType, Type callHttpWebServiceType, Type emailType, Type expandInitFormUsersType, Type singleTaskType, Type lookupRestPropertyNameType, Type getDynamicValuePropertyType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        public static bool CanBuildActionForTest(Type actionType)
         {
-            var sequence = new Sequence();
-            foreach (var child in actions ?? Enumerable.Empty<WorkflowActionYaml>()) sequence.Activities.Add(BuildAction(child, calcType, writeToHistoryType, setStatusType, commentType, delayForType, delayUntilType, lookupWorkflowContextType, getCurrentListIdType, getCurrentItemGuidType, setFieldType, createListItemType, updateListItemType, deleteListItemType, lookupListItemStringPropertyType, lookupListItemIntPropertyType, callHttpWebServiceType, emailType, expandInitFormUsersType, singleTaskType, lookupRestPropertyNameType, getDynamicValuePropertyType, dynamicValueType, valueExpressionTypes, expressionTypes, variableTypes));
-            return sequence;
-        }
-
-        private static Activity BuildLookupListItemStringProperty(LookupListItemStringPropertyActionYaml action, Type lookupType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
-        {
-            ValidateLookupTarget(action, typeof(string), variableTypes);
-            var lookup = BuildLookupListItemPropertyBase(action, lookupType, valueExpressionTypes);
-            SetProperty(lookup, "Result", new OutArgument<string>(new ArgumentReference<string>(action.To)));
-            return (Activity)lookup;
-        }
-
-        private static Activity BuildLookupListItemIntProperty(LookupListItemIntPropertyActionYaml action, Type lookupType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
-        {
-            if (lookupType == null) throw new InvalidOperationException(action.Type + " is not supported by the local SharePoint Designer proxy assembly; LookupSPListItemIntProperty was not found.");
-            ValidateLookupTarget(action, typeof(int), variableTypes);
-            var lookup = BuildLookupListItemPropertyBase(action, lookupType, valueExpressionTypes);
-            SetProperty(lookup, "Result", new OutArgument<int>(new ArgumentReference<int>(action.To)));
-            return (Activity)lookup;
-        }
-
-        private static object BuildLookupListItemPropertyBase(LookupListItemPropertyActionYaml action, Type lookupType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var lookup = Create(lookupType);
-            SetProperty(lookup, "ListId", ToInArgument<Guid>(action.ListId, valueExpressionTypes));
-            SetListItemIdentity(lookup, action, valueExpressionTypes);
-            SetProperty(lookup, "PropertyName", new InArgument<string>(string.IsNullOrWhiteSpace(action.PropertyName) ? action.FieldName : action.PropertyName));
-            return lookup;
-        }
-
-        private static void ValidateLookupTarget(LookupListItemPropertyActionYaml action, Type expectedType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
-        {
-            if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + action.To);
-            if (targetType != expectedType) throw new InvalidOperationException(action.Type + " target variable must be " + expectedType.Name + ": " + action.To);
-        }
-
-        private static Activity BuildCreateListItem(CreateListItemActionYaml action, Type createListItemType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var create = Create(createListItemType);
-            SetProperty(create, "ListId", ToInArgument<Guid>(action.ListId, valueExpressionTypes));
-            SetProperty(create, "ListItemProperties", ToDictionaryArgument(action.Fields, valueExpressionTypes));
-            if (!string.IsNullOrWhiteSpace(action.ItemGuidTo)) SetProperty(create, "ItemGuid", new InOutArgument<Guid>(new ArgumentReference<Guid>(action.ItemGuidTo)));
-            if (!string.IsNullOrWhiteSpace(action.ItemIdTo)) SetProperty(create, "ItemId", new OutArgument<int>(new ArgumentReference<int>(action.ItemIdTo)));
-            return (Activity)create;
-        }
-
-        private static Activity BuildUpdateListItem(UpdateListItemActionYaml action, Type updateListItemType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var update = Create(updateListItemType);
-            SetProperty(update, "ListId", ToInArgument<Guid>(action.ListId, valueExpressionTypes));
-            SetListItemIdentity(update, action, valueExpressionTypes);
-            SetProperty(update, "ListItemProperties", ToDictionaryArgument(action.Fields, valueExpressionTypes));
-            return (Activity)update;
-        }
-
-        private static Activity BuildDeleteListItem(DeleteListItemActionYaml action, Type deleteListItemType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var delete = Create(deleteListItemType);
-            SetProperty(delete, "ListId", ToInArgument<Guid>(action.ListId, valueExpressionTypes));
-            SetListItemIdentity(delete, action, valueExpressionTypes);
-            return (Activity)delete;
-        }
-
-        private static void SetListItemIdentity(object activity, TargetedListItemActionYaml action, ValueExpressionTypes valueExpressionTypes)
-        {
-            if (HasExpression(action.ItemGuid)) SetProperty(activity, "ItemGuid", ToInArgument<Guid>(action.ItemGuid, valueExpressionTypes));
-            if (HasExpression(action.ItemId)) SetProperty(activity, "ItemId", ToInArgument<int>(action.ItemId, valueExpressionTypes));
-        }
-
-        private static InArgument<IDictionary<string, object>> ToDictionaryArgument(Dictionary<string, ExpressionYaml> fields, ValueExpressionTypes valueExpressionTypes)
-        {
-            var buildDictionary = Create(valueExpressionTypes.BuildDictionary);
-            SetProperty(buildDictionary, "Dictionary", new InArgument<IDictionary<string, object>>());
-            var values = valueExpressionTypes.BuildDictionary.GetProperty("Values", BindingFlags.Instance | BindingFlags.Public)?.GetValue(buildDictionary, null) ?? throw new InvalidOperationException("BuildDictionary does not expose Values.");
-            var addMethod = values.GetType().GetMethods().First(m => m.Name == "Add" && m.GetParameters().Length == 2);
-            foreach (var field in fields ?? new Dictionary<string, ExpressionYaml>())
-            {
-                addMethod.Invoke(values, new object[] { field.Key, ToObjectFieldArgument(field.Value, valueExpressionTypes) });
-            }
-            return new InArgument<IDictionary<string, object>>((Activity<IDictionary<string, object>>)buildDictionary);
-        }
-
-        private static InArgument<object> ToObjectFieldArgument(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
-        {
-            expression = expression ?? new ExpressionYaml();
-            return new InArgument<object>((Activity<object>)new Cast<string, object> { Operand = ToInArgument<string>(expression, valueExpressionTypes) });
-        }
-
-        private static bool HasExpression(ExpressionYaml expression) => expression != null && (!string.IsNullOrWhiteSpace(expression.Variable) || !string.IsNullOrWhiteSpace(expression.Type) || expression.ToString != null || expression.Value != null || expression.Literal != null);
-
-        private static Activity BuildGetDynamicValueProperty(GetDynamicValuePropertyActionYaml action, Type getDynamicValuePropertyType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
-        {
-            if (!variableTypes.TryGetValue(action.Source ?? string.Empty, out var sourceType)) throw new InvalidOperationException(action.Type + " action source variable is not declared: " + action.Source);
-            if (sourceType != dynamicValueType) throw new InvalidOperationException(action.Type + " action source must be a DynamicValue response variable: " + action.Source);
-            if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + action.To);
-            if (targetType != typeof(string)) throw new InvalidOperationException(action.Type + " currently supports String targets only: " + action.To);
-
-            var lookup = Create(getDynamicValuePropertyType);
-            ((Activity)lookup).DisplayName = "Get DynamicValue property";
-            SetProperty(lookup, "Source", Activator.CreateInstance(typeof(InArgument<>).MakeGenericType(dynamicValueType), Activator.CreateInstance(typeof(ArgumentValue<>).MakeGenericType(dynamicValueType), action.Source)!)!);
-            SetProperty(lookup, "PropertyName", ToInArgument<string>(action.PropertyName, valueExpressionTypes));
-            SetProperty(lookup, "Result", new OutArgument<string>(new ArgumentReference<string>(action.To)));
-            return (Activity)lookup;
-        }
-
-        private static Activity BuildCallHttpWebService(CallHttpWebServiceActionYaml action, Type callHttpWebServiceType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var call = Create(callHttpWebServiceType);
-            SetProperty(call, "Address", ToInArgument<string>(action.Address, valueExpressionTypes));
-            SetProperty(call, "RequestType", ToInArgument<string>(NormalizeHttpRequestType(action.RequestType), valueExpressionTypes));
-            SetDynamicInArgumentReferenceIfWritable(call, "RequestContent", dynamicValueType, SpdEmptyDynamicValueArgumentName);
-            SetDynamicInArgumentReferenceIfWritable(call, "RequestHeaders", dynamicValueType, SpdRequestHeadersArgumentName);
-            if (!string.IsNullOrWhiteSpace(action.ResponseStatusCodeTo)) SetProperty(call, "ResponseStatusCode", new OutArgument<string>(new ArgumentReference<string>(action.ResponseStatusCodeTo)));
-            if (!string.IsNullOrWhiteSpace(action.ResponseContentTo)) SetProperty(call, "ResponseContent", CreateOutArgument(dynamicValueType, action.ResponseContentTo));
-            if (!string.IsNullOrWhiteSpace(action.ResponseHeadersTo)) SetProperty(call, "ResponseHeaders", CreateOutArgument(dynamicValueType, action.ResponseHeadersTo));
-            return (Activity)call;
-        }
-
-        private static Activity BuildSendEmail(SendEmailActionYaml action, Type emailType, Type expandInitFormUsersType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var email = Create(emailType);
-            SetProperty(email, "To", ToExpandedUserCollectionArgument(action.To, expandInitFormUsersType, valueExpressionTypes));
-            SetProperty(email, "CC", ToExpandedUserCollectionArgument(action.Cc ?? new ExpressionYaml { Literal = string.Empty }, expandInitFormUsersType, valueExpressionTypes));
-            SetProperty(email, "Subject", ToInArgument<string>(action.Subject ?? new ExpressionYaml { Literal = string.Empty }, valueExpressionTypes));
-            SetProperty(email, "Body", ToInArgument<string>(action.Body ?? new ExpressionYaml { Literal = string.Empty }, valueExpressionTypes));
-            return (Activity)email;
-        }
-
-        private static InArgument<System.Collections.ObjectModel.Collection<string>> ToExpandedUserCollectionArgument(ExpressionYaml expression, Type expandInitFormUsersType, ValueExpressionTypes valueExpressionTypes)
-        {
-            expression = expression ?? new ExpressionYaml { Literal = string.Empty };
-            var value = Convert.ToString(expression.Literal ?? string.Empty) ?? string.Empty;
-            var expand = Create(expandInitFormUsersType);
-            SetProperty(expand, "Users", ToBuildCollectionArgument(expression, value, valueExpressionTypes));
-            return new InArgument<System.Collections.ObjectModel.Collection<string>>((Activity<System.Collections.ObjectModel.Collection<string>>)expand);
-        }
-
-        private static InArgument<System.Collections.ObjectModel.Collection<string>> ToBuildCollectionArgument(ExpressionYaml expression, string value, ValueExpressionTypes valueExpressionTypes)
-        {
-            var buildCollectionType = GetRequiredType(valueExpressionTypes.ToStringExpression.Assembly, "Microsoft.Activities.BuildCollection`1").MakeGenericType(typeof(string));
-            var buildCollection = Create(buildCollectionType);
-            var values = buildCollectionType.GetProperty("Values", BindingFlags.Instance | BindingFlags.Public)?.GetValue(buildCollection, null) ?? throw new InvalidOperationException("BuildCollection does not expose Values.");
-            var addMethod = values.GetType().GetMethods().First(m => m.Name == "Add" && m.GetParameters().Length == 1);
-            if (!string.IsNullOrWhiteSpace(expression.Variable) || !string.IsNullOrWhiteSpace(expression.Type) || expression.ToString != null || expression.Value != null || (expression.Values != null && expression.Values.Count > 0))
-            {
-                addMethod.Invoke(values, new object[] { ToInArgument<string>(expression, valueExpressionTypes) });
-                return new InArgument<System.Collections.ObjectModel.Collection<string>>((Activity<System.Collections.ObjectModel.Collection<string>>)buildCollection);
-            }
-
-            foreach (var recipient in value.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries).Select(v => v.Trim()).Where(v => v.Length > 0))
-            {
-                addMethod.Invoke(values, new object[] { new InArgument<string>(recipient) });
-            }
-
-            return new InArgument<System.Collections.ObjectModel.Collection<string>>((Activity<System.Collections.ObjectModel.Collection<string>>)buildCollection);
-        }
-
-        private static Activity BuildSingleTask(SingleTaskActionYaml action, Type singleTaskType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var task = Create(singleTaskType);
-            SetProperty(task, "AssignedTo", ToInArgument<string>(action.AssignedTo, valueExpressionTypes));
-            SetProperty(task, "Title", ToInArgument<string>(action.Title, valueExpressionTypes));
-            SetProperty(task, "Body", ToInArgument<string>(action.Body ?? new ExpressionYaml { Literal = string.Empty }, valueExpressionTypes));
-            SetProperty(task, "ContentTypeId", new InArgument<string>(string.IsNullOrWhiteSpace(action.ContentTypeId) ? "0x0108003365C4474CAE8C42BCE396314E88E51F" : action.ContentTypeId));
-            SetProperty(task, "OutcomeFieldName", new InArgument<string>(string.IsNullOrWhiteSpace(action.OutcomeFieldName) ? "TaskOutcome" : action.OutcomeFieldName));
-            SetProperty(task, "CompletedStatus", new InArgument<string>(string.IsNullOrWhiteSpace(action.CompletedStatus) ? "Completed" : action.CompletedStatus));
-            SetProperty(task, "WaitForTaskCompletion", new InArgument<bool>(action.WaitForTaskCompletion));
-            SetProperty(task, "PreserveIncompleteTasks", new InArgument<bool>(false));
-            SetProperty(task, "WaiveAssignmentEmail", new InArgument<bool>(action.WaiveAssignmentEmail));
-            SetProperty(task, "SendReminderEmail", new InArgument<bool>(false));
-            SetProperty(task, "WaiveCancelationEmail", new InArgument<bool>(action.WaiveCancelationEmail));
-            SetProperty(task, "DefaultTaskOutcome", new InArgument<int>(0));
-            SetProperty(task, "OverdueReminderRepeat", new InArgument<int>(1));
-            SetProperty(task, "OverdueRepeatTimes", new InArgument<int>(1));
-            SetProperty(task, "CancelationEmailSubject", new InArgument<string>("Task Canceled - %Task: Title%"));
-            SetProperty(task, "CancelationEmailBody", new InArgument<string>(DefaultTaskCancelationEmailBody));
-            SetProperty(task, "AssignmentEmailSubject", ToInArgument<string>(action.AssignmentEmailSubject ?? new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" }, valueExpressionTypes));
-            SetProperty(task, "AssignmentEmailBody", ToInArgument<string>(action.AssignmentEmailBody ?? new ExpressionYaml { Literal = DefaultTaskAssignmentEmailBody }, valueExpressionTypes));
-            SetProperty(task, "OverdueEmailSubject", new InArgument<string>("Task Overdue - %Task: Title%"));
-            SetProperty(task, "OverdueEmailBody", new InArgument<string>(DefaultTaskOverdueEmailBody));
-            if (HasExpression(action.DueDate)) SetProperty(task, "DueDate", ToInArgument<DateTime>(action.DueDate, valueExpressionTypes));
-            if (!string.IsNullOrWhiteSpace(action.TaskIdTo)) SetProperty(task, "TaskId", new OutArgument<string>(new ArgumentReference<string>(action.TaskIdTo)));
-            if (!string.IsNullOrWhiteSpace(action.OutcomeTo)) SetProperty(task, "Outcome", new OutArgument<int>(new ArgumentReference<int>(action.OutcomeTo)));
-            return (Activity)task;
-        }
-
-        private const string DefaultTaskAssignmentEmailBody = "<html><body><div>You have been assigned a task.</div><a href=\"%TaskSpecial: TaskUrl%\">%Task: Title%</a><div>%Task: Body%</div></body></html>";
-        private const string DefaultTaskCancelationEmailBody = "<html><body><div>One of your tasks was canceled and deleted. You do not need to take any further action on that task.</div><div>%Task: Title%</div></body></html>";
-        private const string DefaultTaskOverdueEmailBody = "<html><body><div>You have an overdue task.</div><a href=\"%TaskSpecial: TaskUrl%\">%Task: Title%</a><div>%Task: Body%</div></body></html>";
-
-        private static ExpressionYaml NormalizeHttpRequestType(ExpressionYaml requestType)
-        {
-            requestType = requestType ?? new ExpressionYaml { Literal = "HTTPGET" };
-            if (!string.IsNullOrWhiteSpace(requestType.Variable) || !string.IsNullOrWhiteSpace(requestType.Type) || requestType.ToString != null || requestType.Value != null) return requestType;
-            var value = Convert.ToString(requestType.Literal ?? string.Empty)?.Trim() ?? string.Empty;
-            var normalized = value.Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToUpperInvariant();
-            if (normalized == "GET") return new ExpressionYaml { Literal = "HTTPGET" };
-            if (normalized == "POST") return new ExpressionYaml { Literal = "HTTPPOST" };
-            if (normalized == "PUT") return new ExpressionYaml { Literal = "HTTPPUT" };
-            if (normalized == "DELETE") return new ExpressionYaml { Literal = "HTTPDELETE" };
-            if (normalized == "HTTPGET" || normalized == "HTTPPOST" || normalized == "HTTPPUT" || normalized == "HTTPDELETE") return new ExpressionYaml { Literal = normalized };
-            return requestType;
-        }
-
-        private static Activity BuildLookupRestPropertyName(LookupRestPropertyNameActionYaml action, Type lookupRestPropertyNameType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var lookup = Create(lookupRestPropertyNameType);
-            ((Activity)lookup).DisplayName = "Lookup REST property name";
-            SetProperty(lookup, "ListId", ToInArgument<Guid>(action.ListId, valueExpressionTypes));
-            SetProperty(lookup, "PropertyName", ToInArgument<string>(action.PropertyName, valueExpressionTypes));
-            SetProperty(lookup, "Result", new OutArgument<string>(new ArgumentReference<string>(action.To)));
-            return (Activity)lookup;
-        }
-
-        private static Activity BuildSetField(SetFieldActionYaml action, Type setFieldType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var setField = Create(setFieldType);
-            SetProperty(setField, "FieldName", new InArgument<string>(action.FieldName ?? string.Empty));
-            SetProperty(setField, "FieldValue", ToSetFieldValueArgument(action.Value, valueExpressionTypes));
-            return (Activity)setField;
-        }
-
-        private static InArgument<object> ToSetFieldValueArgument(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
-        {
-            expression = expression ?? new ExpressionYaml();
-            if (!string.IsNullOrWhiteSpace(expression.Variable) || expression.ToString != null || !string.IsNullOrWhiteSpace(expression.Type)) return ToInArgument<object>(expression, valueExpressionTypes);
-            if (expression.Literal is string || expression.Literal == null) return new InArgument<object>((Activity<object>)new Cast<string, object> { Operand = ToInArgument<string>(expression, valueExpressionTypes) });
-            if (expression.Literal is int) return new InArgument<object>((Activity<object>)new Cast<int, object> { Operand = ToInArgument<int>(expression, valueExpressionTypes) });
-            if (expression.Literal is bool) return new InArgument<object>((Activity<object>)new Cast<bool, object> { Operand = ToInArgument<bool>(expression, valueExpressionTypes) });
-            if (expression.Literal is DateTime) return new InArgument<object>((Activity<object>)new Cast<DateTime, object> { Operand = ToInArgument<DateTime>(expression, valueExpressionTypes) });
-            if (expression.Literal is Guid) return new InArgument<object>((Activity<object>)new Cast<Guid, object> { Operand = ToInArgument<Guid>(expression, valueExpressionTypes) });
-            return new InArgument<object>((Activity<object>)new Cast<double, object> { Operand = ToInArgument<double>(expression, valueExpressionTypes) });
-        }
-
-        private static Activity BuildLookupWorkflowContext(LookupWorkflowContextActionYaml action, Type lookupWorkflowContextType)
-        {
-            var lookup = Create(lookupWorkflowContextType);
-            SetProperty(lookup, "PropertyName", new InArgument<string>(action.PropertyName ?? string.Empty));
-            SetProperty(lookup, "Result", new OutArgument<string>(new ArgumentReference<string>(action.To)));
-            return (Activity)lookup;
-        }
-
-        private static Activity BuildGetCurrentListId(GetCurrentListIdActionYaml action, Type getCurrentListIdType)
-        {
-            var lookup = Create(getCurrentListIdType);
-            SetProperty(lookup, "Result", new OutArgument<Guid>(new ArgumentReference<Guid>(action.To)));
-            return (Activity)lookup;
-        }
-
-        private static Activity BuildGetCurrentItemGuid(GetCurrentItemGuidActionYaml action, Type getCurrentItemGuidType)
-        {
-            var lookup = Create(getCurrentItemGuidType);
-            SetProperty(lookup, "Result", new OutArgument<Guid>(new ArgumentReference<Guid>(action.To)));
-            return (Activity)lookup;
-        }
-
-        private static Activity BuildCalc(CalcActionYaml action, Type calcType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var calc = Create(calcType);
-            SetProperty(calc, "LValue", ToInArgument<double>(action.LValue, valueExpressionTypes));
-            SetProperty(calc, "RValue", ToInArgument<double>(action.RValue, valueExpressionTypes));
-            SetProperty(calc, "Operator", new InArgument<string>(action.Operator ?? "Add"));
-            SetProperty(calc, "To", new OutArgument<double>(new ArgumentReference<double>(action.To)));
-            return (Activity)calc;
-        }
-
-        private static Activity BuildWriteHistory(WriteHistoryActionYaml action, Type writeToHistoryType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var write = Create(writeToHistoryType);
-            SetProperty(write, "Message", ToInArgument<string>(action.Message, valueExpressionTypes));
-            return (Activity)write;
-        }
-
-        private static Activity BuildSetStatus(SetStatusActionYaml action, Type setStatusType)
-        {
-            var status = Create(setStatusType);
-            SetProperty(status, "Status", new InArgument<string>(action.Status ?? string.Empty));
-            return (Activity)status;
-        }
-
-        private static Activity BuildComment(CommentActionYaml action, Type commentType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var comment = Create(commentType);
-            SetProperty(comment, "CommentText", ToInArgument<string>(action.Text, valueExpressionTypes));
-            return (Activity)comment;
-        }
-
-        private static Activity BuildDelayFor(DelayForActionYaml action, Type delayForType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var delay = Create(delayForType);
-            SetProperty(delay, "Days", ToInArgument<double>(action.Days, valueExpressionTypes));
-            SetProperty(delay, "Hours", ToInArgument<double>(action.Hours, valueExpressionTypes));
-            SetProperty(delay, "Minutes", ToInArgument<double>(action.Minutes, valueExpressionTypes));
-            return (Activity)delay;
-        }
-
-        private static Activity BuildDelayUntil(DelayUntilActionYaml action, Type delayUntilType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var delay = Create(delayUntilType);
-            SetProperty(delay, "Date", ToInArgument<DateTime>(action.Date, valueExpressionTypes));
-            return (Activity)delay;
-        }
-
-        private static void ValidateAssignments(WorkflowYaml workflow, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
-        {
-            foreach (var action in workflow.Stages.SelectMany(s => s.Actions ?? new System.Collections.Generic.List<WorkflowActionYaml>()).OfType<AssignActionYaml>())
-            {
-                if (!variableTypes.ContainsKey(action.To ?? string.Empty)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + action.To);
-            }
-        }
-
-        private static Activity BuildAssign(AssignActionYaml action, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
-        {
-            if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException("assign action target variable is not declared: " + action.To);
-            var value = action.Value ?? new ExpressionYaml();
-            if (targetType == typeof(double)) return new Assign<double> { To = new OutArgument<double>(new ArgumentReference<double>(action.To)), Value = ToInArgument<double>(value, valueExpressionTypes) };
-            if (targetType == typeof(bool)) return new Assign<bool> { To = new OutArgument<bool>(new ArgumentReference<bool>(action.To)), Value = ToInArgument<bool>(value, valueExpressionTypes) };
-            if (targetType == typeof(DateTime)) return new Assign<DateTime> { To = new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)), Value = ToInArgument<DateTime>(value, valueExpressionTypes) };
-            if (targetType == typeof(Guid)) return new Assign<Guid> { To = new OutArgument<Guid>(new ArgumentReference<Guid>(action.To)), Value = ToInArgument<Guid>(value, valueExpressionTypes) };
-            if (targetType == typeof(int)) return new Assign<int> { To = new OutArgument<int>(new ArgumentReference<int>(action.To)), Value = ToInArgument<int>(value, valueExpressionTypes) };
-            return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, valueExpressionTypes) };
-        }
-
-        private static Activity<bool> BuildBooleanExpression(ComparisonExpressionYaml condition, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes)
-        {
-            condition = condition ?? new ComparisonExpressionYaml();
-            var op = (string.IsNullOrWhiteSpace(condition.Operator) ? condition.Type : condition.Operator).Replace("_", string.Empty).Replace("-", string.Empty).ToLowerInvariant();
-            if (op == "islessthan" || op == "lessthan") return CreateComparison(expressionTypes.IsLessThan, condition, valueExpressionTypes);
-            if (op == "greaterthan" || op == "isgreaterthan") return CreateComparison(expressionTypes.IsGreaterThan, condition, valueExpressionTypes);
-            if (op == "equals" || op == "equal" || op == "isequal") return CreateComparison(expressionTypes.IsEqualNumber, condition, valueExpressionTypes);
-            if (op == "lessthanorequal" || op == "islessthanorequal") return CreateComparison(expressionTypes.IsLessThanOrEqual, condition, valueExpressionTypes);
-            if (op == "greaterthanorequal" || op == "isgreaterthanorequal") return CreateComparison(expressionTypes.IsGreaterThanOrEqual, condition, valueExpressionTypes);
-            throw new InvalidOperationException("Unsupported comparison condition: " + (condition.Operator ?? condition.Type));
-        }
-
-        private static Activity<bool> CreateComparison(Type comparisonType, ComparisonExpressionYaml condition, ValueExpressionTypes valueExpressionTypes)
-        {
-            var comparison = Create(comparisonType);
-            SetProperty(comparison, "Left", ToInArgument<double>(condition.Left, valueExpressionTypes));
-            SetProperty(comparison, "Right", ToInArgument<double>(condition.Right, valueExpressionTypes));
-            return (Activity<bool>)comparison;
-        }
-
-        private sealed class ValueExpressionTypes
-        {
-            public ValueExpressionTypes(Type toString, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type buildDictionary)
-            {
-                ToStringExpression = toString;
-                LookupWorkflowContext = lookupWorkflowContext;
-                GetCurrentListId = getCurrentListId;
-                GetCurrentItemGuid = getCurrentItemGuid;
-                LookupListItemStringProperty = lookupListItemStringProperty;
-                BuildDictionary = buildDictionary;
-            }
-
-            public Type ToStringExpression { get; }
-            public Type LookupWorkflowContext { get; }
-            public Type GetCurrentListId { get; }
-            public Type GetCurrentItemGuid { get; }
-            public Type LookupListItemStringProperty { get; }
-            public Type BuildDictionary { get; }
-        }
-
-        private sealed class ComparisonExpressionTypes
-        {
-            public ComparisonExpressionTypes(Assembly assembly)
-            {
-                IsLessThan = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsLessThan`1");
-                IsGreaterThan = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsGreaterThan`1");
-                IsLessThanOrEqual = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsLessThanOrEqual`1");
-                IsGreaterThanOrEqual = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsGreaterThanOrEqual`1");
-                IsEqualNumber = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsEqualNumber`1");
-            }
-
-            public Type IsLessThan { get; }
-            public Type IsGreaterThan { get; }
-            public Type IsLessThanOrEqual { get; }
-            public Type IsGreaterThanOrEqual { get; }
-            public Type IsEqualNumber { get; }
-
-            private static Type GetGenericComparisonType(Assembly assembly, string typeName) => GetRequiredType(assembly, typeName).MakeGenericType(typeof(double));
-        }
-
-        private static InArgument<T> ToInArgument<T>(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
-        {
-            expression = expression ?? new ExpressionYaml();
-            if (string.Equals(expression.Type, "toString", StringComparison.OrdinalIgnoreCase) && expression.Value != null) expression = new ExpressionYaml { ToString = expression.Value };
-            if (!string.IsNullOrWhiteSpace(expression.Variable)) return new InArgument<T>(new ArgumentValue<T>(expression.Variable));
-            if (expression.ToString != null)
-            {
-                var toString = Create(valueExpressionTypes.ToStringExpression);
-                SetProperty(toString, "Object", CreateToStringObjectArgument(expression.ToString));
-                return (InArgument<T>)CreateInArgument(typeof(T), toString);
-            }
-            var expressionActivity = CreateLookupExpressionActivity(expression, typeof(T), valueExpressionTypes);
-            if (expressionActivity != null) return (InArgument<T>)CreateInArgument(typeof(T), expressionActivity);
-            return new InArgument<T>((T)Convert.ChangeType(expression.Literal ?? DefaultLiteral(typeof(T)), typeof(T)));
-        }
-
-        private static object? CreateLookupExpressionActivity(ExpressionYaml expression, Type resultType, ValueExpressionTypes valueExpressionTypes)
-        {
-            var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
-            if (type == "formatstring") return CreateFormatStringExpression(expression, resultType, valueExpressionTypes);
-            if (type == "lookupworkflowcontext" || type == "lookupcontextproperty")
-            {
-                if (resultType != typeof(string) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to String/Object arguments.");
-                if (string.IsNullOrWhiteSpace(expression.PropertyName)) throw new InvalidOperationException(expression.Type + " expression requires 'propertyName'.");
-                var lookup = Create(valueExpressionTypes.LookupWorkflowContext);
-                SetProperty(lookup, "PropertyName", new InArgument<string>(expression.PropertyName));
-                return lookup;
-            }
-
-            if (type == "getcurrentlistid")
-            {
-                if (resultType != typeof(Guid) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to Guid/Object arguments.");
-                return Create(valueExpressionTypes.GetCurrentListId);
-            }
-
-            if (type == "getcurrentitemguid")
-            {
-                if (resultType != typeof(Guid) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to Guid/Object arguments.");
-                return Create(valueExpressionTypes.GetCurrentItemGuid);
-            }
-
-            if (type == "lookuplistitemstringproperty" || type == "lookupsplistitemstringproperty")
-            {
-                if (resultType != typeof(string) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to String/Object arguments.");
-                if (string.IsNullOrWhiteSpace(expression.FieldName) && string.IsNullOrWhiteSpace(expression.PropertyName)) throw new InvalidOperationException(expression.Type + " expression requires 'fieldName' or 'propertyName'.");
-                var action = new LookupListItemStringPropertyActionYaml
-                {
-                    ListId = expression.ListId ?? new ExpressionYaml { Type = "getCurrentListId" },
-                    ItemId = expression.ItemId ?? new ExpressionYaml(),
-                    ItemGuid = expression.ItemGuid ?? new ExpressionYaml(),
-                    FieldName = expression.FieldName ?? string.Empty,
-                    PropertyName = expression.PropertyName ?? string.Empty
-                };
-                action.ValidateExpressionShape();
-                return BuildLookupListItemPropertyBase(action, valueExpressionTypes.LookupListItemStringProperty, valueExpressionTypes);
-            }
-
-            return null;
-        }
-
-        private static object CreateFormatStringExpression(ExpressionYaml expression, Type resultType, ValueExpressionTypes valueExpressionTypes)
-        {
-            if (resultType != typeof(string) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to String/Object arguments.");
-            var formatStringType = GetRequiredType(valueExpressionTypes.ToStringExpression.Assembly, "Microsoft.Activities.Expressions.FormatString");
-            var formatString = Create(formatStringType);
-            var format = Convert.ToString(expression.Literal ?? string.Empty) ?? string.Empty;
-            SetProperty(formatString, "Format", new InArgument<string>(format.StartsWith("{}", StringComparison.Ordinal) ? format.Substring(2) : format));
-            var arguments = formatStringType.GetProperty("Arguments", BindingFlags.Instance | BindingFlags.Public)?.GetValue(formatString, null) ?? throw new InvalidOperationException("FormatString does not expose Arguments.");
-            var addMethod = arguments.GetType().GetMethods().First(m => m.Name == "Add" && m.GetParameters().Length == 1);
-            var values = expression.Values != null && expression.Values.Count > 0 ? expression.Values : expression.Value != null ? new System.Collections.Generic.List<ExpressionYaml> { expression.Value } : new System.Collections.Generic.List<ExpressionYaml>();
-            if (values.Count == 0) throw new InvalidOperationException(expression.Type + " expression requires 'value' or 'values'.");
-            foreach (var value in values) addMethod.Invoke(arguments, new object[] { ToInArgument<string>(value, valueExpressionTypes) });
-            return formatString;
-        }
-
-        private static object CreateToStringObjectArgument(ExpressionYaml expression)
-        {
-            if (!string.IsNullOrWhiteSpace(expression.Variable)) return new InArgument<double>(new ArgumentValue<double>(expression.Variable));
-            if (expression.Literal is string) return new InArgument<string>(Convert.ToString(expression.Literal));
-            return new InArgument<double>(Convert.ToDouble(expression.Literal ?? 0d));
-        }
-
-        private static object DefaultLiteral(Type type) => type == typeof(string) ? string.Empty : type == typeof(bool) ? false : 0d;
-
-        private static Type MapVariableType(string type)
-        {
-            if (string.Equals(type, "Double", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
-            if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Bool", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
-            if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Date", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
-            if (string.Equals(type, "Guid", StringComparison.OrdinalIgnoreCase)) return typeof(Guid);
-            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("DynamicValue variables are only available as HTTP response targets and are emitted using the SharePoint Designer proxy type at build time.");
-            if (string.Equals(type, "Int32", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Int", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Integer", StringComparison.OrdinalIgnoreCase)) return typeof(int);
-            return typeof(string);
+            if (actionType == null) throw new ArgumentNullException(nameof(actionType));
+            return ActionBuilders.ContainsKey(actionType);
         }
 
         /// <summary>
@@ -845,7 +274,7 @@ namespace SPNet.Workflow.WfSerializer
             EnsureExpressionIds(document);
 
             var firstStageContainer = document.Descendants(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes")
-                .Any(e => e.Descendants(XamlNamespace + "String").Any(s => ((string?)s.Attribute(XamlNamespace + "Key")) == "StageAttribute" && ((string?)s).StartsWith("StageContainer-", StringComparison.OrdinalIgnoreCase)));
+                .Any(e => e.Descendants(XamlNamespace + "String").Any(s => ((string?)s.Attribute(XamlNamespace + "Key")) == "StageAttribute" && ((string?)s ?? string.Empty).StartsWith("StageContainer-", StringComparison.OrdinalIgnoreCase)));
             if (firstStageContainer) return document.ToString(SaveOptions.DisableFormatting);
 
             var flowStep = document.Descendants(ActivitiesNamespace + "FlowStep").FirstOrDefault(e => e.Elements(ActivitiesNamespace + "Sequence").Any());
@@ -1026,45 +455,7 @@ namespace SPNet.Workflow.WfSerializer
             return document.ToString(SaveOptions.DisableFormatting);
         }
 
-        private static ActivityBuilder BuildProofOfConceptWorkflow(string workflowName, string workflowClassName, Type calcType, Type writeToHistoryType, Type toStringType)
-        {
-            var calc = Create(calcType);
-            SetProperty(calc, "LValue", new InArgument<double>(1.0));
-            SetProperty(calc, "RValue", new InArgument<double>(1.0));
-            SetProperty(calc, "Operator", new InArgument<string>("Add"));
-            SetProperty(calc, "To", new OutArgument<double>(new ArgumentReference<double>("calc")));
-
-            var toString = Create(toStringType);
-            SetProperty(toString, "Object", new InArgument<double>(new ArgumentValue<double>("calc")));
-
-            var writeToHistory = Create(writeToHistoryType);
-            SetProperty(writeToHistory, "Message", CreateInArgument(typeof(string), toString));
-
-            var stageSequence = new Sequence { DisplayName = "Stage 1" };
-            stageSequence.Activities.Add((Activity)calc);
-            stageSequence.Activities.Add((Activity)writeToHistory);
-
-            var flowStep = new FlowStep { Action = stageSequence };
-            var flowchart = new Flowchart { StartNode = flowStep };
-            flowchart.Nodes.Add(flowStep);
-
-            var outerSequence = new Sequence { DisplayName = workflowName };
-            outerSequence.Activities.Add(flowchart);
-
-            var builder = new ActivityBuilder
-            {
-                Name = workflowClassName,
-                Implementation = outerSequence
-            };
-            builder.Properties.Add(new DynamicActivityProperty
-            {
-                Name = "calc",
-                Type = typeof(InArgument<double>)
-            });
-            return builder;
-        }
-
-        private static string GetDottedWorkflowClassName(string workflowName)
+        internal static string GetDottedWorkflowClassName(string workflowName)
         {
             if (!string.IsNullOrWhiteSpace(workflowName) && workflowName.EndsWith(SpdTechnicalClassSuffix, StringComparison.OrdinalIgnoreCase)) return workflowName;
             return (string.IsNullOrWhiteSpace(workflowName) ? "GeneratedWorkflow" : workflowName) + SpdTechnicalClassSuffix;
@@ -1102,40 +493,6 @@ namespace SPNet.Workflow.WfSerializer
                 report.AppendLine(indent + "  Nodes=" + flowchart.Nodes.Count + " StartNode=" + (flowchart.StartNode == null ? "<null>" : flowchart.StartNode.GetType().FullName));
                 foreach (var node in flowchart.Nodes.OfType<FlowStep>()) AppendActivity(report, node.Action, depth + 1);
             }
-        }
-
-        private static object Create(Type type) => Activator.CreateInstance(type) ?? throw new InvalidOperationException("Could not instantiate " + type.FullName + ".");
-
-        private static void SetProperty(object target, string propertyName, object value)
-        {
-            var property = target.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).FirstOrDefault(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal) && p.CanWrite);
-            if (property == null || !property.CanWrite) throw new InvalidOperationException("Type " + target.GetType().FullName + " does not expose writable property " + propertyName + ".");
-            property.SetValue(target, value, null);
-        }
-
-        private static object CreateInArgument(Type resultType, object expressionActivity)
-        {
-            var argumentType = typeof(InArgument<>).MakeGenericType(resultType);
-            var expressionType = typeof(Activity<>).MakeGenericType(resultType);
-            return Activator.CreateInstance(argumentType, expressionType.IsInstanceOfType(expressionActivity) ? expressionActivity : throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<" + resultType.Name + ">."))!;
-        }
-
-        private static object CreateOutArgument(Type resultType, string variableName)
-        {
-            var argumentReferenceType = typeof(ArgumentReference<>).MakeGenericType(resultType);
-            var argumentReference = Activator.CreateInstance(argumentReferenceType, variableName)!;
-            var outArgumentType = typeof(OutArgument<>).MakeGenericType(resultType);
-            return Activator.CreateInstance(outArgumentType, argumentReference)!;
-        }
-
-        private static void SetDynamicInArgumentReferenceIfWritable(object target, string propertyName, Type dynamicValueType, string argumentName)
-        {
-            var property = target.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).FirstOrDefault(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal) && p.CanWrite);
-            if (property == null || !property.CanWrite) return;
-            var argumentValueType = typeof(ArgumentValue<>).MakeGenericType(dynamicValueType);
-            var argumentValue = Activator.CreateInstance(argumentValueType, argumentName)!;
-            var argument = Activator.CreateInstance(typeof(InArgument<>).MakeGenericType(dynamicValueType), argumentValue)!;
-            property.SetValue(target, argument, null);
         }
 
         private static void LoadManagedDlls(string cacheFolder)
