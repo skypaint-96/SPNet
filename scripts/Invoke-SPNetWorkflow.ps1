@@ -26,6 +26,13 @@ param(
     [string]$StatusColumn,
     [ValidateSet('Update', 'CreateNew', 'Fail')]
     [string]$IfExists = 'Update',
+    [ValidateSet('Legacy', 'Csom')]
+    [string]$PublisherMode = 'Csom',
+    [string]$PublisherExePath,
+    [string]$PublisherCookieHeader,
+    [string]$PublisherUsername,
+    [string]$PublisherPassword,
+    [string]$PublisherDomain,
     [string]$ExpectedDefinitionId,
     [string]$BackupDirectory,
     [string]$WorkflowNamePrefix,
@@ -74,6 +81,136 @@ function Connect-SPNetPnPOnline {
     if (-not $supportsUseWebLogin) { throw 'Connect-PnPOnline -UseWebLogin is unavailable. Install/import a legacy PnP PowerShell module that supports WebLogin.' }
     Connect-PnPOnline -Url $Url -UseWebLogin
 }
+
+function Get-SPNetWinInetCookieHeader {
+    param([Parameter(Mandatory = $true)][string]$Url)
+
+    $typeName = 'SPNet.WinInetCookieReader'
+    if (-not ($typeName -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace SPNet
+{
+    public static class WinInetCookieReader
+    {
+        private const int InternetCookieHttponly = 0x00002000;
+
+        [DllImport("wininet.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool InternetGetCookieEx(string url, string cookieName, StringBuilder cookieData, ref int size, int flags, IntPtr reserved);
+
+        public static string GetCookieHeader(string url)
+        {
+            int size = 0;
+            InternetGetCookieEx(url, null, null, ref size, InternetCookieHttponly, IntPtr.Zero);
+            if (size <= 0) return null;
+
+            var buffer = new StringBuilder(size);
+            if (!InternetGetCookieEx(url, null, buffer, ref size, InternetCookieHttponly, IntPtr.Zero)) return null;
+            return buffer.ToString();
+        }
+    }
+}
+'@
+    }
+
+    try {
+        return [SPNet.WinInetCookieReader]::GetCookieHeader($Url)
+    } catch {
+        Write-Verbose ('Unable to read WinINet cookies for CSOM publisher bootstrap: ' + $_.Exception.Message)
+        return $null
+    }
+}
+
+function Get-SPNetCookieNamesForDiagnostics {
+    param([string]$CookieHeader)
+    if ([string]::IsNullOrWhiteSpace($CookieHeader)) { return @() }
+    @($CookieHeader -split ';' | ForEach-Object {
+        $part = ([string]$_).Trim()
+        if ($part -match '^([^=]+)=') { $matches[1].Trim() }
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+}
+
+function Invoke-SPNetCsomPublisher {
+    if ($Action -ne 'Publish') { return $false }
+    if ($PublisherMode -ne 'Csom') { return $false }
+    if ([string]::IsNullOrWhiteSpace($XamlPath)) { throw '-XamlPath is required for Publish.' }
+    if ([string]::IsNullOrWhiteSpace($WorkflowName)) { throw '-WorkflowName is required for Publish.' }
+    if ($TargetType -eq 'Auto') { throw '-TargetType Site or -TargetType List is required when -PublisherMode Csom.' }
+    if ($IfExists -ne 'Fail') { throw '-PublisherMode Csom currently supports only -IfExists Fail.' }
+
+    $publisherProject = Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj'
+    $publisherExe = if ([string]::IsNullOrWhiteSpace($PublisherExePath)) {
+        Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\bin\Debug\net48\SPNet.Workflow.Publisher.Csom.exe'
+    } else { $PublisherExePath }
+    if (-not (Test-Path $publisherExe)) {
+        if (-not (Test-Path $publisherProject)) { throw "CSOM publisher project not found at '$publisherProject'." }
+        dotnet build $publisherProject -v:minimal | Write-Output
+        if ($LASTEXITCODE -ne 0) { throw "CSOM publisher build failed with exit code $LASTEXITCODE." }
+    }
+    if (-not (Test-Path $publisherExe)) { throw "CSOM publisher executable not found at '$publisherExe'." }
+
+    $publisherArgs = @(
+        '--site-url', $SiteUrl,
+        '--workflow-name', $WorkflowName,
+        '--xaml', $XamlPath,
+        '--target-type', $TargetType,
+        '--start-manual', ([string][bool]$StartManual).ToLowerInvariant(),
+        '--start-created', ([string][bool]$StartOnCreated).ToLowerInvariant(),
+        '--start-updated', ([string][bool]$StartOnUpdated).ToLowerInvariant(),
+        '--if-exists', 'Fail'
+    )
+    if ($TargetType -eq 'List') {
+        if ([string]::IsNullOrWhiteSpace($TargetListTitle)) { throw '-TargetListTitle is required for list workflow publication.' }
+        $listGuid = [Guid]::Empty
+        if ([Guid]::TryParse($TargetListTitle, [ref]$listGuid)) { $publisherArgs += @('--target-list-id', $TargetListTitle) } else { $publisherArgs += @('--target-list-title', $TargetListTitle) }
+    }
+    if ([string]::IsNullOrWhiteSpace($PublisherCookieHeader) -and [string]::IsNullOrWhiteSpace($PublisherUsername)) {
+        Connect-SPNetPnPOnline -Url $SiteUrl -Mode $AuthMode
+        $pnpContext = Get-PnPContext
+        if (-not $pnpContext) { throw 'PnP authenticated, but Get-PnPContext returned no client context for CSOM publisher bootstrap.' }
+        $cookieContainer = $null
+        if ($pnpContext.Credentials -and $pnpContext.Credentials.GetType().GetMethod('GetCookieContainer')) {
+            $cookieContainer = $pnpContext.Credentials.GetCookieContainer()
+        }
+        if (-not $cookieContainer) {
+            $credentialsProperty = $pnpContext.GetType().GetProperty('Credentials')
+            if ($credentialsProperty) {
+                $credentialsValue = $credentialsProperty.GetValue($pnpContext, $null)
+                if ($credentialsValue -and $credentialsValue.GetType().GetMethod('GetCookieContainer')) { $cookieContainer = $credentialsValue.GetCookieContainer() }
+            }
+        }
+        if ($cookieContainer) {
+            $cookies = $cookieContainer.GetCookieHeader([Uri]$SiteUrl)
+            if (-not [string]::IsNullOrWhiteSpace($cookies)) {
+                $PublisherCookieHeader = $cookies
+                Write-Verbose ('CSOM publisher bootstrap using PnP CookieContainer cookies: ' + ((Get-SPNetCookieNamesForDiagnostics -CookieHeader $PublisherCookieHeader) -join ', '))
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($PublisherCookieHeader)) {
+            $cookies = Get-SPNetWinInetCookieHeader -Url $SiteUrl
+            if (-not [string]::IsNullOrWhiteSpace($cookies)) {
+                $PublisherCookieHeader = $cookies
+                Write-Verbose ('CSOM publisher bootstrap using WinINet cookies: ' + ((Get-SPNetCookieNamesForDiagnostics -CookieHeader $PublisherCookieHeader) -join ', '))
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { throw 'PnP WebLogin did not expose a CookieContainer and no WinINet cookies were available for the CSOM publisher bootstrap.' }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { $publisherArgs += @('--cookie-header', $PublisherCookieHeader) }
+    if (-not [string]::IsNullOrWhiteSpace($PublisherUsername)) { $publisherArgs += @('--username', $PublisherUsername) }
+    if (-not [string]::IsNullOrWhiteSpace($PublisherPassword)) { $publisherArgs += @('--password', $PublisherPassword) }
+    if (-not [string]::IsNullOrWhiteSpace($PublisherDomain)) { $publisherArgs += @('--domain', $PublisherDomain) }
+
+    & $publisherExe @publisherArgs
+    if ($LASTEXITCODE -ne 0) { throw "CSOM publisher failed with exit code $LASTEXITCODE." }
+    return $true
+}
+
+if (Invoke-SPNetCsomPublisher) { return }
 
 function Import-SPNetWorkflowServicesCsom {
     $loadedType = [Type]::GetType('Microsoft.SharePoint.Client.WorkflowServices.WorkflowServicesManager, Microsoft.SharePoint.Client.WorkflowServices', $false)
@@ -245,6 +382,60 @@ function Remove-SPNetWorkflowDefinitionAndSubscriptions {
     $subscriptions
 }
 
+function Get-SPNetTargetList {
+    param([string]$ListIdentity)
+    if ([string]::IsNullOrWhiteSpace($ListIdentity)) { throw '-TargetListTitle is required for list workflow publication.' }
+
+    $listGuid = [Guid]::Empty
+    if ([Guid]::TryParse($ListIdentity, [ref]$listGuid)) {
+        return $web.Lists.GetById($listGuid)
+    }
+
+    return $web.Lists.GetByTitle($ListIdentity)
+}
+
+function Get-SPNetRequiredListByTitle {
+    param([string]$Title)
+    $list = $web.Lists.GetByTitle($Title)
+    $context.Load($list)
+    $context.ExecuteQuery()
+    return $list
+}
+
+function Write-SPNetPreSaveDefinitionDiagnostics {
+    param($Definition, [string]$TargetTypeName, $TargetListObject)
+    $xaml = if ($Definition -and $Definition.Xaml) { [string]$Definition.Xaml } else { '' }
+    $displayNameCount = [regex]::Matches($xaml, 'DisplayName\s*=').Count
+    $rootHasDisplayName = $xaml -match '<Activity\b[^>]*\sDisplayName\s*='
+    $flowchartHasDisplayName = $xaml -match '<Flowchart\b[^>]*\sDisplayName\s*='
+    $objectDataProperties = @()
+    try {
+        $flags = [System.Reflection.BindingFlags]'Instance,NonPublic,Public'
+        $objectDataProperty = $Definition.GetType().BaseType.GetProperty('ObjectData', $flags)
+        if (-not $objectDataProperty) { $objectDataProperty = $Definition.GetType().GetProperty('ObjectData', $flags) }
+        if ($objectDataProperty) {
+            $objectData = $objectDataProperty.GetValue($Definition, $null)
+            if ($objectData -and $objectData.Properties) { $objectDataProperties = @($objectData.Properties.Keys) }
+        }
+    } catch {
+        $objectDataProperties = @('UnableToRead:' + $_.Exception.Message)
+    }
+    Write-Output ('SPNET_PRESAVE_DIAGNOSTICS ' + (@{
+        WorkflowName = $Definition.DisplayName
+        DefinitionDisplayNameIsNullOrWhiteSpace = [string]::IsNullOrWhiteSpace([string]$Definition.DisplayName)
+        TargetType = $TargetTypeName
+        RestrictToType = $Definition.RestrictToType
+        RestrictToScope = $Definition.RestrictToScope
+        TargetListId = if ($TargetListObject) { $TargetListObject.Id.ToString() } else { $null }
+        TargetListTitle = if ($TargetListObject) { $TargetListObject.Title } else { $null }
+        XamlLength = $xaml.Length
+        XamlDisplayNameAttributeCount = $displayNameCount
+        XamlRootActivityHasDisplayName = [bool]$rootHasDisplayName
+        XamlFlowchartHasDisplayName = [bool]$flowchartHasDisplayName
+        ObjectDataPropertyKeys = $objectDataProperties
+    } | ConvertTo-Json -Compress -Depth 4))
+}
+
 if ($Action -eq 'List') {
     $matches = Get-SPNetWorkflowDefinitionsByFilter -Name $WorkflowName -Prefix $WorkflowNamePrefix
     Write-SPNetResult @{ Action = 'List'; WorkflowName = $WorkflowName; WorkflowNamePrefix = $WorkflowNamePrefix; Count = $matches.Count; Workflows = @($matches | ForEach-Object { Convert-SPNetWorkflowDefinitionToResult -DefinitionInfo $_ -WithSubscriptions:$IncludeSubscriptions }) }
@@ -342,22 +533,25 @@ $definition.Description = 'SPNet C# authored workflow.'
 $definition.Xaml = $xamlContent
 $effectiveTargetType = if ($TargetType -eq 'Auto') { 'Site' } else { $TargetType }
 $targetList = $null
+$workflowHistoryList = $null
+$workflowTasksList = $null
 if ($effectiveTargetType -eq 'List') {
     if ([string]::IsNullOrWhiteSpace($TargetListTitle)) { throw '-TargetListTitle is required for list workflow publication.' }
-    $targetList = $web.Lists.GetByTitle($TargetListTitle)
+    $targetList = Get-SPNetTargetList -ListIdentity $TargetListTitle
     $context.Load($targetList)
     $context.ExecuteQuery()
+    $workflowHistoryList = Get-SPNetRequiredListByTitle -Title 'Workflow History'
+    $workflowTasksList = Get-SPNetRequiredListByTitle -Title 'Workflow Tasks'
     $definition.RestrictToType = 'List'
     $definition.RestrictToScope = $targetList.Id.ToString()
 } else {
     $definition.RestrictToType = 'Site'
     $definition.RestrictToScope = $web.Id.ToString()
 }
-$definition.RequiresAssociationForm = $false
-$definition.RequiresInitiationForm = $false
 $definitionId = $null
 $subscriptionId = $null
 try {
+    Write-SPNetPreSaveDefinitionDiagnostics -Definition $definition -TargetTypeName $effectiveTargetType -TargetListObject $targetList
     $saveResult = $deploymentService.SaveDefinition($definition)
     $context.ExecuteQuery()
     $definitionId = $saveResult.Value
@@ -369,29 +563,20 @@ try {
     throw
 }
 $subscription = New-Object Microsoft.SharePoint.Client.WorkflowServices.WorkflowSubscription($context)
-$subscription.Name = $WorkflowName
 $subscription.DefinitionId = $definitionId
+$subscription.Name = $WorkflowName
 $subscription.Enabled = $true
-$subscription.ManualStartBypassesActivationLimit = $true
 $subscription.EventTypes = New-Object 'System.Collections.Generic.List[string]'
 $eventTypeTokens = @()
 if ($StartManual) { [void]$subscription.EventTypes.Add('WorkflowStart'); $eventTypeTokens += 'WorkflowStart' }
 if ($StartOnCreated) { [void]$subscription.EventTypes.Add('ItemAdded'); $eventTypeTokens += 'ItemAdded' }
 if ($StartOnUpdated) { [void]$subscription.EventTypes.Add('ItemUpdated'); $eventTypeTokens += 'ItemUpdated' }
 if ($eventTypeTokens.Count -eq 0) { [void]$subscription.EventTypes.Add('WorkflowStart'); $eventTypeTokens += 'WorkflowStart' }
-$eventTypeValue = (($eventTypeTokens | ForEach-Object { $_ + '#;' }) -join '')
-$subscription.SetProperty('WSEventType', $eventTypeValue)
-$subscription.SetProperty('SharePointWorkflowContext.Subscription.EventType', $eventTypeValue)
-$subscription.SetProperty('WSDisplayName', $WorkflowName)
-$subscription.SetProperty('WSEnabled', 'true')
-$subscription.SetProperty('WSPublishState', '3')
-$subscription.SetProperty('CreatedBySPD', '1')
-$subscription.SetProperty('CurrentWebUri', $SiteUrl)
 if ($effectiveTargetType -eq 'List') {
     $subscription.EventSourceId = $targetList.Id
+    $subscription.TaskListId = $workflowTasksList.Id
+    $subscription.HistoryListId = $workflowHistoryList.Id
     $subscription.StatusFieldName = if ([string]::IsNullOrWhiteSpace($StatusColumn)) { $WorkflowName } else { $StatusColumn }
-    $subscription.SetProperty('Microsoft.SharePoint.ActivationProperties.ListId', $targetList.Id.ToString())
-    $subscription.SetProperty('Microsoft.SharePoint.ActivationProperties.ListName', $targetList.Title)
     $subscriptionResult = $subscriptionService.PublishSubscriptionForList($subscription, $targetList.Id)
 } else {
     $subscription.EventSourceId = $web.Id

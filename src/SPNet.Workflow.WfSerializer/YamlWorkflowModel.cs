@@ -10,11 +10,26 @@ using YamlDotNet.Serialization.ObjectFactories;
 
 namespace SPNet.Workflow.WfSerializer
 {
+    /// <summary>
+    /// Represents SPNet tool configuration loaded from committed defaults and optional local overrides.
+    /// </summary>
     public sealed class SpNetToolConfig
     {
+        /// <summary>
+        /// Gets or sets the SharePoint Designer WebsiteCache folder used to resolve legacy proxy assemblies.
+        /// </summary>
         public string SpdCacheFolder { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets SharePoint Designer metadata token overrides used by serializer tooling.
+        /// </summary>
         public Dictionary<string, string> SpdMetadataTokens { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Loads tool configuration from committed defaults and an optional local configuration file.
+        /// </summary>
+        /// <param name="path">Optional path to a local configuration file.</param>
+        /// <returns>The merged tool configuration.</returns>
         public static SpNetToolConfig Load(string path)
         {
             var defaults = File.Exists(Path.Combine("config", "spnet.defaults.yml")) ? Path.Combine("config", "spnet.defaults.yml") : string.Empty;
@@ -37,17 +52,33 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    /// <summary>
+    /// Root YAML model for an SPNet workflow definition.
+    /// </summary>
     public sealed class WorkflowYaml
     {
+        /// <summary>Gets or sets the workflow YAML schema version.</summary>
         public string SchemaVersion { get; set; } = "spnet.workflow/v1";
+        /// <summary>Gets or sets the friendly workflow name.</summary>
         public string Name { get; set; } = "GeneratedWorkflow";
+        /// <summary>Gets or sets the optional WF technical class name.</summary>
         public string TechnicalName { get; set; } = string.Empty;
+        /// <summary>Gets or sets workflow start options used by publishing tooling.</summary>
         public StartFlagsYaml Start { get; set; } = new StartFlagsYaml();
+        /// <summary>Gets or sets workflow target metadata used by publishing tooling.</summary>
         public TargetYaml Target { get; set; } = new TargetYaml();
+        /// <summary>Gets or sets declared workflow variables.</summary>
         public List<VariableYaml> Variables { get; set; } = new List<VariableYaml>();
+        /// <summary>Gets or sets workflow stages and their actions.</summary>
         public List<StageYaml> Stages { get; set; } = new List<StageYaml>();
+        /// <summary>Gets or sets warnings produced by partial XAML export.</summary>
         public List<string> ExportWarnings { get; set; } = new List<string>();
 
+        /// <summary>
+        /// Loads and validates a workflow YAML document.
+        /// </summary>
+        /// <param name="path">Path to the workflow YAML file.</param>
+        /// <returns>The deserialized workflow model.</returns>
         public static WorkflowYaml Load(string path)
         {
             if (!File.Exists(path)) throw new FileNotFoundException("Workflow YAML not found: " + path, path);
@@ -57,6 +88,10 @@ namespace SPNet.Workflow.WfSerializer
             return workflow;
         }
 
+        /// <summary>
+        /// Saves the workflow model as YAML.
+        /// </summary>
+        /// <param name="path">Path where YAML should be written.</param>
         public void Save(string path)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? Environment.CurrentDirectory);
@@ -70,6 +105,9 @@ namespace SPNet.Workflow.WfSerializer
             .IgnoreUnmatchedProperties()
             .Build();
 
+        /// <summary>
+        /// Validates schema version, required workflow fields, and contained action models.
+        /// </summary>
         public void Validate()
         {
             if (!string.Equals(SchemaVersion, "spnet.workflow/v1", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unsupported schemaVersion: " + SchemaVersion);
@@ -84,10 +122,17 @@ namespace SPNet.Workflow.WfSerializer
     public sealed class VariableYaml { public string Name { get; set; } = string.Empty; public string Type { get; set; } = "String"; }
     public sealed class StageYaml { public string Name { get; set; } = "Stage"; public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>(); }
 
+    /// <summary>
+    /// Base class for all supported SPNet YAML workflow actions.
+    /// </summary>
     public abstract class WorkflowActionYaml
     {
+        /// <summary>Gets or sets the action discriminator from YAML.</summary>
         public string Type { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Validates common action requirements.
+        /// </summary>
         public virtual void Validate()
         {
             if (string.IsNullOrWhiteSpace(Type)) throw new InvalidOperationException("Action type is required.");
@@ -99,6 +144,9 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    /// <summary>
+    /// Identifies action models that write a result to a workflow variable.
+    /// </summary>
     public interface ITargetedActionYaml { string To { get; set; } }
 
     public sealed class CalcActionYaml : WorkflowActionYaml, ITargetedActionYaml
@@ -292,10 +340,15 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    /// <summary>
+    /// Converts polymorphic workflow action YAML mappings into typed action models.
+    /// </summary>
     public sealed class WorkflowActionYamlTypeConverter : IYamlTypeConverter
     {
+        /// <inheritdoc />
         public bool Accepts(Type type) => typeof(WorkflowActionYaml).IsAssignableFrom(type);
 
+        /// <inheritdoc />
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
             var yamlObject = rootDeserializer(typeof(ActionYamlSurrogate)) as ActionYamlSurrogate ?? throw new InvalidOperationException("Action YAML is empty.");
@@ -321,6 +374,7 @@ namespace SPNet.Workflow.WfSerializer
             return action;
         }
 
+        /// <inheritdoc />
         public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
         {
             emitter.Emit(new MappingStart(null, null, false, MappingStyle.Block));
@@ -440,13 +494,24 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    /// <summary>
+    /// Represents a numeric comparison expression used by control-flow actions.
+    /// </summary>
     public sealed class ComparisonExpressionYaml
     {
+        /// <summary>Gets or sets the comparison expression type.</summary>
         public string Type { get; set; } = "isLessThan";
+        /// <summary>Gets or sets an optional operator alias for the comparison.</summary>
         public string Operator { get; set; } = string.Empty;
+        /// <summary>Gets or sets the left comparison operand.</summary>
         public ExpressionYaml Left { get; set; } = new ExpressionYaml();
+        /// <summary>Gets or sets the right comparison operand.</summary>
         public ExpressionYaml Right { get; set; } = new ExpressionYaml();
 
+        /// <summary>
+        /// Validates that the comparison specifies a supported operator name.
+        /// </summary>
+        /// <param name="owner">Action type that owns the condition, used in error messages.</param>
         public void Validate(string owner)
         {
             var comparison = string.IsNullOrWhiteSpace(Operator) ? Type : Operator;
@@ -454,13 +519,22 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    /// <summary>
+    /// Represents a literal, variable reference, or supported nested expression value.
+    /// </summary>
     public sealed class ExpressionYaml
     {
+        /// <summary>Gets or sets a scalar literal value.</summary>
         public object? Literal { get; set; }
+        /// <summary>Gets or sets a workflow variable reference.</summary>
         public string Variable { get; set; } = string.Empty;
+        /// <summary>Gets or sets the nested expression type discriminator.</summary>
         public string Type { get; set; } = string.Empty;
+        /// <summary>Gets or sets a SharePoint context or REST property name for lookup expressions.</summary>
         public string PropertyName { get; set; } = string.Empty;
+        /// <summary>Gets or sets a nested expression value used by expression wrappers such as formatting and string conversion.</summary>
         public ExpressionYaml? Value { get; set; }
+        /// <summary>Gets or sets a nested expression to convert to string.</summary>
         public new ExpressionYaml? ToString { get; set; }
     }
 }

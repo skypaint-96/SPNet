@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>false</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <PackageId>SPNet.Workflow.Publisher.Csom</PackageId>
+    <Title>SPNet Workflow CSOM Publisher</Title>
+    <Description>Standalone publishing-only SharePoint WorkflowServices CSOM tool. Consumes XAML as opaque text and does not reference WF/SPD serializer assemblies.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SharePointOnline.CSOM" Version="16.1.24810.12000" />
+  </ItemGroup>
+
+</Project>

@@ -12,6 +12,9 @@ using System.Xml.Linq;
 
 namespace SPNet.Workflow.WfSerializer
 {
+    /// <summary>
+    /// Builds SharePoint Designer-compatible WF activity trees from SPNet YAML and serializes them to XAML.
+    /// </summary>
     public static class WfActivityBuilderSerializer
     {
         private const string SharePointProxyAssemblyName = "Microsoft.SharePoint.WorkflowServices.Activities.Proxy.dll";
@@ -33,6 +36,10 @@ namespace SPNet.Workflow.WfSerializer
         private static readonly XNamespace SharePointProxyNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy";
         private static readonly XNamespace AuthoringNamespace = "clr-namespace:Microsoft.Web.Authoring.Workflow;assembly=Microsoft.Web.Authoring";
 
+        /// <summary>
+        /// Serializes a minimal proof-of-concept workflow that exercises the legacy SharePoint Designer serializer path.
+        /// </summary>
+        /// <param name="options">Serializer options containing the workflow name, output path, and WebsiteCache location.</param>
         public static void SerializeSampleWorkflow(WfSerializerOptions options)
         {
             var cacheFolder = Path.GetFullPath(options.CacheFolder);
@@ -56,12 +63,24 @@ namespace SPNet.Workflow.WfSerializer
             }
         }
 
+        /// <summary>
+        /// Loads an SPNet workflow YAML file, builds the corresponding WF activity tree, and writes Designer-compatible XAML.
+        /// </summary>
+        /// <param name="workflowYamlPath">Path to the SPNet workflow YAML file.</param>
+        /// <param name="outputXamlPath">Path where the generated XAML should be written.</param>
+        /// <param name="cacheFolder">SharePoint Designer WebsiteCache folder containing required proxy assemblies.</param>
+        /// <param name="config">Tool configuration loaded from defaults and local settings.</param>
         public static void SerializeYamlWorkflow(string workflowYamlPath, string outputXamlPath, string cacheFolder, SpNetToolConfig config)
         {
             var workflow = WorkflowYaml.Load(workflowYamlPath);
             SerializeWorkflow(BuildWorkflowFromYaml(workflow, cacheFolder), outputXamlPath, cacheFolder);
         }
 
+        /// <summary>
+        /// Performs a lightweight structural export from workflow XAML to SPNet YAML for inspection and diagnostics.
+        /// </summary>
+        /// <param name="inputXamlPath">Path to the workflow XAML file.</param>
+        /// <param name="outputYamlPath">Path where the exported YAML should be written.</param>
         public static void ExportWorkflowYaml(string inputXamlPath, string outputYamlPath)
         {
             if (!File.Exists(inputXamlPath)) throw new FileNotFoundException("Input XAML not found: " + inputXamlPath, inputXamlPath);
@@ -265,8 +284,20 @@ namespace SPNet.Workflow.WfSerializer
         {
             var setField = Create(setFieldType);
             SetProperty(setField, "FieldName", new InArgument<string>(action.FieldName ?? string.Empty));
-            SetProperty(setField, "FieldValue", ToInArgument<object>(action.Value, valueExpressionTypes));
+            SetProperty(setField, "FieldValue", ToSetFieldValueArgument(action.Value, valueExpressionTypes));
             return (Activity)setField;
+        }
+
+        private static InArgument<object> ToSetFieldValueArgument(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
+        {
+            expression = expression ?? new ExpressionYaml();
+            if (!string.IsNullOrWhiteSpace(expression.Variable) || expression.ToString != null || !string.IsNullOrWhiteSpace(expression.Type)) return ToInArgument<object>(expression, valueExpressionTypes);
+            if (expression.Literal is string || expression.Literal == null) return new InArgument<object>((Activity<object>)new Cast<string, object> { Operand = ToInArgument<string>(expression, valueExpressionTypes) });
+            if (expression.Literal is int) return new InArgument<object>((Activity<object>)new Cast<int, object> { Operand = ToInArgument<int>(expression, valueExpressionTypes) });
+            if (expression.Literal is bool) return new InArgument<object>((Activity<object>)new Cast<bool, object> { Operand = ToInArgument<bool>(expression, valueExpressionTypes) });
+            if (expression.Literal is DateTime) return new InArgument<object>((Activity<object>)new Cast<DateTime, object> { Operand = ToInArgument<DateTime>(expression, valueExpressionTypes) });
+            if (expression.Literal is Guid) return new InArgument<object>((Activity<object>)new Cast<Guid, object> { Operand = ToInArgument<Guid>(expression, valueExpressionTypes) });
+            return new InArgument<object>((Activity<object>)new Cast<double, object> { Operand = ToInArgument<double>(expression, valueExpressionTypes) });
         }
 
         private static Activity BuildLookupWorkflowContext(LookupWorkflowContextActionYaml action, Type lookupWorkflowContextType)
@@ -491,6 +522,12 @@ namespace SPNet.Workflow.WfSerializer
             return typeof(string);
         }
 
+        /// <summary>
+        /// Inspects workflow XAML using WF deserialization when possible, with a structural fallback when deserialization fails.
+        /// </summary>
+        /// <param name="inputXamlPath">Path to the workflow XAML file.</param>
+        /// <param name="cacheFolder">SharePoint Designer WebsiteCache folder containing required proxy assemblies.</param>
+        /// <returns>A text report describing the workflow structure.</returns>
         public static string InspectWorkflowXaml(string inputXamlPath, string cacheFolder)
         {
             if (string.IsNullOrWhiteSpace(inputXamlPath)) throw new ArgumentException("Input XAML path is required.", nameof(inputXamlPath));
@@ -552,6 +589,12 @@ namespace SPNet.Workflow.WfSerializer
             return report.ToString();
         }
 
+        /// <summary>
+        /// Serializes an activity builder to XAML and applies SharePoint Designer metadata normalization.
+        /// </summary>
+        /// <param name="builder">WF activity builder to serialize.</param>
+        /// <param name="outputXamlPath">Path where the generated XAML should be written.</param>
+        /// <param name="cacheFolder">SharePoint Designer WebsiteCache folder containing required proxy assemblies.</param>
         public static void SerializeWorkflow(ActivityBuilder builder, string outputXamlPath, string cacheFolder)
         {
             if (builder == null) throw new ArgumentNullException(nameof(builder));
@@ -571,6 +614,12 @@ namespace SPNet.Workflow.WfSerializer
             }
         }
 
+        /// <summary>
+        /// Adds the SharePoint Designer metadata and namespace shape required for Designer to render generated workflow XAML.
+        /// </summary>
+        /// <param name="xaml">Raw WF XAML generated by the serializer.</param>
+        /// <param name="workflowName">Friendly workflow name used for default stage metadata.</param>
+        /// <returns>XAML with SharePoint Designer metadata applied.</returns>
         public static string AddSharePointDesignerMetadata(string xaml, string workflowName)
         {
             if (string.IsNullOrWhiteSpace(xaml)) throw new ArgumentException("Workflow XAML is required.", nameof(xaml));

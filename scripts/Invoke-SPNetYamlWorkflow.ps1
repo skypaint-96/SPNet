@@ -10,6 +10,15 @@ param(
     [string]$WorkflowName = '',
     [string]$WorkflowNamePrefix = '',
     [string]$TargetType = 'Site',
+    [string]$TargetListTitle = '',
+    [object]$StartManual = $null,
+    [object]$StartOnCreated = $null,
+    [object]$StartOnUpdated = $null,
+    [string]$StatusColumn = '',
+    [ValidateSet('Update', 'CreateNew', 'Fail')]
+    [string]$IfExists = 'Update',
+    [string]$ExpectedDefinitionId = '',
+    [string]$BackupDirectory = '',
     [switch]$NoBuild,
     [switch]$DryRun,
     [switch]$IncludeSubscriptions,
@@ -25,6 +34,25 @@ if (-not (Test-Path $tool)) {
 $common = @()
 if ($Config) { $common += @('--config', $Config) }
 if ($CacheFolder) { $common += @('--cache-folder', $CacheFolder) }
+
+function Get-SPNetYamlScalar {
+    param([string[]]$Lines, [string]$Name)
+    $match = $Lines | Select-String -Pattern ('^\s*' + [regex]::Escape($Name) + '\s*:\s*[''\"]?(.*?)[''\"]?\s*$') | Select-Object -First 1
+    if ($match) { return $match.Matches[0].Groups[1].Value.Trim() }
+    return ''
+}
+
+function ConvertTo-SPNetYamlBoolText {
+    param([object]$Value, [string]$Default)
+    if ($null -eq $Value) { return $Default }
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $Default }
+    if ($text -eq '1') { return 'true' }
+    if ($text -eq '0') { return 'false' }
+    $parsed = $false
+    if ([bool]::TryParse($text, [ref]$parsed)) { return $parsed.ToString().ToLowerInvariant() }
+    throw "Cannot convert '$Value' to Boolean. Use true, false, 1, or 0."
+}
 
 switch ($Action) {
     'Build' { & $tool build --workflow $Workflow --out $XamlPath @common }
@@ -46,12 +74,35 @@ switch ($Action) {
     'Export' { $target = if ($Out) { $Out } else { $XamlPath -replace '\.xaml$', '.exported.yml' }; & $tool export --xaml $XamlPath --out $target }
     'Inspect' { & $tool inspect --xaml $XamlPath @common }
     'Publish' {
+        $workflowLines = @()
+        if ($Workflow -and (Test-Path $Workflow)) { $workflowLines = Get-Content -Path $Workflow }
         if (-not $NoBuild -and -not $PSBoundParameters.ContainsKey('XamlPath')) {
             $XamlPath = Join-Path 'artifacts' (([IO.Path]::GetFileNameWithoutExtension($Workflow)) + '.xaml')
         }
         if (-not $NoBuild -and $Workflow) { & $tool build --workflow $Workflow --out $XamlPath @common }
         if (-not $WorkflowName) { $WorkflowName = [IO.Path]::GetFileNameWithoutExtension($XamlPath) }
-        $publishArgs = @{ Action = 'Publish'; SiteUrl = $SiteUrl; WorkflowName = $WorkflowName; XamlPath = $XamlPath; TargetType = $TargetType }
+        if (-not $PSBoundParameters.ContainsKey('TargetType') -and $workflowLines.Count -gt 0) { $TargetType = Get-SPNetYamlScalar -Lines $workflowLines -Name 'type' }
+        if ([string]::IsNullOrWhiteSpace($TargetType)) { $TargetType = 'Site' }
+        if ([string]::IsNullOrWhiteSpace($TargetListTitle) -and $workflowLines.Count -gt 0) { $TargetListTitle = Get-SPNetYamlScalar -Lines $workflowLines -Name 'listTitle' }
+        $defaultStartManual = 'true'
+        $defaultStartCreated = 'false'
+        $defaultStartUpdated = 'false'
+        if ($workflowLines.Count -gt 0) {
+            $defaultStartManual = Get-SPNetYamlScalar -Lines $workflowLines -Name 'manual'
+            $defaultStartCreated = Get-SPNetYamlScalar -Lines $workflowLines -Name 'autoStartCreate'
+            $defaultStartUpdated = Get-SPNetYamlScalar -Lines $workflowLines -Name 'autoStartChange'
+        }
+        $startManualText = ConvertTo-SPNetYamlBoolText -Value $StartManual -Default $defaultStartManual
+        $startCreatedText = ConvertTo-SPNetYamlBoolText -Value $StartOnCreated -Default $defaultStartCreated
+        $startUpdatedText = ConvertTo-SPNetYamlBoolText -Value $StartOnUpdated -Default $defaultStartUpdated
+        if ([string]::IsNullOrWhiteSpace($startManualText)) { $startManualText = 'true' }
+        if ([string]::IsNullOrWhiteSpace($startCreatedText)) { $startCreatedText = 'false' }
+        if ([string]::IsNullOrWhiteSpace($startUpdatedText)) { $startUpdatedText = 'false' }
+        $publishArgs = @{ Action = 'Publish'; SiteUrl = $SiteUrl; WorkflowName = $WorkflowName; XamlPath = $XamlPath; TargetType = $TargetType; StartManual = $startManualText; StartOnCreated = $startCreatedText; StartOnUpdated = $startUpdatedText; IfExists = $IfExists }
+        if (-not [string]::IsNullOrWhiteSpace($TargetListTitle)) { $publishArgs.TargetListTitle = $TargetListTitle }
+        if (-not [string]::IsNullOrWhiteSpace($StatusColumn)) { $publishArgs.StatusColumn = $StatusColumn }
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedDefinitionId)) { $publishArgs.ExpectedDefinitionId = $ExpectedDefinitionId }
+        if (-not [string]::IsNullOrWhiteSpace($BackupDirectory)) { $publishArgs.BackupDirectory = $BackupDirectory }
         if ($DryRun) { $publishArgs.DryRun = $true }
         & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @publishArgs
     }

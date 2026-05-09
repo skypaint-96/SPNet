@@ -22,7 +22,6 @@ if (-not (Test-Path $resolvedXaml)) { throw "Golden XAML not found: $XamlPath" }
 $xaml = Get-Content -Raw -Path $resolvedXaml
 $requiredMarkers = @(
     '.MTW',
-    'x:Members',
     'InitBlock-7751C281-B0D1-4336-87B4-83F2198EDE6D',
     'StageContainer-8EDBFE6D-DA0D-42F6-A806-F5807380DA4D',
     'StageHeader-7FE15537-DFDB-4198-ABFA-8AF8B9D669AE',
@@ -31,6 +30,10 @@ $requiredMarkers = @(
     'WriteToHistory',
     'SetWorkflowStatus'
 )
+
+if ($Workflow -notlike '*workflow.list-actions.yml') {
+    $requiredMarkers += 'x:Members'
+}
 
 foreach ($marker in $requiredMarkers) {
     if ($xaml -notlike "*$marker*") { throw "Golden regression marker missing from ${XamlPath}: $marker" }
@@ -67,6 +70,32 @@ if ($Workflow -like '*workflow.http.yml') {
     }
 
     if ($xaml -like '*literal: GET*') { throw "HTTP request method was not normalized in ${XamlPath}." }
+}
+
+if ($Workflow -like '*workflow.list-actions.yml') {
+    $listRequiredMarkers = @(
+        'YamlListActionsSmoke.MTW',
+        'SetField',
+        'FieldName',
+        'Title',
+        'SPNet YAML list-action smoke',
+        'WriteToHistory',
+        'SPNet YAML TestList smoke workflow updated the current item Title.'
+    )
+
+    foreach ($marker in $listRequiredMarkers) {
+        if ($xaml -notlike "*$marker*") { throw "List golden regression marker missing from ${XamlPath}: $marker" }
+    }
+
+    $listForbiddenMarkers = @(
+        'GetCurrentListId',
+        'GetCurrentItemGuid',
+        'LookupSPListItemPropertyNameInREST'
+    )
+
+    foreach ($marker in $listForbiddenMarkers) {
+        if ($xaml -like "*$marker*") { throw "List golden regression marker must not appear in ${XamlPath}: $marker" }
+    }
 }
 
 Write-Host "Golden YAML-first workflow regression passed: $XamlPath"
