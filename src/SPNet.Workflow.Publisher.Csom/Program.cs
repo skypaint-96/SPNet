@@ -43,8 +43,8 @@ namespace SPNet.Workflow.Publisher.Csom
         {
             var xaml = System.IO.File.ReadAllText(options.XamlPath);
             var metadata = LoadDefinitionMetadata(options);
-            var formFieldXml = LoadFormFieldXml(options);
-            if (string.IsNullOrWhiteSpace(formFieldXml)) formFieldXml = BuildFormFieldXml(metadata);
+            var formFieldXml = BuildFormFieldXml(metadata);
+            if (string.IsNullOrWhiteSpace(formFieldXml)) formFieldXml = LoadExplicitFallbackFormFieldXml(options);
             using (var context = new ClientContext(options.SiteUrl))
             {
                 ConfigureAuthentication(context, options);
@@ -58,7 +58,7 @@ namespace SPNet.Workflow.Publisher.Csom
 
                 EnsureNoExistingDefinition(context, deploymentService, options.WorkflowName, options.IfExists);
 
-                if (options.TargetType == TargetType.List)
+                if (EffectiveTargetType(options, metadata) == TargetType.List)
                 {
                     PublishListWorkflow(context, web, deploymentService, subscriptionService, options, metadata, xaml, formFieldXml);
                 }
@@ -71,7 +71,7 @@ namespace SPNet.Workflow.Publisher.Csom
 
         private static void PublishListWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, PublisherWorkflowMetadata metadata, string xaml, string formFieldXml)
         {
-            var targetList = GetTargetList(web, options);
+            var targetList = GetTargetList(web, options, metadata);
             var workflowHistoryList = web.Lists.GetByTitle("Workflow History");
             var workflowTasksList = web.Lists.GetByTitle("Workflow Tasks");
             context.Load(targetList, l => l.Id, l => l.Title);
@@ -180,6 +180,12 @@ namespace SPNet.Workflow.Publisher.Csom
             return xamlPath + ".formfield.xml";
         }
 
+        internal static string DiscoverMetadataJsonSidecarPath(string xamlPath)
+        {
+            if (string.IsNullOrWhiteSpace(xamlPath)) return null;
+            return xamlPath + ".metadata.json";
+        }
+
         internal static string ComputeInitiationUrl(Guid definitionId)
         {
             return "wfsvc/" + definitionId.ToString("N") + "/WFInitForm.aspx";
@@ -193,15 +199,9 @@ namespace SPNet.Workflow.Publisher.Csom
             return document.ToString(SaveOptions.DisableFormatting);
         }
 
-        private static string LoadFormFieldXml(PublishOptions options)
+        private static string LoadExplicitFallbackFormFieldXml(PublishOptions options)
         {
             var path = options.FormFieldXmlPath;
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                var sidecarPath = DiscoverFormFieldSidecarPath(options.XamlPath);
-                if (!string.IsNullOrWhiteSpace(sidecarPath) && System.IO.File.Exists(sidecarPath)) path = sidecarPath;
-            }
-
             if (string.IsNullOrWhiteSpace(path)) return null;
             if (!System.IO.File.Exists(path)) throw new FileNotFoundException("FormField XML file not found.", path);
             options.EffectiveFormFieldXmlPath = path;
@@ -240,9 +240,18 @@ namespace SPNet.Workflow.Publisher.Csom
 
         internal static PublisherWorkflowMetadata LoadDefinitionMetadata(PublishOptions options)
         {
-            if (options == null || string.IsNullOrWhiteSpace(options.MetadataJsonPath)) return null;
-            if (!System.IO.File.Exists(options.MetadataJsonPath)) throw new FileNotFoundException("Workflow metadata JSON file not found.", options.MetadataJsonPath);
-            return PublisherWorkflowMetadata.FromJson(System.IO.File.ReadAllText(options.MetadataJsonPath));
+            if (options == null) return null;
+            var path = options.MetadataJsonPath;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                var sidecarPath = DiscoverMetadataJsonSidecarPath(options.XamlPath);
+                if (!string.IsNullOrWhiteSpace(sidecarPath) && System.IO.File.Exists(sidecarPath)) path = sidecarPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            if (!System.IO.File.Exists(path)) throw new FileNotFoundException("Workflow metadata JSON file not found.", path);
+            options.EffectiveMetadataJsonPath = path;
+            return PublisherWorkflowMetadata.FromJson(System.IO.File.ReadAllText(path));
         }
 
         internal static string BuildFormFieldXml(PublisherWorkflowMetadata metadata)
@@ -368,12 +377,14 @@ namespace SPNet.Workflow.Publisher.Csom
         }
 
         internal static string EffectiveWorkflowName(PublishOptions options, PublisherWorkflowMetadata metadata) => !string.IsNullOrWhiteSpace(options.WorkflowName) ? options.WorkflowName : metadata?.DisplayName;
+        internal static TargetType EffectiveTargetType(PublishOptions options, PublisherWorkflowMetadata metadata) => metadata?.Target?.Type ?? options.TargetType;
         private static string EffectiveDescription(PublisherWorkflowMetadata metadata, string fallback) => !string.IsNullOrWhiteSpace(metadata?.Description) ? metadata.Description : fallback;
 
-        private static List GetTargetList(Web web, PublishOptions options)
+        private static List GetTargetList(Web web, PublishOptions options, PublisherWorkflowMetadata metadata)
         {
             if (options.TargetListId.HasValue) return web.Lists.GetById(options.TargetListId.Value);
             if (!string.IsNullOrWhiteSpace(options.TargetListTitle)) return web.Lists.GetByTitle(options.TargetListTitle);
+            if (!string.IsNullOrWhiteSpace(metadata?.Target?.ListTitle)) return web.Lists.GetByTitle(metadata.Target.ListTitle);
             throw new ArgumentException("--target-list-title or --target-list-id is required when --target-type List.");
         }
 
@@ -505,6 +516,7 @@ namespace SPNet.Workflow.Publisher.Csom
         public string FormFieldXmlPath { get; private set; }
         public string MetadataJsonPath { get; private set; }
         public string EffectiveFormFieldXmlPath { get; internal set; }
+        public string EffectiveMetadataJsonPath { get; internal set; }
 
         public static PublishOptions Parse(string[] args)
         {
@@ -551,6 +563,7 @@ namespace SPNet.Workflow.Publisher.Csom
     {
         public string DisplayName { get; set; }
         public string Description { get; set; }
+        public PublisherWorkflowTarget Target { get; set; } = new PublisherWorkflowTarget();
         public PublisherWorkflowStartOptions Start { get; set; } = new PublisherWorkflowStartOptions();
         public PublisherWorkflowInitiation Initiation { get; set; } = new PublisherWorkflowInitiation();
 
@@ -559,6 +572,7 @@ namespace SPNet.Workflow.Publisher.Csom
             if (string.IsNullOrWhiteSpace(json)) return new PublisherWorkflowMetadata();
             var raw = new JavaScriptSerializer().DeserializeObject(json) as Dictionary<string, object> ?? new Dictionary<string, object>();
             var metadata = new PublisherWorkflowMetadata { DisplayName = ReadString(raw, "displayName"), Description = ReadString(raw, "description") };
+            if (ReadMap(raw, "target") is Dictionary<string, object> target) metadata.Target = new PublisherWorkflowTarget { Type = ReadTargetType(target, "type"), ListTitle = ReadString(target, "listTitle") };
             if (ReadMap(raw, "start") is Dictionary<string, object> start) metadata.Start = new PublisherWorkflowStartOptions { Manual = ReadBool(start, "manual"), OnCreated = ReadBool(start, "onCreated"), OnUpdated = ReadBool(start, "onUpdated") };
             if (ReadMap(raw, "initiation") is Dictionary<string, object> initiation)
             {
@@ -571,6 +585,7 @@ namespace SPNet.Workflow.Publisher.Csom
         private static Dictionary<string, object> ReadMap(Dictionary<string, object> map, string key) => map.TryGetValue(key, out var value) ? value as Dictionary<string, object> : null;
         private static string ReadString(Dictionary<string, object> map, string key) => map.TryGetValue(key, out var value) && value != null ? Convert.ToString(value) : null;
         private static bool? ReadBool(Dictionary<string, object> map, string key) => map.TryGetValue(key, out var value) && value != null ? Convert.ToBoolean(value) : (bool?)null;
+        private static TargetType? ReadTargetType(Dictionary<string, object> map, string key) => Enum.TryParse<TargetType>(ReadString(map, key), true, out var parsed) ? parsed : (TargetType?)null;
         private static List<PublisherFormField> ReadFormFields(Dictionary<string, object> map)
         {
             var fields = new List<PublisherFormField>();
@@ -605,6 +620,7 @@ namespace SPNet.Workflow.Publisher.Csom
     }
 
     internal sealed class PublisherWorkflowStartOptions { public bool? Manual { get; set; } public bool? OnCreated { get; set; } public bool? OnUpdated { get; set; } }
+    internal sealed class PublisherWorkflowTarget { public TargetType? Type { get; set; } public string ListTitle { get; set; } }
     internal sealed class PublisherWorkflowInitiation { public string Url { get; set; } public List<PublisherFormField> FormFields { get; set; } = new List<PublisherFormField>(); }
     internal sealed class PublisherChoice { public string Value { get; set; } public string DisplayName { get; set; } }
     internal sealed class PublisherFormField { public string Name { get; set; } public string FormType { get; set; } public string Type { get; set; } public string DisplayName { get; set; } public string Description { get; set; } public string Direction { get; set; } public object Default { get; set; } public string Format { get; set; } public string BaseType { get; set; } public string MaxLength { get; set; } public string NumLines { get; set; } public string Sortable { get; set; } public string RichTextMode { get; set; } public string List { get; set; } public string ShowField { get; set; } public string Mult { get; set; } public string UserSelectionMode { get; set; } public string UserSelectionScope { get; set; } public List<PublisherChoice> Choices { get; set; } = new List<PublisherChoice>(); }

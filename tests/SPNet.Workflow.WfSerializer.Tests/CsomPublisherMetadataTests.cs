@@ -9,9 +9,9 @@ namespace SPNet.Workflow.WfSerializer.Tests
     public sealed class CsomPublisherMetadataTests
     {
         [TestMethod]
-        public void DiscoverFormFieldSidecarPath_AppendsSidecarSuffix()
+        public void DiscoverMetadataJsonSidecarPath_AppendsSidecarSuffix()
         {
-            Assert.AreEqual(@"artifacts\workflow.xaml.formfield.xml", Program.DiscoverFormFieldSidecarPath(@"artifacts\workflow.xaml"));
+            Assert.AreEqual(@"artifacts\workflow.xaml.metadata.json", Program.DiscoverMetadataJsonSidecarPath(@"artifacts\workflow.xaml"));
         }
 
         [TestMethod]
@@ -66,6 +66,12 @@ namespace SPNet.Workflow.WfSerializer.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        [TestMethod]
+        public void DiscoverFormFieldSidecarPath_RemainsLegacyFallbackOnly()
+        {
+            Assert.AreEqual(@"artifacts\workflow.xaml.formfield.xml", Program.DiscoverFormFieldSidecarPath(@"artifacts\workflow.xaml"));
         }
 
         [TestMethod]
@@ -133,6 +139,16 @@ namespace SPNet.Workflow.WfSerializer.Tests
             var options = CreateOptions();
 
             Assert.AreEqual("Workflow", Program.EffectiveWorkflowName(options, metadata));
+        }
+
+        [TestMethod]
+        public void PublisherMetadataJson_CanDriveTargetType()
+        {
+            var metadata = PublisherWorkflowMetadata.FromJson(@"{""target"":{""type"":""List"",""listTitle"":""Documents""}}");
+            var options = CreateOptions();
+
+            Assert.AreEqual(TargetType.List, Program.EffectiveTargetType(options, metadata));
+            Assert.AreEqual("Documents", metadata.Target.ListTitle);
         }
 
         private static PublishOptions CreateOptions()

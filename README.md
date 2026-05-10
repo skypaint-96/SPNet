@@ -49,8 +49,8 @@ If editor state shows `src/SPNet.Workflow.Core/`, `src/SPNet.Workflow.Cli/`, or 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action ValidateConfig -Config config\spnet.local.yml
 ```
 
-3. Edit `samples/workflow.example.yml` or your own `spnet.workflow/v1` YAML file.
-4. Build YAML to SPD-compatible XAML:
+3. Edit `samples/workflow.example.yml` or your own `spnet.workflow/v1` YAML file. YAML is the authoring source of truth for workflow structure and publish metadata.
+4. Build YAML to SPD-compatible XAML plus the generated publish metadata sidecar `*.xaml.metadata.json`:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Build -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -Config config\spnet.local.yml
@@ -69,7 +69,7 @@ Equivalent direct CLI:
 .\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 ```
 
-6. Publish through the retained PowerShell boundary. By default publish builds from `-Workflow` to `-XamlPath` first; pass `-NoBuild` when publishing an existing XAML file directly. The current publisher path uses WorkflowServices CSOM and submits XAML as opaque text:
+6. Publish through the retained PowerShell boundary. By default publish builds from `-Workflow` to `-XamlPath` first, emits `-XamlPath + '.metadata.json'`, and passes that metadata JSON to the publisher. Pass `-NoBuild` only when publishing an existing XAML file that already has a matching metadata JSON sidecar, or pass `-MetadataJsonPath` explicitly. The current publisher path uses WorkflowServices CSOM, submits XAML as opaque text, and uses metadata JSON as the normal publish contract:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Publish -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -TargetType Site -DryRun
@@ -78,20 +78,57 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWo
 
 Remove `-DryRun` only when SharePoint authentication/session state and WorkflowServices CSOM dependencies are available. For browser-authenticated SharePoint Online sessions, the wrapper can hand off WebLogin/WinINet cookies to the CSOM publisher; username/password/domain credentials and default Windows credentials remain available for environments that support them.
 
+7. Download published workflows back to XAML plus metadata JSON. Download always writes the XAML and `*.xaml.metadata.json`; it may also preserve `*.xaml.formfield.xml` when SharePoint exposes legacy FormField metadata so older export/inspection paths can still inspect it:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Download -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -Out artifacts\YamlFirstSmoke.downloaded.xaml
+```
+
 ## YAML schema `spnet.workflow/v1`
 
 Supported top-level fields:
 
 - `schemaVersion`: must be `spnet.workflow/v1`.
-- `name`: friendly workflow name.
-- `technicalName`: optional WF class name; defaults to `name + .MTW`.
-- `start`: `manual`, `autoStartCreate`, `autoStartChange` metadata for authoring/publish tooling.
-- `target`: `type` and optional `listTitle` metadata for publish tooling.
-- `parameters`: initiation form parameters backed by SharePoint workflow `FormField` metadata. Use either map-style YAML keyed by parameter name or list-style items with explicit `name`. Supported field types are `Text`, `Choice`, `Note`, `URL`, `UserMulti` (WF `String`), `Boolean` (WF `Boolean`), `Number` (WF `Double`), and `DateTime` (WF `DateTime`). Metadata properties include `formType`, `displayName`, `description`, `direction`, `default`, `choices`, `format`, `baseType`, `maxLength`, `numLines`, `sortable`, `richTextMode`, `list`, `showField`, `mult`, `userSelectionMode`, and `userSelectionScope`. Parameter names must not duplicate variables, expressions may read parameters by name, and assignment actions may not target parameters.
+- `name`: friendly workflow name. This is the legacy alias for canonical `metadata.displayName`.
+- `technicalName`: optional WF class name; defaults to `name + .MTW`. This is the legacy alias for canonical `metadata.technicalName`.
+- `metadata`: canonical publish metadata source. Supported fields are `displayName`, `technicalName`, `description`, `target`, `start`, and `initiation.formFields`.
+- `start`: legacy top-level `manual`, `autoStartCreate`, `autoStartChange` metadata for authoring/publish tooling. Canonical metadata uses `metadata.start.manual`, `metadata.start.onCreated`, and `metadata.start.onUpdated`.
+- `target`: legacy top-level `type` and optional `listTitle` metadata for publish tooling. Canonical metadata uses `metadata.target.type` and `metadata.target.listTitle`.
+- `parameters`: legacy top-level initiation form parameters. Canonical metadata uses `metadata.initiation.formFields`. Use either map-style YAML keyed by parameter name or list-style items with explicit `name`. Supported field types are `Text`, `Choice`, `Note`, `URL`, `UserMulti` (WF `String`), `Boolean` (WF `Boolean`), `Number` (WF `Double`), and `DateTime` (WF `DateTime`). Metadata properties include `formType`, `displayName`, `description`, `direction`, `default`, `choices`, `format`, `baseType`, `maxLength`, `numLines`, `sortable`, `richTextMode`, `list`, `showField`, `mult`, `userSelectionMode`, and `userSelectionScope`. Parameter names must not duplicate variables, expressions may read parameters by name, and assignment actions may not target parameters.
 - `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, `Boolean`/`Bool`, `Int32`/`Int`/`Integer`, `Guid`, and `DateTime`/`Date` are supported.
 - `stages`: one or more stages, each with supported actions.
 
-When YAML with `parameters` is built, SPNet emits public WF `InArgument<T>` declarations in the generated XAML and writes a deterministic sidecar `*.xaml.formfield.xml` containing the SharePoint `FormField` XML for future publisher consumption. The current CSOM publisher does not yet apply that definition metadata during live publish, so parameter workflows should be treated as build/export artifacts until publisher support is validated.
+When YAML is built, SPNet emits public WF `InArgument<T>` declarations for effective initiation fields and writes a deterministic `*.xaml.metadata.json` sidecar. That JSON is generated from effective YAML metadata/defaults after applying the canonical `metadata` block and legacy aliases (`name`, `technicalName`, top-level `start`, top-level `target`, and `parameters`). It is the primary publish contract and contains display name, technical name, description, target, start options, initiation settings, and form fields. The normal round trip is YAML -> XAML + metadata JSON -> SharePoint publish with metadata JSON -> download XAML + metadata JSON. A legacy `*.xaml.formfield.xml` sidecar may still be generated for compatibility/inspection when form fields are present, and downloaded workflows may preserve it, but FormField XML is no longer the normal YAML publish input. Use `-FormFieldXmlPath` only as an explicit deprecated fallback when metadata JSON is unavailable.
+
+Canonical metadata example:
+
+```yaml
+schemaVersion: spnet.workflow/v1
+metadata:
+  displayName: ParameterWorkflow
+  technicalName: ParameterWorkflow.MTW
+  description: Workflow with initiation fields published from metadata JSON.
+  target:
+    type: List
+    listTitle: TestList
+  start:
+    manual: true
+    onCreated: false
+    onUpdated: false
+  initiation:
+    requiresForm: true
+    formFields:
+    - name: requestTitle
+      type: Text
+      displayName: Request title
+      default: New request
+stages:
+- name: Stage 1
+  actions:
+  - type: writeHistory
+    message:
+      variable: requestTitle
+```
 
 Supported actions:
 
@@ -293,7 +330,9 @@ Deferred actions for future safe expansion batches: `copyItem`, `checkInItem`, `
 
 ## CSOM publishing, listing, and cleanup
 
-The CSOM publisher supports site workflows and list workflows. List publishing resolves the target list by `-TargetListTitle` or `-TargetListId`, creates a WorkflowServices definition scoped to that list, publishes a subscription for that list, and applies manual/create/update start flags from YAML or explicit parameters. It expects standard `Workflow History` and `Workflow Tasks` lists to exist in the target web.
+The CSOM publisher supports site workflows and list workflows. List publishing resolves the target list by `-TargetListTitle` or `-TargetListId`, creates a WorkflowServices definition scoped to that list, publishes a subscription for that list, and applies manual/create/update start flags from YAML-generated metadata JSON or explicit parameters. It expects standard `Workflow History` and `Workflow Tasks` lists to exist in the target web.
+
+For YAML-authored workflows, `*.xaml.metadata.json` is the expected metadata input. `Invoke-SPNetYamlWorkflow.ps1 -Action Publish` discovers `-XamlPath + '.metadata.json'` automatically after build or accepts `-MetadataJsonPath` for an explicit sidecar. Direct publishing with `Invoke-SPNetWorkflow.ps1` and the CSOM publisher follows the same contract through `-MetadataJsonPath` / `--metadata-json`. The publisher converts `metadata.initiation.formFields` to SharePoint Definition `FormField` metadata internally during publish; `*.xaml.formfield.xml` is only a deprecated fallback/compatibility input and is not used by the normal YAML publish path.
 
 Publishing currently uses an intentionally conservative `--if-exists Fail` policy. If a workflow definition with the requested name already exists, local tooling reports the conflict instead of overwriting or deleting live SharePoint content.
 
@@ -343,13 +382,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWo
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-SPNetYamlWorkflowGolden.ps1 -Workflow samples\workflow.example.yml -XamlPath artifacts\golden\YamlFirstSmoke.xaml -Config config\spnet.local.yml
 ```
 
-Downloaded workflow XAML can be captured without publishing:
+Downloaded workflow XAML can be captured from SharePoint and will be accompanied by metadata JSON:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Download -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -Out artifacts\YamlFirstSmoke.downloaded.xaml
 ```
 
-Live publish validation requires SharePoint auth/session support and pinned SharePoint Online CSOM dependencies used by the publisher project. Do not publish or clean workflows as part of local validation unless intentionally performing a live SharePoint smoke test. Manual validation guidance: publish a uniquely named test workflow, open it in SharePoint Designer, run `Check for Errors`, validate the target list subscription/start behavior, then list and clean only the uniquely named test artifacts.
+The downloaded metadata JSON is written beside the XAML as `artifacts\YamlFirstSmoke.downloaded.xaml.metadata.json`. If SharePoint exposes legacy FormField XML, the download path may also write `artifacts\YamlFirstSmoke.downloaded.xaml.formfield.xml` for compatibility and inspection.
+
+Live publish validation requires SharePoint auth/session support and pinned SharePoint Online CSOM dependencies used by the publisher project. Do not publish or clean workflows as part of local validation unless intentionally performing a live SharePoint smoke test. Manual validation guidance: publish a uniquely named test workflow using YAML -> XAML + metadata JSON, open it in SharePoint Designer, run `Check for Errors`, validate the target list subscription/start behavior and initiation fields, download the workflow to confirm XAML + metadata JSON round trip, then list and clean only the uniquely named test artifacts.
 
 ## Known limitations
 
