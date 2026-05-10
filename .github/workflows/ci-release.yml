@@ -3,12 +3,12 @@ name: CI and Release
 on:
   push:
     branches:
-      - development
-      - production
+      - Development
+      - Production
   pull_request:
     branches:
-      - development
-      - production
+      - Development
+      - Production
 
 permissions:
   contents: read
