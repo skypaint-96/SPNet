@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj" />
     <ProjectReference Include="..\..\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj" />
   </ItemGroup>
 

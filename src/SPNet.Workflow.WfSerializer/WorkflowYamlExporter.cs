@@ -18,7 +18,12 @@ namespace SPNet.Workflow.WfSerializer
     {
         public static void ExportWorkflowYaml(string inputXamlPath, string outputYamlPath)
         {
-            WorkflowYamlExporter.Export(inputXamlPath, outputYamlPath);
+            WorkflowYamlExporter.Export(inputXamlPath, outputYamlPath, string.Empty);
+        }
+
+        public static void ExportWorkflowYaml(string inputXamlPath, string outputYamlPath, string formFieldXmlPath)
+        {
+            WorkflowYamlExporter.Export(inputXamlPath, outputYamlPath, formFieldXmlPath);
         }
     }
 
@@ -29,7 +34,7 @@ namespace SPNet.Workflow.WfSerializer
         private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
         private static readonly XNamespace SharePointNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities";
 
-        public static void Export(string inputXamlPath, string outputYamlPath)
+        public static void Export(string inputXamlPath, string outputYamlPath, string formFieldXmlPath)
         {
             if (!File.Exists(inputXamlPath)) throw new FileNotFoundException("Input XAML not found: " + inputXamlPath, inputXamlPath);
             var document = XDocument.Parse(File.ReadAllText(inputXamlPath));
@@ -38,12 +43,18 @@ namespace SPNet.Workflow.WfSerializer
             var name = className.EndsWith(SpdTechnicalClassSuffix, StringComparison.OrdinalIgnoreCase) ? className.Substring(0, className.Length - SpdTechnicalClassSuffix.Length) : className;
             var workflow = new WorkflowYaml { Name = name, TechnicalName = className };
             var assignedTargets = FindAssignedArgumentNames(document);
+            var formFieldParameters = LoadFormFieldParameters(inputXamlPath, formFieldXmlPath);
             foreach (var property in root.Element(XamlNamespace + "Members")?.Elements(XamlNamespace + "Property") ?? Enumerable.Empty<XElement>())
             {
                 var propertyName = (string?)property.Attribute("Name") ?? "variable";
                 var propertyType = (string?)property.Attribute("Type") ?? string.Empty;
                 if (IsExportableParameterType(propertyType) && !assignedTargets.Contains(propertyName)) workflow.Parameters.Add(new ParameterYaml { Name = propertyName, Type = MapXamlTypeToParameterType(propertyType), XamlType = propertyType, DisplayName = propertyName });
                 else workflow.Variables.Add(new VariableYaml { Name = propertyName, Type = MapXamlTypeToVariableType(propertyType) });
+            }
+            if (formFieldParameters.Count > 0)
+            {
+                MergeFormFieldParameters(workflow, formFieldParameters);
+                workflow.ExportWarnings.Add("FormField metadata export: parameters were populated from SharePoint workflow definition FormField metadata sidecar, preserving display names, defaults, choices, and field-specific settings where present.");
             }
             var stageElements = document.Descendants(ActivitiesNamespace + "Sequence").Where(e => !string.IsNullOrWhiteSpace((string?)e.Attribute("DisplayName"))).ToList();
             foreach (var stageElement in stageElements.Take(20))
@@ -53,9 +64,48 @@ namespace SPNet.Workflow.WfSerializer
                 if (stage.Actions.Count > 0) workflow.Stages.Add(stage);
             }
             workflow.ExportWarnings.Add("Partial structural export: supported SharePoint actions are listed, but expressions and list dictionaries may be placeholders when WF deserialization is not used.");
-            if (workflow.Parameters.Count > 0) workflow.ExportWarnings.Add("XAML-only parameter export: x:Members InArgument entries were exported as parameters, but SharePoint FormField metadata is not present in XAML so display names, choices, URL/person/note settings, and authoritative defaults may be incomplete.");
+            if (workflow.Parameters.Count > 0 && formFieldParameters.Count == 0) workflow.ExportWarnings.Add("XAML-only parameter export: x:Members InArgument entries were exported as parameters, but SharePoint FormField metadata is not present in XAML so display names, choices, URL/person/note settings, and authoritative defaults may be incomplete.");
             if (workflow.Stages.Count == 0) workflow.Stages.Add(new StageYaml { Name = "Unsupported XAML", Actions = new System.Collections.Generic.List<WorkflowActionYaml>() });
             workflow.Save(outputYamlPath);
+        }
+
+        private static List<ParameterYaml> LoadFormFieldParameters(string inputXamlPath, string explicitFormFieldXmlPath)
+        {
+            var formFieldPath = ResolveFormFieldXmlPath(inputXamlPath, explicitFormFieldXmlPath);
+            return string.IsNullOrWhiteSpace(formFieldPath) ? new List<ParameterYaml>() : WorkflowParameterFormFieldSerializer.Parse(File.ReadAllText(formFieldPath));
+        }
+
+        internal static string ResolveFormFieldXmlPath(string inputXamlPath, string explicitFormFieldXmlPath)
+        {
+            if (!string.IsNullOrWhiteSpace(explicitFormFieldXmlPath))
+            {
+                if (!File.Exists(explicitFormFieldXmlPath)) throw new FileNotFoundException("FormField XML not found: " + explicitFormFieldXmlPath, explicitFormFieldXmlPath);
+                return explicitFormFieldXmlPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(inputXamlPath)) return string.Empty;
+            var sidecarPath = inputXamlPath + ".formfield.xml";
+            return File.Exists(sidecarPath) ? sidecarPath : string.Empty;
+        }
+
+        private static void MergeFormFieldParameters(WorkflowYaml workflow, List<ParameterYaml> formFieldParameters)
+        {
+            var xamlParameters = workflow.Parameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+            var merged = new List<ParameterYaml>();
+            var mergedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var formFieldParameter in formFieldParameters)
+            {
+                if (xamlParameters.TryGetValue(formFieldParameter.Name, out var xamlParameter) && string.IsNullOrWhiteSpace(formFieldParameter.XamlType)) formFieldParameter.XamlType = xamlParameter.XamlType;
+                merged.Add(formFieldParameter);
+                mergedNames.Add(formFieldParameter.Name);
+            }
+
+            foreach (var xamlParameter in workflow.Parameters)
+            {
+                if (!mergedNames.Contains(xamlParameter.Name)) merged.Add(xamlParameter);
+            }
+
+            workflow.Parameters = merged;
         }
 
         private static bool IsExportableParameterType(string propertyType) =>

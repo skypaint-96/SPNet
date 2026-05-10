@@ -547,6 +547,85 @@ stages:
             }
         }
 
+        [TestMethod]
+        public void ExportWorkflowYaml_UsesExplicitFormFieldMetadataForParameters()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-formfield-export-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var formFieldPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-formfield-export-" + Guid.NewGuid().ToString("N") + ".formfield.xml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-formfield-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, @"<Activity x:Class=""ParameterWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:s=""clr-namespace:System;assembly=mscorlib"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><x:Members><x:Property Name=""titleParam"" Type=""InArgument(x:String)"" /><x:Property Name=""approved"" Type=""InArgument(x:Boolean)"" /><x:Property Name=""amount"" Type=""InArgument(x:Double)"" /><x:Property Name=""legacyOnly"" Type=""InArgument(x:String)"" /></x:Members><Sequence DisplayName=""Stage 1""><local:WriteToHistory Message=""hello"" /></Sequence></Activity>");
+            File.WriteAllText(formFieldPath, @"<Fields><Field Name=""titleParam"" FormType=""Initiation"" Type=""Text"" DisplayName=""Request title"" Description=""Title description"" Direction=""None"" MaxLength=""255""><Default>default title</Default></Field><Field Name=""approved"" FormType=""Initiation"" Type=""Boolean"" DisplayName=""Approved?"" Direction=""None""><Default>1</Default></Field><Field Name=""choiceParam"" FormType=""Initiation"" Type=""Choice"" Format=""Dropdown"" BaseType=""Text"" DisplayName=""Choice parameter"" Direction=""None"" CustomAttribute=""preserved""><Default>Choice2</Default><CHOICES><CHOICE DisplayName=""Choice One"">Choice1</CHOICE><CHOICE>Choice2</CHOICE></CHOICES></Field><Field Name=""personParam"" FormType=""Initiation"" Type=""UserMulti"" List=""UserInfo"" ShowField=""Name"" Mult=""TRUE"" UserSelectionMode=""PeopleAndGroups"" UserSelectionScope=""0"" DisplayName=""People"" Direction=""None"" /><Field Name=""noteParam"" FormType=""Initiation"" Type=""Note"" NumLines=""6"" Sortable=""FALSE"" RichTextMode=""Compatible"" DisplayName=""Notes"" Direction=""None"" /><Field Name=""urlParam"" FormType=""Initiation"" Type=""URL"" Format=""Image"" DisplayName=""Picture"" Direction=""None"" /><Field Name=""amount"" FormType=""Initiation"" Type=""Number"" DisplayName=""Amount"" Direction=""None""><Default>12.5</Default></Field></Fields>");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath, formFieldPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.AreEqual("Request title", workflow.Parameters.Single(p => p.Name == "titleParam").DisplayName);
+                Assert.AreEqual("Title description", workflow.Parameters.Single(p => p.Name == "titleParam").Description);
+                Assert.AreEqual("255", workflow.Parameters.Single(p => p.Name == "titleParam").MaxLength);
+                Assert.AreEqual("default title", workflow.Parameters.Single(p => p.Name == "titleParam").Default);
+                Assert.AreEqual("1", workflow.Parameters.Single(p => p.Name == "approved").Default);
+                var choice = workflow.Parameters.Single(p => p.Name == "choiceParam");
+                Assert.AreEqual("Choice", choice.Type);
+                Assert.AreEqual("Dropdown", choice.Format);
+                Assert.AreEqual("Text", choice.BaseType);
+                Assert.AreEqual("preserved", choice.Attributes["CustomAttribute"]);
+                Assert.AreEqual(2, choice.Choices.Count);
+                Assert.AreEqual("Choice One", choice.Choices[0].DisplayName);
+                var person = workflow.Parameters.Single(p => p.Name == "personParam");
+                Assert.AreEqual("UserMulti", person.Type);
+                Assert.AreEqual("UserInfo", person.List);
+                Assert.AreEqual("TRUE", person.Mult);
+                Assert.AreEqual("PeopleAndGroups", person.UserSelectionMode);
+                Assert.AreEqual("0", person.UserSelectionScope);
+                var note = workflow.Parameters.Single(p => p.Name == "noteParam");
+                Assert.AreEqual("6", note.NumLines);
+                Assert.AreEqual("FALSE", note.Sortable);
+                Assert.AreEqual("Compatible", note.RichTextMode);
+                Assert.AreEqual("Image", workflow.Parameters.Single(p => p.Name == "urlParam").Format);
+                Assert.AreEqual("Text", workflow.Parameters.Single(p => p.Name == "legacyOnly").Type, "XAML-only parameters not present in FormField should remain available.");
+                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("FormField metadata export")), "Expected FormField metadata warning.");
+                Assert.IsFalse(workflow.ExportWarnings.Any(w => w.Contains("XAML-only parameter export")), "FormField export should not emit the conservative XAML-only parameter warning.");
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(formFieldPath)) File.Delete(formFieldPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_AutoDiscoversFormFieldSidecarPath()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-sidecar-export-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var formFieldPath = inputPath + ".formfield.xml";
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-sidecar-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, @"<Activity x:Class=""ParameterWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><x:Members><x:Property Name=""titleParam"" Type=""InArgument(x:String)"" /></x:Members><Sequence DisplayName=""Stage 1""><local:WriteToHistory Message=""hello"" /></Sequence></Activity>");
+            File.WriteAllText(formFieldPath, @"<Fields><Field Name=""titleParam"" FormType=""Initiation"" Type=""Text"" DisplayName=""Auto-discovered title"" Direction=""None"" /></Fields>");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.AreEqual("Auto-discovered title", workflow.Parameters.Single(p => p.Name == "titleParam").DisplayName);
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(formFieldPath)) File.Delete(formFieldPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void WfSerializerOptionsParse_AcceptsExportFormFieldXmlArgument()
+        {
+            var options = WfSerializerOptions.Parse(new[] { "export", "--xaml", "workflow.xaml", "--out", "workflow.yml", "--form-field-xml", "workflow.xaml.formfield.xml" });
+
+            Assert.AreEqual("workflow.xaml.formfield.xml", options.FormFieldXmlPath);
+        }
+
         private static ParameterYaml[] CreateParameterisedWFExParameters() => new[]
         {
             new ParameterYaml { Name = "ExampleStringParam", Type = "Text", MaxLength = "255", DisplayName = "ExampleStringParam", Description = string.Empty, Direction = "None", Default = "defaultvaluieaac" },

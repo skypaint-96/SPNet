@@ -4,8 +4,12 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Xml.Linq;
 using Microsoft.SharePoint.Client;
 using Microsoft.SharePoint.Client.WorkflowServices;
+
+[assembly: InternalsVisibleTo("SPNet.Workflow.WfSerializer.Tests")]
 
 namespace SPNet.Workflow.Publisher.Csom
 {
@@ -37,6 +41,7 @@ namespace SPNet.Workflow.Publisher.Csom
         private static void Publish(PublishOptions options)
         {
             var xaml = System.IO.File.ReadAllText(options.XamlPath);
+            var formFieldXml = LoadFormFieldXml(options);
             using (var context = new ClientContext(options.SiteUrl))
             {
                 ConfigureAuthentication(context, options);
@@ -52,16 +57,16 @@ namespace SPNet.Workflow.Publisher.Csom
 
                 if (options.TargetType == TargetType.List)
                 {
-                    PublishListWorkflow(context, web, deploymentService, subscriptionService, options, xaml);
+                    PublishListWorkflow(context, web, deploymentService, subscriptionService, options, xaml, formFieldXml);
                 }
                 else
                 {
-                    PublishSiteWorkflow(context, web, deploymentService, subscriptionService, options, xaml);
+                    PublishSiteWorkflow(context, web, deploymentService, subscriptionService, options, xaml, formFieldXml);
                 }
             }
         }
 
-        private static void PublishListWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, string xaml)
+        private static void PublishListWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, string xaml, string formFieldXml)
         {
             var targetList = GetTargetList(web, options);
             var workflowHistoryList = web.Lists.GetByTitle("Workflow History");
@@ -79,10 +84,12 @@ namespace SPNet.Workflow.Publisher.Csom
                 RestrictToType = "List",
                 RestrictToScope = targetList.Id.ToString()
             };
+            ApplyWorkflowDefinitionMetadata(definition, formFieldXml, null);
 
             var saveResult = deploymentService.SaveDefinition(definition);
             context.ExecuteQuery();
             var definitionId = saveResult.Value;
+            EnsureSavedDefinitionMetadata(context, deploymentService, definitionId, formFieldXml);
 
             deploymentService.PublishDefinition(definitionId);
             context.ExecuteQuery();
@@ -113,11 +120,13 @@ namespace SPNet.Workflow.Publisher.Csom
                 ["SubscriptionId"] = subscriptionResult.Value.ToString(),
                 ["StartManual"] = options.StartManual,
                 ["StartOnCreated"] = options.StartOnCreated,
-                ["StartOnUpdated"] = options.StartOnUpdated
+                ["StartOnUpdated"] = options.StartOnUpdated,
+                ["HasFormField"] = !string.IsNullOrWhiteSpace(formFieldXml),
+                ["FormFieldXmlPath"] = options.EffectiveFormFieldXmlPath
             });
         }
 
-        private static void PublishSiteWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, string xaml)
+        private static void PublishSiteWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, string xaml, string formFieldXml)
         {
             var definition = new WorkflowDefinition(context)
             {
@@ -127,10 +136,12 @@ namespace SPNet.Workflow.Publisher.Csom
                 RestrictToType = "Site",
                 RestrictToScope = web.Id.ToString()
             };
+            ApplyWorkflowDefinitionMetadata(definition, formFieldXml, null);
 
             var saveResult = deploymentService.SaveDefinition(definition);
             context.ExecuteQuery();
             var definitionId = saveResult.Value;
+            EnsureSavedDefinitionMetadata(context, deploymentService, definitionId, formFieldXml);
 
             deploymentService.PublishDefinition(definitionId);
             context.ExecuteQuery();
@@ -154,8 +165,134 @@ namespace SPNet.Workflow.Publisher.Csom
                 ["WorkflowName"] = options.WorkflowName,
                 ["TargetType"] = "Site",
                 ["DefinitionId"] = definitionId.ToString(),
-                ["SubscriptionId"] = subscriptionResult.Value.ToString()
+                ["SubscriptionId"] = subscriptionResult.Value.ToString(),
+                ["HasFormField"] = !string.IsNullOrWhiteSpace(formFieldXml),
+                ["FormFieldXmlPath"] = options.EffectiveFormFieldXmlPath
             });
+        }
+
+        internal static string DiscoverFormFieldSidecarPath(string xamlPath)
+        {
+            if (string.IsNullOrWhiteSpace(xamlPath)) return null;
+            return xamlPath + ".formfield.xml";
+        }
+
+        internal static string ComputeInitiationUrl(Guid definitionId)
+        {
+            return "wfsvc/" + definitionId.ToString("N") + "/WFInitForm.aspx";
+        }
+
+        internal static string NormalizeFormFieldXml(string formFieldXml)
+        {
+            if (string.IsNullOrWhiteSpace(formFieldXml)) return null;
+            var document = XDocument.Parse(formFieldXml, LoadOptions.PreserveWhitespace);
+            if (!string.Equals(document.Root?.Name.LocalName, "Fields", StringComparison.Ordinal)) throw new ArgumentException("FormField XML root element must be <Fields>.");
+            return document.ToString(SaveOptions.DisableFormatting);
+        }
+
+        private static string LoadFormFieldXml(PublishOptions options)
+        {
+            var path = options.FormFieldXmlPath;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                var sidecarPath = DiscoverFormFieldSidecarPath(options.XamlPath);
+                if (!string.IsNullOrWhiteSpace(sidecarPath) && System.IO.File.Exists(sidecarPath)) path = sidecarPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            if (!System.IO.File.Exists(path)) throw new FileNotFoundException("FormField XML file not found.", path);
+            options.EffectiveFormFieldXmlPath = path;
+            return NormalizeFormFieldXml(System.IO.File.ReadAllText(path));
+        }
+
+        private static void EnsureSavedDefinitionMetadata(ClientContext context, WorkflowDeploymentService deploymentService, Guid definitionId, string formFieldXml)
+        {
+            if (string.IsNullOrWhiteSpace(formFieldXml)) return;
+            var savedDefinition = deploymentService.GetDefinition(definitionId);
+            context.Load(savedDefinition);
+            context.ExecuteQuery();
+            ApplyWorkflowDefinitionMetadata(savedDefinition, formFieldXml, ComputeInitiationUrl(definitionId));
+            deploymentService.SaveDefinition(savedDefinition);
+            context.ExecuteQuery();
+        }
+
+        internal static void ApplyWorkflowDefinitionMetadata(object definition, string formFieldXml, string initiationUrl)
+        {
+            if (definition == null || string.IsNullOrWhiteSpace(formFieldXml)) return;
+            SetWorkflowDefinitionMetadataValue(definition, "FormField", formFieldXml);
+            SetWorkflowDefinitionMetadataValue(definition, "RequiresInitiationForm", true);
+            if (!string.IsNullOrWhiteSpace(initiationUrl)) SetWorkflowDefinitionMetadataValue(definition, "InitiationUrl", initiationUrl);
+        }
+
+        private static void SetWorkflowDefinitionMetadataValue(object definition, string name, object value)
+        {
+            if (TrySetPublicProperty(definition, name, value)) return;
+            if (TryInvokeSetProperty(definition, name, value)) return;
+            if (TrySetPropertyDefinitionsValue(definition, name, value)) return;
+
+            if (string.Equals(name, "InitiationUrl", StringComparison.OrdinalIgnoreCase)) return;
+            throw new MissingMemberException(definition.GetType().FullName, name);
+        }
+
+        private static bool TrySetPublicProperty(object target, string name, object value)
+        {
+            var property = target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+            if (property == null || !property.CanWrite) return false;
+            property.SetValue(target, CoerceValue(value, property.PropertyType), null);
+            return true;
+        }
+
+        private static bool TryInvokeSetProperty(object target, string name, object value)
+        {
+            var setProperty = target.GetType().GetMethod("SetProperty", BindingFlags.Instance | BindingFlags.Public, null, new[] { typeof(string), typeof(object) }, null);
+            if (setProperty != null)
+            {
+                setProperty.Invoke(target, new[] { name, value });
+                return true;
+            }
+
+            setProperty = target.GetType().GetMethod("SetProperty", BindingFlags.Instance | BindingFlags.Public, null, new[] { typeof(string), typeof(string) }, null);
+            if (setProperty != null)
+            {
+                setProperty.Invoke(target, new[] { name, Convert.ToString(value) });
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TrySetPropertyDefinitionsValue(object target, string name, object value)
+        {
+            var propertyDefinitions = target.GetType().GetProperty("PropertyDefinitions", BindingFlags.Instance | BindingFlags.Public);
+            var propertyDefinitionsValue = propertyDefinitions == null ? null : propertyDefinitions.GetValue(target, null);
+            if (propertyDefinitionsValue == null) return false;
+
+            var indexer = propertyDefinitionsValue.GetType().GetProperty("Item", BindingFlags.Instance | BindingFlags.Public, null, typeof(string), new[] { typeof(string) }, null);
+            if (indexer != null && indexer.CanWrite)
+            {
+                indexer.SetValue(propertyDefinitionsValue, Convert.ToString(value), new object[] { name });
+                return true;
+            }
+
+            var add = propertyDefinitionsValue.GetType().GetMethod("Add", BindingFlags.Instance | BindingFlags.Public, null, new[] { typeof(string), typeof(string) }, null);
+            if (add != null)
+            {
+                add.Invoke(propertyDefinitionsValue, new[] { name, Convert.ToString(value) });
+                return true;
+            }
+
+            return false;
+        }
+
+        private static object CoerceValue(object value, Type targetType)
+        {
+            if (value == null || targetType.IsInstanceOfType(value)) return value;
+            var nullableType = Nullable.GetUnderlyingType(targetType);
+            if (nullableType != null) targetType = nullableType;
+            if (targetType == typeof(string)) return Convert.ToString(value);
+            if (targetType == typeof(bool)) return Convert.ToBoolean(value);
+            if (targetType == typeof(Guid)) return value is Guid guid ? guid : Guid.Parse(Convert.ToString(value));
+            return Convert.ChangeType(value, targetType);
         }
 
         private static List<string> BuildEventTypes(PublishOptions options)
@@ -300,6 +437,8 @@ namespace SPNet.Workflow.Publisher.Csom
         public string Username { get; private set; }
         public string Password { get; private set; }
         public string Domain { get; private set; }
+        public string FormFieldXmlPath { get; private set; }
+        public string EffectiveFormFieldXmlPath { get; internal set; }
 
         public static PublishOptions Parse(string[] args)
         {
@@ -322,7 +461,8 @@ namespace SPNet.Workflow.Publisher.Csom
                 CookieHeader = Optional(map, "cookie-header"),
                 Username = Optional(map, "username"),
                 Password = Optional(map, "password"),
-                Domain = Optional(map, "domain")
+                Domain = Optional(map, "domain"),
+                FormFieldXmlPath = Optional(map, "form-field-xml")
             };
             if (map.ContainsKey("target-list-id")) options.TargetListId = Guid.Parse(map["target-list-id"]);
             if (map.ContainsKey("start-manual")) options.StartManual = bool.Parse(map["start-manual"]);
@@ -330,6 +470,7 @@ namespace SPNet.Workflow.Publisher.Csom
             if (map.ContainsKey("start-updated")) options.StartOnUpdated = bool.Parse(map["start-updated"]);
             if (map.ContainsKey("if-exists")) options.IfExists = ParseEnum<IfExistsPolicy>(map["if-exists"], "if-exists");
             if (!System.IO.File.Exists(options.XamlPath)) throw new FileNotFoundException("XAML file not found.", options.XamlPath);
+            if (!string.IsNullOrWhiteSpace(options.FormFieldXmlPath) && !System.IO.File.Exists(options.FormFieldXmlPath)) throw new FileNotFoundException("FormField XML file not found.", options.FormFieldXmlPath);
             return options;
         }
 
