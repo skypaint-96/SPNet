@@ -10,13 +10,15 @@ namespace SPNet.Workflow.WfSerializer
             WfActivityBuilderSerializer.ValueExpressionTypes valueExpressionTypes,
             WfActivityBuilderSerializer.ComparisonExpressionTypes comparisonExpressionTypes,
             Type dynamicValueType,
-            IReadOnlyDictionary<string, Type> variableTypes)
+            IReadOnlyDictionary<string, Type> variableTypes,
+            IReadOnlyDictionary<string, Type> parameterTypes)
         {
             ProxyActivityTypes = proxyActivityTypes ?? throw new ArgumentNullException(nameof(proxyActivityTypes));
             ValueExpressionTypes = valueExpressionTypes ?? throw new ArgumentNullException(nameof(valueExpressionTypes));
             ComparisonExpressionTypes = comparisonExpressionTypes ?? throw new ArgumentNullException(nameof(comparisonExpressionTypes));
             DynamicValueType = dynamicValueType ?? throw new ArgumentNullException(nameof(dynamicValueType));
             VariableTypes = variableTypes ?? throw new ArgumentNullException(nameof(variableTypes));
+            ParameterTypes = parameterTypes ?? throw new ArgumentNullException(nameof(parameterTypes));
         }
 
         public IReadOnlyDictionary<string, Type> ProxyActivityTypes { get; }
@@ -28,6 +30,8 @@ namespace SPNet.Workflow.WfSerializer
         public Type DynamicValueType { get; }
 
         public IReadOnlyDictionary<string, Type> VariableTypes { get; }
+
+        public IReadOnlyDictionary<string, Type> ParameterTypes { get; }
 
         public Type GetProxyActivityType(string key)
         {

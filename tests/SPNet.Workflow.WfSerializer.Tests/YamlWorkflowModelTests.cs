@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Xml.Linq;
 using YamlDotNet.Core;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SPNet.Workflow.WfSerializer;
@@ -406,6 +407,158 @@ namespace SPNet.Workflow.WfSerializer.Tests
             Assert.IsFalse(normalized.Contains("CSharpValue"), "Generated metadata output should not contain raw CSharpValue.");
             Assert.IsFalse(normalized.Contains("CSharpReference"), "Generated metadata output should not contain raw CSharpReference.");
         }
+
+        [TestMethod]
+        public void Load_DeserializesMapStyleParameters()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: ParameterWorkflow
+parameters:
+  titleParam:
+    type: Text
+    displayName: Title Parameter
+    default: hello
+  approved:
+    type: Boolean
+    default: true
+stages:
+  - name: Stage 1
+    actions:
+      - type: writeHistory
+        message:
+          variable: titleParam");
+
+            Assert.AreEqual(2, workflow.Parameters.Count);
+            Assert.AreEqual("titleParam", workflow.Parameters[0].Name);
+            Assert.AreEqual("Title Parameter", workflow.Parameters[0].DisplayName);
+            Assert.AreEqual("approved", workflow.Parameters[1].Name);
+            Assert.AreEqual("Boolean", workflow.Parameters[1].Type);
+        }
+
+        [TestMethod]
+        public void Load_DeserializesListStyleParameters()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: ParameterWorkflow
+parameters:
+  - name: titleParam
+    type: Text
+    displayName: Title Parameter
+    default: hello
+  - name: approved
+    type: Boolean
+    default: true
+stages:
+  - name: Stage 1
+    actions:
+      - type: writeHistory
+        message:
+          variable: titleParam");
+
+            Assert.AreEqual(2, workflow.Parameters.Count);
+            Assert.AreEqual("titleParam", workflow.Parameters[0].Name);
+            Assert.AreEqual("approved", workflow.Parameters[1].Name);
+        }
+
+        [TestMethod]
+        public void Load_RejectsDuplicateParameterAndVariableName()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: ParameterWorkflow
+variables:
+  - name: duplicateName
+    type: String
+parameters:
+  duplicateName:
+    type: Text
+stages:
+  - name: Stage 1
+    actions:
+      - type: writeHistory
+        message: hello"));
+
+            StringAssert.Contains(ex.Message, "Duplicate variable/parameter name");
+        }
+
+        [TestMethod]
+        public void Load_RejectsAssignmentToParameter()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: ParameterWorkflow
+parameters:
+  readonlyParam:
+    type: Text
+stages:
+  - name: Stage 1
+    actions:
+      - type: assign
+        to: readonlyParam
+        value: changed"));
+
+            StringAssert.Contains(ex.Message, "cannot assign to initiation parameter");
+        }
+
+        [TestMethod]
+        public void FormFieldSerializer_GeneratesParameterisedWFExMetadataShape()
+        {
+            var xml = WorkflowParameterFormFieldSerializer.Serialize(CreateParameterisedWFExParameters());
+            var document = XDocument.Parse(xml);
+            var fields = document.Root.Elements("Field").ToList();
+
+            Assert.AreEqual(9, fields.Count);
+            Assert.AreEqual("ExampleStringParam", (string)fields[0].Attribute("Name"));
+            Assert.AreEqual("Text", (string)fields[0].Attribute("Type"));
+            Assert.AreEqual("255", (string)fields[0].Attribute("MaxLength"));
+            Assert.AreEqual("defaultvaluieaac", fields[0].Element("Default")?.Value);
+            var choice = fields.Single(f => (string)f.Attribute("Name") == "examplechoice");
+            Assert.AreEqual("Dropdown", (string)choice.Attribute("Format"));
+            Assert.AreEqual("Choice2", choice.Element("Default")?.Value);
+            Assert.AreEqual(3, choice.Element("CHOICES")?.Elements("CHOICE").Count());
+            var person = fields.Single(f => (string)f.Attribute("Name") == "exampleperson");
+            Assert.AreEqual("UserMulti", (string)person.Attribute("Type"));
+            Assert.AreEqual("TRUE", (string)person.Attribute("Mult"));
+            var note = fields.Single(f => (string)f.Attribute("Name") == "examplemultilineparam");
+            Assert.AreEqual("6", (string)note.Attribute("NumLines"));
+            Assert.AreEqual("Compatible", (string)note.Attribute("RichTextMode"));
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_ExportsXamlOnlyInArgumentParametersConservatively()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-export-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, @"<Activity x:Class=""ParameterWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:s=""clr-namespace:System;assembly=mscorlib"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><x:Members><x:Property Name=""titleParam"" Type=""InArgument(x:String)"" /><x:Property Name=""approved"" Type=""InArgument(x:Boolean)"" /><x:Property Name=""amount"" Type=""InArgument(x:Double)"" /><x:Property Name=""dueDate"" Type=""InArgument(s:DateTime)"" /></x:Members><Sequence DisplayName=""Stage 1""><local:WriteToHistory Message=""hello"" /></Sequence></Activity>");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.AreEqual(4, workflow.Parameters.Count);
+                Assert.AreEqual("Text", workflow.Parameters.Single(p => p.Name == "titleParam").Type);
+                Assert.AreEqual("Boolean", workflow.Parameters.Single(p => p.Name == "approved").Type);
+                Assert.AreEqual("Number", workflow.Parameters.Single(p => p.Name == "amount").Type);
+                Assert.AreEqual("DateTime", workflow.Parameters.Single(p => p.Name == "dueDate").Type);
+                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("XAML-only parameter export")));
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        private static ParameterYaml[] CreateParameterisedWFExParameters() => new[]
+        {
+            new ParameterYaml { Name = "ExampleStringParam", Type = "Text", MaxLength = "255", DisplayName = "ExampleStringParam", Description = string.Empty, Direction = "None", Default = "defaultvaluieaac" },
+            new ParameterYaml { Name = "exampleboolparam", Type = "Boolean", DisplayName = "exampleboolparam", Description = string.Empty, Direction = "None", Default = true },
+            new ParameterYaml { Name = "examplechoice", Type = "Choice", Format = "Dropdown", BaseType = "Text", DisplayName = "examplechoice", Description = string.Empty, Direction = "None", Default = "Choice2", Choices = { new ChoiceYaml { DisplayName = "Choice 1", Value = "choice1value" }, new ChoiceYaml { DisplayName = "Choice2", Value = "Choice2" }, new ChoiceYaml { DisplayName = "Param Title", Value = "wfvarname" } } },
+            new ParameterYaml { Name = "exampleperson", Type = "UserMulti", List = "UserInfo", ShowField = "Name", Mult = "TRUE", UserSelectionMode = "PeopleAndGroups", UserSelectionScope = "386", DisplayName = "exampleperson", Description = string.Empty, Direction = "None" },
+            new ParameterYaml { Name = "examplemultilineparam", Type = "Note", NumLines = "6", Sortable = "FALSE", RichTextMode = "Compatible", DisplayName = "examplemultilineparam", Description = string.Empty, Direction = "None" },
+            new ParameterYaml { Name = "Example", Type = "URL", Format = "Hyperlink", DisplayName = "Example", Description = string.Empty, Direction = "None" },
+            new ParameterYaml { Name = "examplepicture", Type = "URL", Format = "Image", DisplayName = "examplepicture", Description = string.Empty, Direction = "None" },
+            new ParameterYaml { Name = "Example1", Type = "Number", DisplayName = "Example1", Description = string.Empty, Direction = "None", Default = 0d },
+            new ParameterYaml { Name = "exampledate", Type = "DateTime", DisplayName = "exampledate", Description = string.Empty, Direction = "None" }
+        };
 
         private static WorkflowYaml LoadYaml(string yaml)
         {

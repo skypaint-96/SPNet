@@ -74,6 +74,7 @@ namespace SPNet.Workflow.WfSerializer
         {
             var workflow = WorkflowYaml.Load(workflowYamlPath);
             SerializeWorkflow(BuildWorkflowFromYaml(workflow, cacheFolder), outputXamlPath, cacheFolder);
+            WriteParameterFormFieldSidecar(workflow, outputXamlPath);
         }
 
         /// <summary>
@@ -94,9 +95,10 @@ namespace SPNet.Workflow.WfSerializer
                 var valueExpressionTypes = proxyTypes.CreateValueExpressionTypes();
 
                 var variableTypes = WorkflowVariableTypeInferer.Infer(workflow, proxyTypes.DynamicValue, SpdEmptyDynamicValueArgumentName, SpdRequestHeadersArgumentName);
+                var parameterTypes = (workflow.Parameters ?? new List<ParameterYaml>()).ToDictionary(p => p.Name, WorkflowTypeMapper.MapParameterType, StringComparer.OrdinalIgnoreCase);
                 ValidateAssignments(workflow, variableTypes);
 
-                var buildContext = new WorkflowActivityBuildContext(proxyTypes.CreateBuildContextTypes(), valueExpressionTypes, proxyTypes.ComparisonExpressionTypes, proxyTypes.DynamicValue, variableTypes);
+                var buildContext = new WorkflowActivityBuildContext(proxyTypes.CreateBuildContextTypes(), valueExpressionTypes, proxyTypes.ComparisonExpressionTypes, proxyTypes.DynamicValue, variableTypes, parameterTypes);
                 return new WorkflowActivityBuilder(BuildAction).Build(workflow, buildContext);
             }
         }
@@ -107,6 +109,14 @@ namespace SPNet.Workflow.WfSerializer
             if (context == null) throw new ArgumentNullException(nameof(context));
             if (ActionBuilders.TryGetValue(action.GetType(), out var builder)) return builder(action, context);
             throw new InvalidOperationException("Unsupported action type: " + action.Type);
+        }
+
+        private static void WriteParameterFormFieldSidecar(WorkflowYaml workflow, string outputXamlPath)
+        {
+            if (workflow.Parameters == null || workflow.Parameters.Count == 0) return;
+            var outputPath = Path.GetFullPath(outputXamlPath + ".formfield.xml");
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? Environment.CurrentDirectory);
+            File.WriteAllText(outputPath, WorkflowParameterFormFieldSerializer.Serialize(workflow.Parameters));
         }
 
         private delegate Activity ActionBuilder(WorkflowActionYaml action, WorkflowActivityBuildContext context);

@@ -37,9 +37,13 @@ namespace SPNet.Workflow.WfSerializer
             var className = (string?)root.Attribute(XamlNamespace + "Class") ?? "ExportedWorkflow.MTW";
             var name = className.EndsWith(SpdTechnicalClassSuffix, StringComparison.OrdinalIgnoreCase) ? className.Substring(0, className.Length - SpdTechnicalClassSuffix.Length) : className;
             var workflow = new WorkflowYaml { Name = name, TechnicalName = className };
+            var assignedTargets = FindAssignedArgumentNames(document);
             foreach (var property in root.Element(XamlNamespace + "Members")?.Elements(XamlNamespace + "Property") ?? Enumerable.Empty<XElement>())
             {
-                workflow.Variables.Add(new VariableYaml { Name = (string?)property.Attribute("Name") ?? "variable", Type = ((string?)property.Attribute("Type") ?? string.Empty).Contains("Double") ? "Double" : "String" });
+                var propertyName = (string?)property.Attribute("Name") ?? "variable";
+                var propertyType = (string?)property.Attribute("Type") ?? string.Empty;
+                if (IsExportableParameterType(propertyType) && !assignedTargets.Contains(propertyName)) workflow.Parameters.Add(new ParameterYaml { Name = propertyName, Type = MapXamlTypeToParameterType(propertyType), XamlType = propertyType, DisplayName = propertyName });
+                else workflow.Variables.Add(new VariableYaml { Name = propertyName, Type = MapXamlTypeToVariableType(propertyType) });
             }
             var stageElements = document.Descendants(ActivitiesNamespace + "Sequence").Where(e => !string.IsNullOrWhiteSpace((string?)e.Attribute("DisplayName"))).ToList();
             foreach (var stageElement in stageElements.Take(20))
@@ -49,8 +53,56 @@ namespace SPNet.Workflow.WfSerializer
                 if (stage.Actions.Count > 0) workflow.Stages.Add(stage);
             }
             workflow.ExportWarnings.Add("Partial structural export: supported SharePoint actions are listed, but expressions and list dictionaries may be placeholders when WF deserialization is not used.");
+            if (workflow.Parameters.Count > 0) workflow.ExportWarnings.Add("XAML-only parameter export: x:Members InArgument entries were exported as parameters, but SharePoint FormField metadata is not present in XAML so display names, choices, URL/person/note settings, and authoritative defaults may be incomplete.");
             if (workflow.Stages.Count == 0) workflow.Stages.Add(new StageYaml { Name = "Unsupported XAML", Actions = new System.Collections.Generic.List<WorkflowActionYaml>() });
             workflow.Save(outputYamlPath);
+        }
+
+        private static bool IsExportableParameterType(string propertyType) =>
+            propertyType.IndexOf("InArgument", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            (propertyType.IndexOf("String", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             propertyType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             propertyType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             propertyType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0);
+
+        private static HashSet<string> FindAssignedArgumentNames(XDocument document)
+        {
+            var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var reference in document.Descendants().Where(e => e.Name.LocalName == "ArgumentReference"))
+            {
+                var parent = reference.Parent;
+                while (parent != null)
+                {
+                    if (parent.Name.LocalName == "OutArgument")
+                    {
+                        var name = (string?)reference.Attribute("ArgumentName") ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(name)) targets.Add(name);
+                        break;
+                    }
+
+                    parent = parent.Parent;
+                }
+            }
+
+            return targets;
+        }
+
+        private static string MapXamlTypeToParameterType(string propertyType)
+        {
+            if (propertyType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return "Boolean";
+            if (propertyType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return "Number";
+            if (propertyType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return "DateTime";
+            return "Text";
+        }
+
+        private static string MapXamlTypeToVariableType(string propertyType)
+        {
+            if (propertyType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return "Boolean";
+            if (propertyType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return "Double";
+            if (propertyType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return "DateTime";
+            if (propertyType.IndexOf("Int32", StringComparison.OrdinalIgnoreCase) >= 0) return "Int32";
+            if (propertyType.IndexOf("Guid", StringComparison.OrdinalIgnoreCase) >= 0) return "Guid";
+            return "String";
         }
 
         private static IEnumerable<WorkflowActionYaml> ExportActions(XElement container)
