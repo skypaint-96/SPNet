@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/Nerdbank.GitVersioning/main/src/NerdBank.GitVersioning/version.schema.json",
+  "version": "0.1",
+  "publicReleaseRefSpec": [
+    "^refs/heads/production$",
+    "^refs/tags/v\\d+\\.\\d+(?:\\.\\d+)?$"
+  ],
+  "cloudBuild": {
+    "buildNumber": {
+      "enabled": true
+    }
+  },
+  "release": {
+    "branchName": "production",
+    "versionIncrement": "minor"
+  },
+  "pathFilters": [
+    ":/Directory.Build.props",
+    ":/SPNet.slnx",
+    ":/config",
+    ":/docs",
+    ":/samples",
+    ":/scripts",
+    ":/src",
+    ":/tests",
+    ":/README.md"
+  ]
+}

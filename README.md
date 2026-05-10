@@ -8,6 +8,28 @@ Generated SharePoint workflow XAML must not contain raw WF language expression a
 
 See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md).
 
+## CI, packaging, and releases
+
+GitHub Actions are intentionally scoped to the protected `development` and `production` branches. Pull requests into `production` must come from `development`; `development` runs validation only. A push to `production` runs validation, builds a distributable package, uploads Actions artifacts, and creates a GitHub Release.
+
+Repository versioning is controlled by Nerdbank.GitVersioning via `version.json`. The initial product version is `0.1`, matching the existing project metadata baseline. Builds from `development` are non-public prerelease/dev builds derived from Git history. Builds from `production` are public release builds, so CI uses the Nerdbank-derived stable package version for zip names, NuGet package versions, artifact names, GitHub Release tags, and release titles.
+
+Inspect the local Nerdbank-derived version with:
+
+```powershell
+dotnet tool install --global nbgv
+nbgv get-version
+```
+
+Create a local package with:
+
+```powershell
+$version = (nbgv get-version --format json | ConvertFrom-Json).NuGetPackageVersion
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Package-SPNetWorkflow.ps1 -Configuration Release -Version $version -OutputDirectory artifacts\release -IncludeNuGetPackages
+```
+
+The package includes built command-line tools, runtime PowerShell scripts, safe config examples, docs, samples, and this README. It intentionally excludes local config, SharePoint secrets, SharePoint Designer WebsiteCache/proxy assemblies, generated diagnostics, and transient build artifacts.
+
 ## Current architecture
 
 - `src/SPNet.Workflow.WfSerializer`: legacy .NET Framework 4.8 serializer/converter. It owns YAML parsing, WF activity construction, XAML export/inspection, SharePoint Designer metadata normalization, and WebsiteCache proxy assembly loading.
