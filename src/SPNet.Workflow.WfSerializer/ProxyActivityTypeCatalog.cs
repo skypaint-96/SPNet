@@ -37,7 +37,7 @@ namespace SPNet.Workflow.WfSerializer
             TrimExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.Trim");
             DynamicValue = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.DynamicValue");
             BuildDictionary = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildDictionary`2").MakeGenericType(typeof(string), typeof(object));
-            ComparisonExpressionTypes = new WfActivityBuilderSerializer.ComparisonExpressionTypes(microsoftActivitiesAssembly);
+            ComparisonExpressionTypes = new WfActivityBuilderSerializer.ComparisonExpressionTypes(microsoftActivitiesAssembly, sharePointAssembly);
         }
 
         public Type Calc { get; }

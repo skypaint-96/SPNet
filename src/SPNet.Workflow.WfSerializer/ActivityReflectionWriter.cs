@@ -17,6 +17,12 @@ namespace SPNet.Workflow.WfSerializer
             property.SetValue(target, value, null);
         }
 
+        public static void SetPropertyIfWritable(object target, string propertyName, object value)
+        {
+            var property = target.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).FirstOrDefault(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal) && p.CanWrite);
+            if (property != null && property.CanWrite) property.SetValue(target, value, null);
+        }
+
         public static object GetProperty(object target, string propertyName, string missingMessage)
         {
             var property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);

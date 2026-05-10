@@ -947,10 +947,18 @@ namespace SPNet.Workflow.WfSerializer
         public string Type { get; set; } = "isLessThan";
         /// <summary>Gets or sets an optional operator alias for the comparison.</summary>
         public string Operator { get; set; } = string.Empty;
+        /// <summary>Gets or sets an optional value type hint for selecting typed SharePoint Designer comparison expressions.</summary>
+        public string ValueType { get; set; } = string.Empty;
         /// <summary>Gets or sets the left comparison operand.</summary>
         public ExpressionYaml Left { get; set; } = new ExpressionYaml();
         /// <summary>Gets or sets the right comparison operand.</summary>
         public ExpressionYaml Right { get; set; } = new ExpressionYaml();
+        /// <summary>Gets or sets the left nested boolean condition for logical operators.</summary>
+        public ComparisonExpressionYaml? LeftCondition { get; set; }
+        /// <summary>Gets or sets the right nested boolean condition for logical operators.</summary>
+        public ComparisonExpressionYaml? RightCondition { get; set; }
+        /// <summary>Gets or sets the nested boolean operand for negation.</summary>
+        public ComparisonExpressionYaml? Operand { get; set; }
 
         /// <summary>
         /// Validates that the comparison specifies a supported operator name.

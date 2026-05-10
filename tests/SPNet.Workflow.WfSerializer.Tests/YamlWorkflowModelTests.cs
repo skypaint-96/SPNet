@@ -352,6 +352,91 @@ namespace SPNet.Workflow.WfSerializer.Tests
         }
 
         [TestMethod]
+        public void Load_SupportsExampleConditionalsLogicalAndTypedConditions()
+        {
+            var workflow = LoadYaml(CreateWorkflowYaml(@"
+      - type: if
+        condition:
+          type: and
+          leftCondition:
+            type: or
+            leftCondition:
+              type: isEqualString
+              valueType: String
+              left:
+                variable: currentWebUrl
+              right: dfgdf
+            rightCondition:
+              type: isEqual
+              valueType: Boolean
+              left:
+                variable: approvedFlag
+              right: true
+          rightCondition:
+            type: not
+            operand:
+              type: endsWithString
+              valueType: String
+              left:
+                variable: currentWebUrl
+              right: dfv
+        then:
+          - type: writeHistory
+            message: condition matched
+      - type: if
+        condition:
+          type: isGreaterThan
+          valueType: DateTime
+          left:
+            variable: dueDate
+          right: 2026-05-10T17:46:00Z
+        then:
+          - type: writeHistory
+            message: date matched"));
+
+            var first = workflow.Stages[0].Actions.OfType<IfActionYaml>().First();
+            Assert.AreEqual("and", first.Condition.Type);
+            Assert.AreEqual("or", first.Condition.LeftCondition.Type);
+            Assert.AreEqual("isEqualString", first.Condition.LeftCondition.LeftCondition.Type);
+            Assert.AreEqual("String", first.Condition.LeftCondition.LeftCondition.ValueType);
+            Assert.AreEqual("not", first.Condition.RightCondition.Type);
+            Assert.AreEqual("endsWithString", first.Condition.RightCondition.Operand.Type);
+            var second = workflow.Stages[0].Actions.OfType<IfActionYaml>().Last();
+            Assert.AreEqual("DateTime", second.Condition.ValueType);
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_ReconstructsExampleConditionalsBooleanTree()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-example-conditionals-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, @"<Activity x:Class=""ExampleConditionals.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:s=""clr-namespace:System;assembly=mscorlib"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local1=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Sequence DisplayName=""Stage 1""><If><If.Condition><InArgument x:TypeArguments=""x:Boolean""><p:And><p:And.Left><InArgument x:TypeArguments=""x:Boolean""><p:Or><p:Or.Left><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualString Text=""dfgdf""><p:IsEqualString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:IsEqualString.Input></p:IsEqualString></InArgument></p:Or.Left><p:Or.Right><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualBoolean Right=""True""><p:IsEqualBoolean.Left><InArgument x:TypeArguments=""x:Boolean""><ArgumentValue x:TypeArguments=""x:Boolean"" ArgumentName=""varboolex"" /></InArgument></p:IsEqualBoolean.Left></p:IsEqualBoolean></InArgument></p:Or.Right></p:Or></InArgument></p:And.Left><p:And.Right><InArgument x:TypeArguments=""x:Boolean""><p:Not><p:Not.Operand><InArgument x:TypeArguments=""x:Boolean""><p:EndsWithString SearchValue=""dfv""><p:EndsWithString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:EndsWithString.Input></p:EndsWithString></InArgument></p:Not.Operand></p:Not></InArgument></p:And.Right></p:And></InArgument></If.Condition><If.Then><Sequence DisplayName=""Then"" /></If.Then></If><If><If.Condition><InArgument x:TypeArguments=""x:Boolean""><local1:IsGreaterThanDateTime><local1:IsGreaterThanDateTime.Left><InArgument x:TypeArguments=""s:DateTime""><ArgumentValue x:TypeArguments=""s:DateTime"" ArgumentName=""vardateex"" /></InArgument></local1:IsGreaterThanDateTime.Left><local1:IsGreaterThanDateTime.Right><InArgument x:TypeArguments=""s:DateTime""><Literal x:TypeArguments=""s:DateTime"" Value=""2026-05-10T17:46Z"" /></InArgument></local1:IsGreaterThanDateTime.Right></local1:IsGreaterThanDateTime></InArgument></If.Condition><If.Then><Sequence DisplayName=""Then"" /></If.Then></If></Sequence></Activity>");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+                var actions = workflow.Stages.SelectMany(s => s.Actions).OfType<IfActionYaml>().ToList();
+
+                Assert.AreEqual("and", actions[0].Condition.Type);
+                Assert.AreEqual("or", actions[0].Condition.LeftCondition.Type);
+                Assert.AreEqual("isEqualString", actions[0].Condition.LeftCondition.LeftCondition.Type);
+                Assert.AreEqual("varstrex", actions[0].Condition.LeftCondition.LeftCondition.Left.Variable);
+                Assert.AreEqual("dfgdf", actions[0].Condition.LeftCondition.LeftCondition.Right.Literal);
+                Assert.AreEqual("Boolean", actions[0].Condition.LeftCondition.RightCondition.ValueType);
+                Assert.AreEqual(true, Convert.ToBoolean(actions[0].Condition.LeftCondition.RightCondition.Right.Literal));
+                Assert.AreEqual("not", actions[0].Condition.RightCondition.Type);
+                Assert.AreEqual("endsWithString", actions[0].Condition.RightCondition.Operand.Type);
+                Assert.AreEqual("DateTime", actions[1].Condition.ValueType);
+                Assert.AreEqual("isGreaterThan", actions[1].Condition.Type);
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
         public void ExportWorkflowYaml_ReconstructsRecognizableNestedLookupExpressionShapes()
         {
             var inputPath = Path.Combine(Path.GetTempPath(), "spnet-nested-expression-shapes-" + Guid.NewGuid().ToString("N") + ".xaml");

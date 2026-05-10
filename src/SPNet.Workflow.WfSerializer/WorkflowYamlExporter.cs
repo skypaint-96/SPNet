@@ -237,6 +237,8 @@ namespace SPNet.Workflow.WfSerializer
             if (element == null) return new ExpressionYaml { Literal = "<exported expression>" };
             var argumentReference = element.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value;
             if (!string.IsNullOrWhiteSpace(argumentReference)) return new ExpressionYaml { Variable = argumentReference ?? string.Empty };
+            var argumentValue = element.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentValue")?.Attribute("ArgumentName")?.Value;
+            if (!string.IsNullOrWhiteSpace(argumentValue)) return new ExpressionYaml { Variable = argumentValue ?? string.Empty };
             var nestedExpression = element.Descendants().FirstOrDefault(IsSupportedNestedExpressionActivity);
             if (nestedExpression != null) return ReadNestedExpressionActivity(nestedExpression);
             // Legacy/import compatibility only. This recognizes raw VB expression text in downloaded XAML but does not endorse it as output.
@@ -250,7 +252,9 @@ namespace SPNet.Workflow.WfSerializer
         {
             text = WebUtility.HtmlDecode(text ?? string.Empty).Trim();
             if (text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"') return new ExpressionYaml { Literal = text.Substring(1, text.Length - 2).Replace("\"\"", "\"") };
+            if (bool.TryParse(text, out var boolean)) return new ExpressionYaml { Literal = boolean };
             if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)) return new ExpressionYaml { Literal = number };
+            if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dateTime)) return new ExpressionYaml { Literal = dateTime };
             if (Guid.TryParse(text, out var guid)) return new ExpressionYaml { Literal = guid.ToString("D") };
             if (text.Equals("GetCurrentListId()", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "getCurrentListId" };
             if (text.Equals("GetCurrentItemGuid()", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "getCurrentItemGuid" };
@@ -260,21 +264,54 @@ namespace SPNet.Workflow.WfSerializer
 
         private static ComparisonExpressionYaml ReadConditionOrPlaceholder(XElement? conditionElement)
         {
-            var comparison = conditionElement?.Descendants().FirstOrDefault(IsComparisonExpressionActivity);
-            if (comparison == null) return new ComparisonExpressionYaml { Type = "isEqual", Left = new ExpressionYaml { Literal = 1 }, Right = new ExpressionYaml { Literal = 1 } };
+            var activity = conditionElement?.Descendants().FirstOrDefault(IsSupportedBooleanExpressionActivity);
+            return activity == null ? new ComparisonExpressionYaml { Type = "isEqual", Left = new ExpressionYaml { Literal = 1 }, Right = new ExpressionYaml { Literal = 1 } } : ReadBooleanExpressionActivity(activity);
+        }
+
+        private static ComparisonExpressionYaml ReadBooleanExpressionActivity(XElement activity)
+        {
+            var name = activity.Name.LocalName;
+            if (name.Equals("And", StringComparison.OrdinalIgnoreCase) || name.Equals("Or", StringComparison.OrdinalIgnoreCase))
+            {
+                return new ComparisonExpressionYaml
+                {
+                    Type = name.Equals("And", StringComparison.OrdinalIgnoreCase) ? "and" : "or",
+                    LeftCondition = ReadNestedBooleanCondition(activity, "Left"),
+                    RightCondition = ReadNestedBooleanCondition(activity, "Right")
+                };
+            }
+
+            if (name.Equals("Not", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = "not", Operand = ReadNestedBooleanCondition(activity, "Operand") };
+            if (name.Equals("IsEqualBoolean", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = "isEqual", ValueType = "Boolean", Left = ReadActivityPropertyExpression(activity, "Left"), Right = ReadActivityPropertyExpression(activity, "Right") };
+            if (name.Equals("IsEqualString", StringComparison.OrdinalIgnoreCase) || name.Equals("IsEqualStringIgnoreCase", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = name.EndsWith("IgnoreCase", StringComparison.OrdinalIgnoreCase) ? "isEqualStringIgnoreCase" : "isEqualString", ValueType = name.EndsWith("IgnoreCase", StringComparison.OrdinalIgnoreCase) ? "StringIgnoreCase" : "String", Left = ReadActivityPropertyExpression(activity, "Input"), Right = ReadActivityStringPropertyExpression(activity, "Text") };
+            if (name.Equals("ContainsString", StringComparison.OrdinalIgnoreCase) || name.Equals("ContainsStringIgnoreCase", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = name.EndsWith("IgnoreCase", StringComparison.OrdinalIgnoreCase) ? "containsStringIgnoreCase" : "containsString", ValueType = name.EndsWith("IgnoreCase", StringComparison.OrdinalIgnoreCase) ? "StringIgnoreCase" : "String", Left = ReadActivityPropertyExpression(activity, "Input"), Right = ReadActivityStringPropertyExpression(activity, "SearchValue") };
+            if (name.Equals("StartsWithString", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = "startsWithString", ValueType = "String", Left = ReadActivityPropertyExpression(activity, "Input"), Right = ReadActivityStringPropertyExpression(activity, "SearchValue") };
+            if (name.Equals("EndsWithString", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = "endsWithString", ValueType = "String", Left = ReadActivityPropertyExpression(activity, "Input"), Right = ReadActivityStringPropertyExpression(activity, "SearchValue") };
+            if (IsDateComparisonExpressionActivity(activity)) return new ComparisonExpressionYaml { Type = NormalizeComparisonType(name), ValueType = "DateTime", Left = ReadActivityPropertyExpression(activity, "Left"), Right = ReadActivityPropertyExpression(activity, "Right") };
             return new ComparisonExpressionYaml
             {
-                Type = NormalizeComparisonType(comparison.Name.LocalName),
-                Left = ReadActivityPropertyExpression(comparison, "Left"),
-                Right = ReadActivityPropertyExpression(comparison, "Right")
+                Type = NormalizeComparisonType(name),
+                Left = ReadActivityPropertyExpression(activity, "Left"),
+                Right = ReadActivityPropertyExpression(activity, "Right")
             };
         }
+
+        private static ComparisonExpressionYaml ReadNestedBooleanCondition(XElement activity, string propertyName)
+        {
+            var propertyElement = activity.Element(activity.Name.Namespace + (activity.Name.LocalName + "." + propertyName)) ?? activity.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(activity.Name.LocalName + "." + propertyName, StringComparison.OrdinalIgnoreCase));
+            var nested = propertyElement?.Descendants().FirstOrDefault(IsSupportedBooleanExpressionActivity);
+            return nested == null ? new ComparisonExpressionYaml { Type = "isEqual", Left = new ExpressionYaml { Literal = 1 }, Right = new ExpressionYaml { Literal = 1 } } : ReadBooleanExpressionActivity(nested);
+        }
+
+        private static bool IsSupportedBooleanExpressionActivity(XElement element) => element.Name.LocalName.Equals("And", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("Or", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("Not", StringComparison.OrdinalIgnoreCase) || IsComparisonExpressionActivity(element);
 
         private static bool IsComparisonExpressionActivity(XElement element)
         {
             var name = element.Name.LocalName;
-            return (name.StartsWith("Is", StringComparison.OrdinalIgnoreCase) && (name.IndexOf("Than", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Equal", StringComparison.OrdinalIgnoreCase) >= 0)) || name.Equals("Equal", StringComparison.OrdinalIgnoreCase) || name.Equals("IsEqualNumber", StringComparison.OrdinalIgnoreCase);
+            return (name.StartsWith("Is", StringComparison.OrdinalIgnoreCase) && (name.IndexOf("Than", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Equal", StringComparison.OrdinalIgnoreCase) >= 0)) || name.Equals("Equal", StringComparison.OrdinalIgnoreCase) || name.Equals("IsEqualNumber", StringComparison.OrdinalIgnoreCase) || name.Equals("ContainsString", StringComparison.OrdinalIgnoreCase) || name.Equals("ContainsStringIgnoreCase", StringComparison.OrdinalIgnoreCase) || name.Equals("StartsWithString", StringComparison.OrdinalIgnoreCase) || name.Equals("EndsWithString", StringComparison.OrdinalIgnoreCase);
         }
+
+        private static bool IsDateComparisonExpressionActivity(XElement element) => element.Name.LocalName.EndsWith("Date", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.EndsWith("DateTime", StringComparison.OrdinalIgnoreCase);
 
         private static bool IsSupportedStringExpressionActivity(XElement element) => element.Name.LocalName.Equals("ReplaceString", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("Substring", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("Trim", StringComparison.OrdinalIgnoreCase);
 
