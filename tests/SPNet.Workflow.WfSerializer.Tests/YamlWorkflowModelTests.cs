@@ -756,8 +756,10 @@ stages:
         }
 
         [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
         public void SerializeYamlWorkflow_WritesMetadataJsonSidecar()
         {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
             var directory = Path.Combine(Path.GetTempPath(), "spnet-metadata-json-sidecar-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             var workflowPath = Path.Combine(directory, "workflow.yml");
@@ -777,7 +779,7 @@ stages:
 
             try
             {
-                WfActivityBuilderSerializer.SerializeYamlWorkflow(workflowPath, xamlPath, Environment.GetEnvironmentVariable("SPNET_SPD_CACHE") ?? @"C:\Users\mason.kerr\AppData\Local\Microsoft\WebsiteCache\PMteamblog\15.0.0.4455", new SpNetToolConfig());
+                WfActivityBuilderSerializer.SerializeYamlWorkflow(workflowPath, xamlPath, cacheFolder, new SpNetToolConfig());
 
                 var metadataPath = xamlPath + ".metadata.json";
                 Assert.IsTrue(File.Exists(metadataPath));
@@ -790,6 +792,30 @@ stages:
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static string GetConfiguredWebsiteCacheOrInconclusive()
+        {
+            var cacheFolder = Environment.GetEnvironmentVariable("SPNET_SPD_CACHE");
+            if (string.IsNullOrWhiteSpace(cacheFolder))
+            {
+                Assert.Inconclusive("SPNET_SPD_CACHE is not set. Skipping WebsiteCache integration coverage that requires SharePoint Designer proxy DLLs.");
+            }
+
+            if (!Directory.Exists(cacheFolder))
+            {
+                Assert.Inconclusive("SPNET_SPD_CACHE does not point to an existing WebsiteCache folder. Skipping WebsiteCache integration coverage.");
+            }
+
+            foreach (var dll in new[] { "Microsoft.SharePoint.WorkflowServices.Activities.Proxy.dll", "Microsoft.Activities.Proxy.dll" })
+            {
+                if (!File.Exists(Path.Combine(cacheFolder, dll)))
+                {
+                    Assert.Inconclusive("SPNET_SPD_CACHE is missing required SharePoint Designer proxy DLLs. Skipping WebsiteCache integration coverage.");
+                }
+            }
+
+            return cacheFolder;
         }
 
         private static Exception AssertThrowsWorkflowException(Action action)
