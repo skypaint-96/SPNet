@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Xml.Linq;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -69,6 +70,8 @@ namespace SPNet.Workflow.WfSerializer
         public TargetYaml Target { get; set; } = new TargetYaml();
         /// <summary>Gets or sets declared workflow variables.</summary>
         public List<VariableYaml> Variables { get; set; } = new List<VariableYaml>();
+        /// <summary>Gets or sets SharePoint initiation parameters backed by DefinitionInfo.FormField metadata.</summary>
+        public List<ParameterYaml> Parameters { get; set; } = new List<ParameterYaml>();
         /// <summary>Gets or sets workflow stages and their actions.</summary>
         public List<StageYaml> Stages { get; set; } = new List<StageYaml>();
         /// <summary>Gets or sets warnings produced by partial XAML export.</summary>
@@ -103,6 +106,7 @@ namespace SPNet.Workflow.WfSerializer
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .WithTypeConverter(new WorkflowActionYamlTypeConverter())
             .WithTypeConverter(new ExpressionYamlTypeConverter())
+            .WithTypeConverter(new WorkflowParameterYamlTypeConverter())
             .IgnoreUnmatchedProperties()
             .Build();
 
@@ -114,14 +118,145 @@ namespace SPNet.Workflow.WfSerializer
             if (!string.Equals(SchemaVersion, "spnet.workflow/v1", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unsupported schemaVersion: " + SchemaVersion);
             if (string.IsNullOrWhiteSpace(Name)) throw new InvalidOperationException("Workflow name is required.");
             if (Stages == null || Stages.Count == 0) throw new InvalidOperationException("At least one stage is required.");
+            ValidateNamesAndParameters();
             foreach (var action in Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>())) action.Validate();
+        }
+
+        private void ValidateNamesAndParameters()
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var variable in Variables ?? new List<VariableYaml>())
+            {
+                if (string.IsNullOrWhiteSpace(variable.Name)) throw new InvalidOperationException("Variable name is required.");
+                if (!names.Add(variable.Name)) throw new InvalidOperationException("Duplicate variable/parameter name: " + variable.Name);
+                WorkflowTypeMapper.MapDeclaredVariableType(variable.Type);
+            }
+
+            foreach (var parameter in Parameters ?? new List<ParameterYaml>())
+            {
+                parameter.Validate();
+                if (!names.Add(parameter.Name)) throw new InvalidOperationException("Duplicate variable/parameter name: " + parameter.Name);
+            }
+
+            var parameterNames = new HashSet<string>((Parameters ?? new List<ParameterYaml>()).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            foreach (var action in EnumerateActions(Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>())))
+            {
+                if (action is ITargetedActionYaml targeted && parameterNames.Contains(targeted.To ?? string.Empty)) throw new InvalidOperationException(action.Type + " action cannot assign to initiation parameter: " + targeted.To);
+            }
+        }
+
+        private static IEnumerable<WorkflowActionYaml> EnumerateActions(IEnumerable<WorkflowActionYaml> actions)
+        {
+            foreach (var action in actions)
+            {
+                yield return action;
+                if (action is IfActionYaml ifAction)
+                {
+                    foreach (var child in EnumerateActions(ifAction.Then ?? new List<WorkflowActionYaml>())) yield return child;
+                    foreach (var child in EnumerateActions(ifAction.Else ?? new List<WorkflowActionYaml>())) yield return child;
+                }
+                else if (action is WhileActionYaml whileAction)
+                {
+                    foreach (var child in EnumerateActions(whileAction.Actions ?? new List<WorkflowActionYaml>())) yield return child;
+                }
+            }
         }
     }
 
     public sealed class StartFlagsYaml { public bool Manual { get; set; } = true; public bool AutoStartCreate { get; set; } public bool AutoStartChange { get; set; } }
     public sealed class TargetYaml { public string Type { get; set; } = "Site"; public string ListTitle { get; set; } = string.Empty; }
     public sealed class VariableYaml { public string Name { get; set; } = string.Empty; public string Type { get; set; } = "String"; }
+    public sealed class ParameterYaml
+    {
+        public string Name { get; set; } = string.Empty;
+        public string FormType { get; set; } = "Initiation";
+        public string Type { get; set; } = "Text";
+        public string XamlType { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Direction { get; set; } = "None";
+        public object? Default { get; set; }
+        public List<ChoiceYaml> Choices { get; set; } = new List<ChoiceYaml>();
+        public string Format { get; set; } = string.Empty;
+        public string BaseType { get; set; } = string.Empty;
+        public string MaxLength { get; set; } = string.Empty;
+        public string NumLines { get; set; } = string.Empty;
+        public string Sortable { get; set; } = string.Empty;
+        public string RichTextMode { get; set; } = string.Empty;
+        public string List { get; set; } = string.Empty;
+        public string ShowField { get; set; } = string.Empty;
+        public string Mult { get; set; } = string.Empty;
+        public string UserSelectionMode { get; set; } = string.Empty;
+        public string UserSelectionScope { get; set; } = string.Empty;
+        public Dictionary<string, string> Attributes { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        public void Validate()
+        {
+            if (string.IsNullOrWhiteSpace(Name)) throw new InvalidOperationException("Parameter name is required.");
+            if (string.IsNullOrWhiteSpace(Type) && string.IsNullOrWhiteSpace(XamlType)) throw new InvalidOperationException("Parameter type is required: " + Name);
+            WorkflowTypeMapper.MapParameterType(this);
+        }
+    }
+
+    public sealed class ChoiceYaml { public string Value { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; }
     public sealed class StageYaml { public string Name { get; set; } = "Stage"; public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>(); }
+
+    public sealed class WorkflowParameterYamlTypeConverter : IYamlTypeConverter
+    {
+        public bool Accepts(Type type) => type == typeof(List<ParameterYaml>);
+
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        {
+            if (parser.Current is SequenceStart) return ((ParameterYaml[]?)rootDeserializer(typeof(ParameterYaml[])))?.ToList() ?? new List<ParameterYaml>();
+            var map = rootDeserializer(typeof(Dictionary<string, ParameterYaml>)) as Dictionary<string, ParameterYaml> ?? new Dictionary<string, ParameterYaml>(StringComparer.OrdinalIgnoreCase);
+            var list = new List<ParameterYaml>();
+            foreach (var pair in map)
+            {
+                var parameter = pair.Value ?? new ParameterYaml();
+                if (string.IsNullOrWhiteSpace(parameter.Name)) parameter.Name = pair.Key;
+                list.Add(parameter);
+            }
+
+            return list;
+        }
+
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer) => serializer(value);
+    }
+
+    internal static class WorkflowTypeMapper
+    {
+        public static Type MapDeclaredVariableType(string type)
+        {
+            if (string.Equals(type, "Double", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
+            if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Bool", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
+            if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Date", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
+            if (string.Equals(type, "Guid", StringComparison.OrdinalIgnoreCase)) return typeof(Guid);
+            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("DynamicValue variables are only available as HTTP response targets and are emitted using the SharePoint Designer proxy type at build time.");
+            if (string.Equals(type, "Int32", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Int", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Integer", StringComparison.OrdinalIgnoreCase)) return typeof(int);
+            if (string.Equals(type, "String", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Text", StringComparison.OrdinalIgnoreCase)) return typeof(string);
+            throw new InvalidOperationException("Unsupported variable type: " + type);
+        }
+
+        public static Type MapParameterType(ParameterYaml parameter)
+        {
+            var xamlType = parameter.XamlType ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(xamlType))
+            {
+                if (xamlType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(bool);
+                if (xamlType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(double);
+                if (xamlType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(DateTime);
+                if (xamlType.IndexOf("String", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(string);
+                throw new InvalidOperationException("Unsupported parameter xamlType for " + parameter.Name + ": " + parameter.XamlType);
+            }
+
+            var type = parameter.Type ?? string.Empty;
+            if (string.Equals(type, "Text", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Choice", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Note", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "URL", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "UserMulti", StringComparison.OrdinalIgnoreCase)) return typeof(string);
+            if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
+            if (string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
+            if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
+            throw new InvalidOperationException("Unsupported parameter type for " + parameter.Name + ": " + parameter.Type);
+        }
+    }
 
     /// <summary>
     /// Base class for all supported SPNet YAML workflow actions.

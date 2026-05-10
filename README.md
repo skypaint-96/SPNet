@@ -87,8 +87,11 @@ Supported top-level fields:
 - `technicalName`: optional WF class name; defaults to `name + .MTW`.
 - `start`: `manual`, `autoStartCreate`, `autoStartChange` metadata for authoring/publish tooling.
 - `target`: `type` and optional `listTitle` metadata for publish tooling.
+- `parameters`: initiation form parameters backed by SharePoint workflow `FormField` metadata. Use either map-style YAML keyed by parameter name or list-style items with explicit `name`. Supported field types are `Text`, `Choice`, `Note`, `URL`, `UserMulti` (WF `String`), `Boolean` (WF `Boolean`), `Number` (WF `Double`), and `DateTime` (WF `DateTime`). Metadata properties include `formType`, `displayName`, `description`, `direction`, `default`, `choices`, `format`, `baseType`, `maxLength`, `numLines`, `sortable`, `richTextMode`, `list`, `showField`, `mult`, `userSelectionMode`, and `userSelectionScope`. Parameter names must not duplicate variables, expressions may read parameters by name, and assignment actions may not target parameters.
 - `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, `Boolean`/`Bool`, `Int32`/`Int`/`Integer`, `Guid`, and `DateTime`/`Date` are supported.
 - `stages`: one or more stages, each with supported actions.
+
+When YAML with `parameters` is built, SPNet emits public WF `InArgument<T>` declarations in the generated XAML and writes a deterministic sidecar `*.xaml.formfield.xml` containing the SharePoint `FormField` XML for future publisher consumption. The current CSOM publisher does not yet apply that definition metadata during live publish, so parameter workflows should be treated as build/export artifacts until publisher support is validated.
 
 Supported actions:
 

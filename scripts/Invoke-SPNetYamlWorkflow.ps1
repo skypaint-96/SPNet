@@ -3,6 +3,7 @@ param(
     [string]$Action = 'Build',
     [string]$Workflow = 'samples\workflow.example.yml',
     [string]$XamlPath = 'artifacts\workflow.xaml',
+    [string]$FormFieldXmlPath = '',
     [string]$Out = '',
     [string]$Config = 'config\spnet.local.yml',
     [string]$CacheFolder = '',
@@ -71,7 +72,17 @@ switch ($Action) {
         }
         Write-Host "SPNet YAML workflow config is valid. SPD cache: $candidateCacheFolder"
     }
-    'Export' { $target = if ($Out) { $Out } else { $XamlPath -replace '\.xaml$', '.exported.yml' }; & $tool export --xaml $XamlPath --out $target }
+    'Export' {
+        $target = if ($Out) { $Out } else { $XamlPath -replace '\.xaml$', '.exported.yml' }
+        $exportArgs = @('export', '--xaml', $XamlPath, '--out', $target)
+        if (-not [string]::IsNullOrWhiteSpace($FormFieldXmlPath)) {
+            $exportArgs += @('--form-field-xml', $FormFieldXmlPath)
+        } else {
+            $sidecarPath = $XamlPath + '.formfield.xml'
+            if (Test-Path $sidecarPath -PathType Leaf) { $exportArgs += @('--form-field-xml', $sidecarPath) }
+        }
+        & $tool @exportArgs
+    }
     'Inspect' { & $tool inspect --xaml $XamlPath @common }
     'Publish' {
         $workflowLines = @()
@@ -101,6 +112,12 @@ switch ($Action) {
         $publishArgs = @{ Action = 'Publish'; SiteUrl = $SiteUrl; WorkflowName = $WorkflowName; XamlPath = $XamlPath; TargetType = $TargetType; StartManual = $startManualText; StartOnCreated = $startCreatedText; StartOnUpdated = $startUpdatedText; IfExists = $IfExists }
         if (-not [string]::IsNullOrWhiteSpace($TargetListTitle)) { $publishArgs.TargetListTitle = $TargetListTitle }
         if (-not [string]::IsNullOrWhiteSpace($StatusColumn)) { $publishArgs.StatusColumn = $StatusColumn }
+        if (-not [string]::IsNullOrWhiteSpace($FormFieldXmlPath)) {
+            $publishArgs.FormFieldXmlPath = $FormFieldXmlPath
+        } else {
+            $sidecarPath = $XamlPath + '.formfield.xml'
+            if (Test-Path $sidecarPath -PathType Leaf) { $publishArgs.FormFieldXmlPath = $sidecarPath }
+        }
         if (-not [string]::IsNullOrWhiteSpace($ExpectedDefinitionId)) { $publishArgs.ExpectedDefinitionId = $ExpectedDefinitionId }
         if (-not [string]::IsNullOrWhiteSpace($BackupDirectory)) { $publishArgs.BackupDirectory = $BackupDirectory }
         if ($DryRun) { $publishArgs.DryRun = $true }

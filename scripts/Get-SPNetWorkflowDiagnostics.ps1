@@ -95,6 +95,25 @@ function ConvertTo-SPNetDiagnosticDictionary {
     return $properties
 }
 
+function ConvertTo-SPNetFormFieldSummary {
+    param([string]$FormFieldXml)
+    if ([string]::IsNullOrWhiteSpace($FormFieldXml)) { return @() }
+    try {
+        [xml]$document = $FormFieldXml
+        return @($document.SelectNodes('/*[local-name()="Fields"]/*[local-name()="Field"]') | ForEach-Object {
+            [ordered]@{
+                Name = $_.GetAttribute('Name')
+                DisplayName = $_.GetAttribute('DisplayName')
+                Type = $_.GetAttribute('Type')
+                FormType = $_.GetAttribute('FormType')
+                Direction = $_.GetAttribute('Direction')
+            }
+        })
+    } catch {
+        return @([ordered]@{ Error = $_.Exception.Message })
+    }
+}
+
 if (-not (Test-Path $OutputDirectory)) { New-Item -Path $OutputDirectory -ItemType Directory -Force | Out-Null }
 
 Connect-SPNetDiagnosticsPnPOnline -Url $SiteUrl
@@ -145,6 +164,8 @@ foreach ($definitionInfo in $matchingDefinitionInfos) {
     $diagnostics.Definitions += [ordered]@{
         DefinitionInfo = ConvertTo-SPNetDiagnosticPropertyBag -Object $definitionInfo
         Definition = ConvertTo-SPNetDiagnosticPropertyBag -Object $definition
+        FormFieldLength = if ($definitionInfo.FormField) { ([string]$definitionInfo.FormField).Length } elseif ($definition.FormField) { ([string]$definition.FormField).Length } else { 0 }
+        FormFieldSummary = ConvertTo-SPNetFormFieldSummary -FormFieldXml $(if ($definitionInfo.FormField) { [string]$definitionInfo.FormField } elseif ($definition.FormField) { [string]$definition.FormField } else { $null })
         XamlPath = $xamlPath
         XamlLength = if ($definition.Xaml) { $definition.Xaml.Length } else { 0 }
         Subscriptions = @($subscriptions | ForEach-Object {
