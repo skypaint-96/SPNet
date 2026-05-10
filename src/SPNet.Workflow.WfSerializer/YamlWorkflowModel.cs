@@ -268,6 +268,7 @@ namespace SPNet.Workflow.WfSerializer
                 if (xamlType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(bool);
                 if (xamlType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(double);
                 if (xamlType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(DateTime);
+                if (xamlType.IndexOf("DynamicValue", StringComparison.OrdinalIgnoreCase) >= 0) return Type.GetType("Microsoft.Activities.DynamicValue, Microsoft.Activities.Proxy", throwOnError: false) ?? typeof(object);
                 if (xamlType.IndexOf("String", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(string);
                 throw new InvalidOperationException("Unsupported parameter xamlType for " + parameter.Name + ": " + parameter.XamlType);
             }
@@ -277,6 +278,7 @@ namespace SPNet.Workflow.WfSerializer
             if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
             if (string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
             if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
+            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) return Type.GetType("Microsoft.Activities.DynamicValue, Microsoft.Activities.Proxy", throwOnError: false) ?? typeof(object);
             throw new InvalidOperationException("Unsupported parameter type for " + parameter.Name + ": " + parameter.Type);
         }
     }

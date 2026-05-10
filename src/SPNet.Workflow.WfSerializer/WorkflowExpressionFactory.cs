@@ -32,6 +32,7 @@ namespace SPNet.Workflow.WfSerializer
             if (op == "isequalstring" || op == "equalsstring") return CreateStringComparison(expressionTypes.IsEqualString, condition, "Text");
             if (op == "isequalboolean" || op == "equalsboolean") return CreateBooleanComparison(expressionTypes.IsEqualBoolean, condition);
             if (op == "isnotequal" || op == "notequals" || op == "notequal") return CreateNot(expressionTypes.Not, new ComparisonExpressionYaml { Type = "isEqual", ValueType = condition.ValueType, Left = condition.Left, Right = condition.Right }, expressionTypes);
+            if (IsDynamicValueCondition(condition)) return CreateDynamicValueComparison(expressionTypes, condition);
             if (IsDateCondition(condition, op)) return CreateDateComparison(GetDateComparisonType(expressionTypes, op), condition);
             if (op == "islessthan" || op == "lessthan") return CreateComparison(expressionTypes.IsLessThan, condition);
             if (op == "greaterthan" || op == "isgreaterthan") return CreateComparison(expressionTypes.IsGreaterThan, condition);
@@ -55,6 +56,12 @@ namespace SPNet.Workflow.WfSerializer
             var expressionActivity = CreateLookupExpressionActivity(expression, typeof(T));
             if (expressionActivity != null) return (InArgument<T>)ActivityReflectionWriter.CreateInArgument(typeof(T), expressionActivity);
             return new InArgument<T>((T)Convert.ChangeType(expression.Literal ?? DefaultLiteral(typeof(T)), typeof(T)));
+        }
+
+        private object ToInArgument(ExpressionYaml expression, Type resultType)
+        {
+            var method = GetType().GetMethod(nameof(ToInArgument), new[] { typeof(ExpressionYaml) }) ?? throw new InvalidOperationException("ToInArgument method was not found.");
+            return method.MakeGenericMethod(resultType).Invoke(this, new object[] { expression }) ?? throw new InvalidOperationException("Could not create typed InArgument.");
         }
 
         private Activity<bool> CreateComparison(Type comparisonType, ComparisonExpressionYaml condition)
@@ -113,6 +120,15 @@ namespace SPNet.Workflow.WfSerializer
             return (Activity<bool>)comparison;
         }
 
+        private Activity<bool> CreateDynamicValueComparison(WfActivityBuilderSerializer.ComparisonExpressionTypes expressionTypes, ComparisonExpressionYaml condition)
+        {
+            if (expressionTypes.IsEqualDynamicValue == null) throw new InvalidOperationException("DynamicValue comparisons are not supported by the local SharePoint Designer proxy assembly.");
+            var comparison = ActivityReflectionWriter.Create(expressionTypes.IsEqualDynamicValue);
+            ActivityReflectionWriter.SetProperty(comparison, "Left", ToInArgument(condition.Left, valueExpressionTypes.DynamicValue));
+            ActivityReflectionWriter.SetProperty(comparison, "Right", ToInArgument(condition.Right, valueExpressionTypes.DynamicValue));
+            return (Activity<bool>)comparison;
+        }
+
         private static Type GetDateComparisonType(WfActivityBuilderSerializer.ComparisonExpressionTypes expressionTypes, string op)
         {
             Type? type = op == "isequal" || op == "equals" || op == "equal" ? expressionTypes.IsEqualDate : op.Contains("greaterthanorequal") ? expressionTypes.IsGreaterThanOrEqualDateTime : op.Contains("lessthanorequal") ? expressionTypes.IsLessThanOrEqualDateTime : op.Contains("greaterthan") ? expressionTypes.IsGreaterThanDateTime : expressionTypes.IsLessThanDateTime;
@@ -121,6 +137,7 @@ namespace SPNet.Workflow.WfSerializer
 
         private static bool IsBooleanCondition(ComparisonExpressionYaml condition) => IsValueType(condition, "Boolean", "Bool") || condition.Left.Literal is bool || condition.Right.Literal is bool;
         private static bool IsDateCondition(ComparisonExpressionYaml condition, string op) => IsValueType(condition, "DateTime", "Date") || condition.Left.Literal is DateTime || condition.Right.Literal is DateTime || op.Contains("datetime") || op.Contains("date");
+        private static bool IsDynamicValueCondition(ComparisonExpressionYaml condition) => IsValueType(condition, "DynamicValue");
         private static bool IsStringCondition(ComparisonExpressionYaml condition) => IsValueType(condition, "String", "Text") || condition.Left.Literal is string || condition.Right.Literal is string;
         private static bool IsValueType(ComparisonExpressionYaml condition, params string[] names) => names.Any(n => string.Equals(condition.ValueType, n, StringComparison.OrdinalIgnoreCase));
         private static bool IsIgnoreCase(ComparisonExpressionYaml condition) => string.Equals(condition.ValueType, "StringIgnoreCase", StringComparison.OrdinalIgnoreCase) || (condition.Operator ?? condition.Type ?? string.Empty).IndexOf("IgnoreCase", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -129,6 +146,8 @@ namespace SPNet.Workflow.WfSerializer
         {
             var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
             if (type == "formatstring") return CreateFormatStringExpression(expression, resultType);
+            if (type == "parsedate" || type == "parseutcdate" || type == "parseSpDate".ToLowerInvariant()) return CreateParseDateExpression(expression, resultType);
+            if (type == "parsedynamicvalue") return CreateParseDynamicValueExpression(expression, resultType);
             if (type == "lookupworkflowcontext" || type == "lookupcontextproperty")
             {
                 if (resultType != typeof(string) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to String/Object arguments.");
@@ -181,6 +200,28 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             return null;
+        }
+
+        private object CreateParseDynamicValueExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (resultType != typeof(object) && resultType != valueExpressionTypes.DynamicValue) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to DynamicValue/Object arguments.");
+            if (valueExpressionTypes.ParseDynamicValue == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            var parseDynamicValue = ActivityReflectionWriter.Create(valueExpressionTypes.ParseDynamicValue);
+            ActivityReflectionWriter.SetProperty(parseDynamicValue, "Json", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            return parseDynamicValue;
+        }
+
+        private object CreateParseDateExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (resultType != typeof(DateTime) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to DateTime/Object arguments.");
+            if (valueExpressionTypes.ParseDate == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            var parseDate = ActivityReflectionWriter.Create(valueExpressionTypes.ParseDate);
+            ActivityReflectionWriter.SetProperty(parseDate, "Value", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(parseDate, "CultureName", new InArgument<string>("en-US"));
+            if (valueExpressionTypes.ConvertTimeZoneFromSpLocalToUtc == null) return parseDate;
+            var convert = ActivityReflectionWriter.Create(valueExpressionTypes.ConvertTimeZoneFromSpLocalToUtc);
+            ActivityReflectionWriter.SetProperty(convert, "Input", (InArgument<DateTime>)ActivityReflectionWriter.CreateInArgument(typeof(DateTime), parseDate));
+            return convert;
         }
 
         private object CreateLookupListItemPropertyActivity(ExpressionYaml expression, Type lookupType)

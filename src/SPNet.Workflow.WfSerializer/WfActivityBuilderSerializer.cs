@@ -36,7 +36,9 @@ namespace SPNet.Workflow.WfSerializer
         private static readonly XNamespace MarkupCompatibilityNamespace = "http://schemas.openxmlformats.org/markup-compatibility/2006";
         private static readonly XNamespace Workflow2012ActivitiesNamespace = "http://schemas.microsoft.com/workflow/2012/07/xaml/activities";
         private static readonly XNamespace SharePointNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities";
+        private static readonly XNamespace SharePointExpressionNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions";
         private static readonly XNamespace SharePointProxyNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy";
+        private static readonly XNamespace SharePointExpressionProxyNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy";
         private static readonly XNamespace AuthoringNamespace = "clr-namespace:Microsoft.Web.Authoring.Workflow;assembly=Microsoft.Web.Authoring";
 
         /// <summary>
@@ -292,6 +294,7 @@ namespace SPNet.Workflow.WfSerializer
             EnsureLifecycleListItemPropertiesElements(document);
             EnsureInitBlock(document, root);
             EnsureExpressionIds(document);
+            EnsureConditionExpressionResultPlaceholders(document);
 
             var firstStageContainer = document.Descendants(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes")
                 .Any(e => e.Descendants(XamlNamespace + "String").Any(s => ((string?)s.Attribute(XamlNamespace + "Key")) == "StageAttribute" && ((string?)s ?? string.Empty).StartsWith("StageContainer-", StringComparison.OrdinalIgnoreCase)));
@@ -443,6 +446,56 @@ namespace SPNet.Workflow.WfSerializer
             element.Name.NamespaceName == "http://schemas.microsoft.com/workflow/2012/07/xaml/activities" &&
             element.Name.LocalName == "ToString";
 
+        private static void EnsureConditionExpressionResultPlaceholders(XDocument document)
+        {
+            foreach (var condition in document.Descendants().Where(e => e.Name.LocalName == "If.Condition" || e.Name.LocalName == "While.Condition"))
+            {
+                foreach (var expression in condition.Descendants().Where(IsBooleanConditionExpressionElement))
+                {
+                    if (expression.Attribute("Result") == null) expression.SetAttributeValue("Result", "{x:Null}");
+                }
+            }
+        }
+
+        private static bool IsBooleanConditionExpressionElement(XElement element)
+        {
+            if (element.Name.Namespace == Workflow2012ActivitiesNamespace)
+            {
+                switch (element.Name.LocalName)
+                {
+                    case "And":
+                    case "Or":
+                    case "Not":
+                    case "IsEqualString":
+                    case "IsEqualBoolean":
+                    case "IsEqualNumber":
+                    case "ContainsString":
+                    case "StartsWithString":
+                    case "EndsWithString":
+                    case "IsLessThan":
+                    case "IsGreaterThan":
+                    case "IsLessThanOrEqual":
+                    case "IsGreaterThanOrEqual":
+                        return true;
+                }
+            }
+
+            if (element.Name.Namespace.NamespaceName.StartsWith("clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions", StringComparison.Ordinal))
+            {
+                switch (element.Name.LocalName)
+                {
+                    case "IsEqualDate":
+                    case "IsGreaterThanDateTime":
+                    case "IsGreaterThanOrEqualDateTime":
+                    case "IsLessThanDateTime":
+                    case "IsLessThanOrEqualDateTime":
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
         private static XElement CreateCustomDictionaryAttribute(string key, string value) =>
             new XElement(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes",
                 new XElement(GenericCollectionsNamespace + "Dictionary",
@@ -468,6 +521,11 @@ namespace SPNet.Workflow.WfSerializer
             foreach (var element in document.Descendants().Where(e => e.Name.Namespace == SharePointProxyNamespace).ToList())
             {
                 element.Name = SharePointNamespace + element.Name.LocalName;
+            }
+
+            foreach (var element in document.Descendants().Where(e => e.Name.Namespace == SharePointExpressionProxyNamespace).ToList())
+            {
+                element.Name = SharePointExpressionNamespace + element.Name.LocalName;
             }
 
             var root = document.Root;

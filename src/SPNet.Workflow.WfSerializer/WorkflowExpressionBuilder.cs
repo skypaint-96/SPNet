@@ -17,7 +17,7 @@ namespace SPNet.Workflow.WfSerializer
         {
             // These are structured Microsoft.Activities proxy expression activities that SharePoint Workflow Manager accepts.
             // Do not replace them with raw VisualBasicValue/VisualBasicReference/CSharpValue/CSharpReference nodes; those require compilation and fail publish validation.
-            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type? lookupListItemIntProperty, Type? lookupListItemGuid, Type buildDictionary)
+            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type? lookupListItemIntProperty, Type? lookupListItemGuid, Type buildDictionary, Type dynamicValue, Type? parseDate, Type? convertTimeZoneFromSpLocalToUtc, Type? parseDynamicValue)
             {
                 ToStringExpression = toString;
                 ReplaceStringExpression = replaceString;
@@ -30,6 +30,10 @@ namespace SPNet.Workflow.WfSerializer
                 LookupListItemIntProperty = lookupListItemIntProperty;
                 LookupListItemGuid = lookupListItemGuid;
                 BuildDictionary = buildDictionary;
+                DynamicValue = dynamicValue;
+                ParseDate = parseDate;
+                ConvertTimeZoneFromSpLocalToUtc = convertTimeZoneFromSpLocalToUtc;
+                ParseDynamicValue = parseDynamicValue;
             }
 
             public Type ToStringExpression { get; }
@@ -43,6 +47,10 @@ namespace SPNet.Workflow.WfSerializer
             public Type? LookupListItemIntProperty { get; }
             public Type? LookupListItemGuid { get; }
             public Type BuildDictionary { get; }
+            public Type DynamicValue { get; }
+            public Type? ParseDate { get; }
+            public Type? ConvertTimeZoneFromSpLocalToUtc { get; }
+            public Type? ParseDynamicValue { get; }
         }
 
         internal sealed class ComparisonExpressionTypes
@@ -66,6 +74,7 @@ namespace SPNet.Workflow.WfSerializer
                 if (sharePointAssembly != null)
                 {
                     IsEqualDate = sharePointAssembly.GetType("Microsoft.SharePoint.WorkflowServices.Activities.Expressions.IsEqualDate", throwOnError: false, ignoreCase: false);
+                    IsEqualDynamicValue = sharePointAssembly.GetType("Microsoft.SharePoint.WorkflowServices.Activities.Expressions.IsEqualDynamicValue", throwOnError: false, ignoreCase: false);
                     IsGreaterThanDateTime = sharePointAssembly.GetType("Microsoft.SharePoint.WorkflowServices.Activities.Expressions.IsGreaterThanDateTime", throwOnError: false, ignoreCase: false);
                     IsGreaterThanOrEqualDateTime = sharePointAssembly.GetType("Microsoft.SharePoint.WorkflowServices.Activities.Expressions.IsGreaterThanOrEqualDateTime", throwOnError: false, ignoreCase: false);
                     IsLessThanDateTime = sharePointAssembly.GetType("Microsoft.SharePoint.WorkflowServices.Activities.Expressions.IsLessThanDateTime", throwOnError: false, ignoreCase: false);
@@ -87,6 +96,7 @@ namespace SPNet.Workflow.WfSerializer
             public Type Or { get; }
             public Type Not { get; }
             public Type? IsEqualDate { get; }
+            public Type? IsEqualDynamicValue { get; }
             public Type? IsGreaterThanDateTime { get; }
             public Type? IsGreaterThanOrEqualDateTime { get; }
             public Type? IsLessThanDateTime { get; }

@@ -114,7 +114,8 @@ namespace SPNet.Workflow.WfSerializer
             (propertyType.IndexOf("String", StringComparison.OrdinalIgnoreCase) >= 0 ||
              propertyType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0 ||
              propertyType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0 ||
-             propertyType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0);
+             propertyType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             propertyType.IndexOf("DynamicValue", StringComparison.OrdinalIgnoreCase) >= 0);
 
         private static HashSet<string> FindAssignedArgumentNames(XDocument document)
         {
@@ -143,6 +144,7 @@ namespace SPNet.Workflow.WfSerializer
             if (propertyType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return "Boolean";
             if (propertyType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return "Number";
             if (propertyType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return "DateTime";
+            if (propertyType.IndexOf("DynamicValue", StringComparison.OrdinalIgnoreCase) >= 0) return "DynamicValue";
             return "Text";
         }
 
@@ -151,6 +153,7 @@ namespace SPNet.Workflow.WfSerializer
             if (propertyType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return "Boolean";
             if (propertyType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return "Double";
             if (propertyType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return "DateTime";
+            if (propertyType.IndexOf("DynamicValue", StringComparison.OrdinalIgnoreCase) >= 0) return "DynamicValue";
             if (propertyType.IndexOf("Int32", StringComparison.OrdinalIgnoreCase) >= 0) return "Int32";
             if (propertyType.IndexOf("Guid", StringComparison.OrdinalIgnoreCase) >= 0) return "Guid";
             return "String";
@@ -235,12 +238,12 @@ namespace SPNet.Workflow.WfSerializer
         private static ExpressionYaml ReadExpressionElementOrPlaceholder(XElement? element)
         {
             if (element == null) return new ExpressionYaml { Literal = "<exported expression>" };
+            var nestedExpression = element.Descendants().FirstOrDefault(IsSupportedNestedExpressionActivity);
+            if (nestedExpression != null) return ReadNestedExpressionActivity(nestedExpression);
             var argumentReference = element.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value;
             if (!string.IsNullOrWhiteSpace(argumentReference)) return new ExpressionYaml { Variable = argumentReference ?? string.Empty };
             var argumentValue = element.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentValue")?.Attribute("ArgumentName")?.Value;
             if (!string.IsNullOrWhiteSpace(argumentValue)) return new ExpressionYaml { Variable = argumentValue ?? string.Empty };
-            var nestedExpression = element.Descendants().FirstOrDefault(IsSupportedNestedExpressionActivity);
-            if (nestedExpression != null) return ReadNestedExpressionActivity(nestedExpression);
             // Legacy/import compatibility only. This recognizes raw VB expression text in downloaded XAML but does not endorse it as output.
             var visualBasic = element.Descendants().FirstOrDefault(e => e.Name.LocalName == "VisualBasicValue")?.Attribute("ExpressionText")?.Value ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(visualBasic)) return ReadExpressionText(visualBasic);
@@ -283,6 +286,7 @@ namespace SPNet.Workflow.WfSerializer
 
             if (name.Equals("Not", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = "not", Operand = ReadNestedBooleanCondition(activity, "Operand") };
             if (name.Equals("IsEqualBoolean", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = "isEqual", ValueType = "Boolean", Left = ReadActivityPropertyExpression(activity, "Left"), Right = ReadActivityPropertyExpression(activity, "Right") };
+            if (name.Equals("IsEqualDynamicValue", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = "isEqual", ValueType = "DynamicValue", Left = ReadActivityPropertyExpression(activity, "Left"), Right = ReadActivityPropertyExpression(activity, "Right") };
             if (name.Equals("IsEqualString", StringComparison.OrdinalIgnoreCase) || name.Equals("IsEqualStringIgnoreCase", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = name.EndsWith("IgnoreCase", StringComparison.OrdinalIgnoreCase) ? "isEqualStringIgnoreCase" : "isEqualString", ValueType = name.EndsWith("IgnoreCase", StringComparison.OrdinalIgnoreCase) ? "StringIgnoreCase" : "String", Left = ReadActivityPropertyExpression(activity, "Input"), Right = ReadActivityStringPropertyExpression(activity, "Text") };
             if (name.Equals("ContainsString", StringComparison.OrdinalIgnoreCase) || name.Equals("ContainsStringIgnoreCase", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = name.EndsWith("IgnoreCase", StringComparison.OrdinalIgnoreCase) ? "containsStringIgnoreCase" : "containsString", ValueType = name.EndsWith("IgnoreCase", StringComparison.OrdinalIgnoreCase) ? "StringIgnoreCase" : "String", Left = ReadActivityPropertyExpression(activity, "Input"), Right = ReadActivityStringPropertyExpression(activity, "SearchValue") };
             if (name.Equals("StartsWithString", StringComparison.OrdinalIgnoreCase)) return new ComparisonExpressionYaml { Type = "startsWithString", ValueType = "String", Left = ReadActivityPropertyExpression(activity, "Input"), Right = ReadActivityStringPropertyExpression(activity, "SearchValue") };
@@ -315,7 +319,7 @@ namespace SPNet.Workflow.WfSerializer
 
         private static bool IsSupportedStringExpressionActivity(XElement element) => element.Name.LocalName.Equals("ReplaceString", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("Substring", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("Trim", StringComparison.OrdinalIgnoreCase);
 
-        private static bool IsSupportedNestedExpressionActivity(XElement element) => element.Name.LocalName.Equals("LookupWorkflowContextProperty", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("GetCurrentListId", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("GetCurrentItemGuid", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("LookupSPListItemStringProperty", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("LookupSPListItemInt32Property", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("LookupSPListItemIntProperty", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("LookupSPListItemGuid", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("FormatString", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("ToString", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("Cast", StringComparison.OrdinalIgnoreCase);
+        private static bool IsSupportedNestedExpressionActivity(XElement element) => element.Name.LocalName.Equals("LookupWorkflowContextProperty", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("GetCurrentListId", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("GetCurrentItemGuid", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("LookupSPListItemStringProperty", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("LookupSPListItemInt32Property", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("LookupSPListItemIntProperty", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("LookupSPListItemGuid", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("FormatString", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("ToString", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("Cast", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("ParseDate", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("ConvertTimeZoneFromSPLocalToUtc", StringComparison.OrdinalIgnoreCase) || element.Name.LocalName.Equals("ParseDynamicValue", StringComparison.OrdinalIgnoreCase);
 
         private static ExpressionYaml ReadActivityPropertyExpression(XElement activity, string propertyName) => ReadOptionalActivityPropertyExpression(activity, propertyName) ?? new ExpressionYaml { Literal = "<exported expression>" };
 
@@ -341,6 +345,9 @@ namespace SPNet.Workflow.WfSerializer
             if (activity.Name.LocalName.Equals("FormatString", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "formatString", Literal = ReadActivityStringProperty(activity, "Format"), Values = ReadFormatStringArguments(activity), ValueType = "String" };
             if (activity.Name.LocalName.Equals("ToString", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { ToString = ReadActivityPropertyExpression(activity, "Object") };
             if (activity.Name.LocalName.Equals("Cast", StringComparison.OrdinalIgnoreCase)) return ReadCastOperandExpression(activity);
+            if (activity.Name.LocalName.Equals("ConvertTimeZoneFromSPLocalToUtc", StringComparison.OrdinalIgnoreCase)) return ReadActivityPropertyExpression(activity, "Input");
+            if (activity.Name.LocalName.Equals("ParseDate", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "parseDate", Value = ReadActivityPropertyExpression(activity, "Value"), ValueType = "DateTime" };
+            if (activity.Name.LocalName.Equals("ParseDynamicValue", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "parseDynamicValue", Value = ReadActivityPropertyExpression(activity, "Json"), ValueType = "DynamicValue" };
             return new ExpressionYaml { Literal = "<exported expression>" };
         }
 

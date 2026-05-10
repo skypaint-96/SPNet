@@ -494,6 +494,21 @@ namespace SPNet.Workflow.WfSerializer.Tests
         }
 
         [TestMethod]
+        public void AddSharePointDesignerMetadata_AddsResultPlaceholdersToConditionExpressions()
+        {
+            var xaml = @"<Activity x:Class=""ConditionExpressionWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local1=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy""><Flowchart><FlowStep><Sequence DisplayName=""Stage 1""><If><If.Condition><InArgument x:TypeArguments=""x:Boolean""><p:And><p:And.Left><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualString Pattern=""{x:Null}"" IgnoreCase=""False"" Text=""Alpha""><p:IsEqualString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""testText"" /></InArgument></p:IsEqualString.Input></p:IsEqualString></InArgument></p:And.Left><p:And.Right><InArgument x:TypeArguments=""x:Boolean""><local1:IsGreaterThanDateTime><local1:IsGreaterThanDateTime.Left><InArgument x:TypeArguments=""s:DateTime"" xmlns:s=""clr-namespace:System;assembly=mscorlib""><ArgumentValue x:TypeArguments=""s:DateTime"" ArgumentName=""testDate"" /></InArgument></local1:IsGreaterThanDateTime.Left></local1:IsGreaterThanDateTime></InArgument></p:And.Right></p:And></InArgument></If.Condition><If.Then><Sequence /></If.Then></If></Sequence></FlowStep></Flowchart></Activity>";
+
+            var normalized = WfActivityBuilderSerializer.AddSharePointDesignerMetadata(xaml, "ConditionExpressionWorkflow");
+            var document = XDocument.Parse(normalized);
+            var conditionExpressions = document.Descendants()
+                .Where(e => e.Name.LocalName == "And" || e.Name.LocalName == "IsEqualString" || e.Name.LocalName == "IsGreaterThanDateTime")
+                .ToList();
+
+            Assert.AreEqual(3, conditionExpressions.Count);
+            Assert.IsTrue(conditionExpressions.All(e => (string)e.Attribute("Result") == "{x:Null}"), "SPD-authored condition expressions include explicit null Result placeholders so Designer can render the condition text.");
+        }
+
+        [TestMethod]
         public void Load_DeserializesMapStyleParameters()
         {
             var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
