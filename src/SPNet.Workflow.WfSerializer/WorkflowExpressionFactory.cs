@@ -96,7 +96,33 @@ namespace SPNet.Workflow.WfSerializer
                 return buildLookupListItemProperty(action, valueExpressionTypes.LookupListItemStringProperty, valueExpressionTypes);
             }
 
+            if (type == "lookuplistitemintproperty" || type == "lookupsplistitemintproperty" || type == "lookupsplistitemint32property")
+            {
+                if (valueExpressionTypes.LookupListItemIntProperty == null) throw new InvalidOperationException(expression.Type + " is not supported by the local SharePoint Designer proxy assembly.");
+                if (resultType != typeof(int) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to Int32/Object arguments.");
+                return CreateLookupListItemPropertyActivity(expression, valueExpressionTypes.LookupListItemIntProperty);
+            }
+
+            if (type == "lookuplistitemguid" || type == "lookupsplistitemguid")
+            {
+                if (valueExpressionTypes.LookupListItemGuid == null) throw new InvalidOperationException(expression.Type + " is not supported by the local SharePoint Designer proxy assembly.");
+                if (resultType != typeof(Guid) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to Guid/Object arguments.");
+                return CreateLookupListItemPropertyActivity(expression, valueExpressionTypes.LookupListItemGuid);
+            }
+
             return null;
+        }
+
+        private object CreateLookupListItemPropertyActivity(ExpressionYaml expression, Type lookupType)
+        {
+            if (string.IsNullOrWhiteSpace(expression.FieldName) && string.IsNullOrWhiteSpace(expression.PropertyName)) throw new InvalidOperationException(expression.Type + " expression requires 'fieldName' or 'propertyName'.");
+            var lookup = ActivityReflectionWriter.Create(lookupType);
+            ActivityReflectionWriter.SetProperty(lookup, "ListId", ToInArgument<Guid>(expression.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }));
+            if (HasExpression(expression.ItemGuid)) ActivityReflectionWriter.SetProperty(lookup, "ItemGuid", ToInArgument<Guid>(expression.ItemGuid ?? new ExpressionYaml()));
+            if (HasExpression(expression.ItemId)) ActivityReflectionWriter.SetProperty(lookup, "ItemId", ToInArgument<int>(expression.ItemId ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(lookup, "PropertyName", new InArgument<string>(string.IsNullOrWhiteSpace(expression.PropertyName) ? expression.FieldName : expression.PropertyName));
+            if (HasExpression(expression.Value)) ActivityReflectionWriter.SetProperty(lookup, "PropertyValue", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            return lookup;
         }
 
         private object CreateFormatStringExpression(ExpressionYaml expression, Type resultType)
@@ -122,5 +148,7 @@ namespace SPNet.Workflow.WfSerializer
         }
 
         private static object DefaultLiteral(Type type) => type == typeof(string) ? string.Empty : type == typeof(bool) ? false : 0d;
+
+        private static bool HasExpression(ExpressionYaml? expression) => expression != null && (!string.IsNullOrWhiteSpace(expression.Variable) || !string.IsNullOrWhiteSpace(expression.Type) || expression.ToString != null || expression.Value != null || expression.Literal != null);
     }
 }

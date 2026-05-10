@@ -15,7 +15,9 @@ namespace SPNet.Workflow.WfSerializer
 
         internal sealed class ValueExpressionTypes
         {
-            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type buildDictionary)
+            // These are structured Microsoft.Activities proxy expression activities that SharePoint Workflow Manager accepts.
+            // Do not replace them with raw VisualBasicValue/VisualBasicReference/CSharpValue/CSharpReference nodes; those require compilation and fail publish validation.
+            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type? lookupListItemIntProperty, Type? lookupListItemGuid, Type buildDictionary)
             {
                 ToStringExpression = toString;
                 ReplaceStringExpression = replaceString;
@@ -25,6 +27,8 @@ namespace SPNet.Workflow.WfSerializer
                 GetCurrentListId = getCurrentListId;
                 GetCurrentItemGuid = getCurrentItemGuid;
                 LookupListItemStringProperty = lookupListItemStringProperty;
+                LookupListItemIntProperty = lookupListItemIntProperty;
+                LookupListItemGuid = lookupListItemGuid;
                 BuildDictionary = buildDictionary;
             }
 
@@ -36,6 +40,8 @@ namespace SPNet.Workflow.WfSerializer
             public Type GetCurrentListId { get; }
             public Type GetCurrentItemGuid { get; }
             public Type LookupListItemStringProperty { get; }
+            public Type? LookupListItemIntProperty { get; }
+            public Type? LookupListItemGuid { get; }
             public Type BuildDictionary { get; }
         }
 
@@ -43,6 +49,7 @@ namespace SPNet.Workflow.WfSerializer
         {
             public ComparisonExpressionTypes(Assembly assembly)
             {
+                // Comparisons are emitted as structured Microsoft.Activities.Expressions nodes, not raw VB/C# language expressions.
                 IsLessThan = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsLessThan`1");
                 IsGreaterThan = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsGreaterThan`1");
                 IsLessThanOrEqual = GetGenericComparisonType(assembly, "Microsoft.Activities.Expressions.IsLessThanOrEqual`1");

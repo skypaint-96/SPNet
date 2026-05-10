@@ -4,6 +4,8 @@ SPNet now focuses on editing SharePoint 2013 / Workflow Manager workflows as con
 
 This is intentionally not the old broad YAML conversion pipeline. The YAML schema is small, explicit, and only emits supported WF activity objects before the existing serializer normalizes SharePoint Designer metadata.
 
+Generated SharePoint workflow XAML must not contain raw WF language expression activities such as `VisualBasicValue`, `VisualBasicReference`, `CSharpValue`, or `CSharpReference`. Those activities require VB/C# expression compilation, and SharePoint Workflow Manager validation rejects them for published workflows (for example, raw `Microsoft.CSharp.Activities.CSharpValue<TResult>` fails as an invalid type). SPNet therefore emits structured SharePoint/Workflow Manager-safe activity nodes, primarily SharePoint proxy activities and `Microsoft.Activities.Expressions` proxy expression activities. Export/import compatibility may still recognize raw VB/C# expression text from legacy or downloaded XAML so it can produce diagnostic YAML, but that compatibility path is not an endorsed output format.
+
 See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md).
 
 ## Current architecture
@@ -96,6 +98,8 @@ Supported actions:
 The external YAML shape is intentionally stable. Internally, action YAML is deserialized into a discriminated action hierarchy (`calc`, `writeHistory`, `setStatus`, and assignment actions) so action-specific validation and WF activity construction stay scoped to the supported action type instead of one broad property bag.
 
 Supported expressions:
+
+These expressions are serialized as structured activity nodes and typed WF arguments. Do not add YAML features that emit raw WF language expression activities (`VisualBasicValue`, `VisualBasicReference`, `CSharpValue`, or `CSharpReference`); they require compilation and are rejected by SharePoint Workflow Manager publishing validation.
 
 - literal values: `literal: 1` or `literal: "text"`.
 - variable references: `variable: calc`.
@@ -303,6 +307,8 @@ External dependencies are not packaged: SharePoint Designer WebsiteCache DLLs, O
 ## Validation
 
 The YAML-first baseline has been validated end-to-end in SharePoint Designer with `YamlFirstSmoke`: the workflow opens in Designer, the stage/action structure is visible, and Designer `Check for Errors` reports no errors. HTTP actions, DynamicValue property extraction, current-item list field updates, local list smoke generation, read-only list workflow listing, and CSOM list publishing have also been validated. List lifecycle create/update has been runtime-validated with `SPNetYamlListLifecycleManual-20260509-1535` on `TestList`: Designer showed misleading red boxes and incomplete variable-picker/action-builder rendering for the created item ID, but `Check for Errors` passed and runtime execution created an item and updated that new item's title via the returned ID. Generated artifacts are intentionally ignored by Git; keep only `artifacts/.gitkeep` committed in the workspace.
+
+Publishing validation has also confirmed that raw VB/C# WF language expression activities are not acceptable output: a probe containing raw `Microsoft.CSharp.Activities.CSharpValue<TResult>` failed Workflow Manager validation with an invalid-type error, and earlier raw `VisualBasicValue<T>` string-action builders were rejected until replaced with `Microsoft.Activities.Expressions` structured proxy expression nodes. Keep this as a hard guardrail for generated XAML.
 
 ```powershell
 dotnet build .\SPNet.slnx

@@ -192,7 +192,7 @@ namespace SPNet.Workflow.WfSerializer.Tests
         }
 
         [TestMethod]
-        public void ExportWorkflowYaml_EmitsBuildablePlaceholdersForTestWFAutoStartListActions()
+        public void ExportWorkflowYaml_EmitsFaithfulExpressionsForTestWFAutoStartListActions()
         {
             var inputPath = FindRepoFile("artifacts", "diagnostics-TestListExample2", "TestListExample2.pretty.xaml");
             if (!File.Exists(inputPath)) Assert.Inconclusive("Reference diagnostics XAML artifact is not available in this checkout.");
@@ -204,12 +204,22 @@ namespace SPNet.Workflow.WfSerializer.Tests
                 var actions = workflow.Stages.SelectMany(s => s.Actions).ToList();
                 var create = actions.OfType<CreateListItemActionYaml>().Single();
                 var targeted = actions.OfType<TargetedListItemActionYaml>().ToList();
+                var updates = actions.OfType<UpdateListItemActionYaml>().ToList();
+                var firstUpdateTitle = updates[0].Fields["Title"];
 
                 Assert.IsTrue(create.Fields.ContainsKey("TestWFAutoStart"), "Expected exported createListItem fields to include TestWFAutoStart.");
-                Assert.AreEqual("getCurrentListId", create.ListId.Type, "Expected createListItem listId placeholder to build as current-list lookup.");
+                Assert.AreEqual("rgvedrfgr", create.Fields["TestWFAutoStart"].Literal, "Expected exported field values to preserve real literals.");
+                Assert.AreEqual("tielsdg", create.Fields["Title"].Literal, "Expected exported create field values to preserve real literals.");
+                Assert.AreEqual("getCurrentListId", create.ListId.Type, "Expected createListItem listId to preserve current-list lookup expression.");
                 Assert.IsTrue(targeted.Count >= 1, "Expected at least one exported targeted list-item action.");
-                Assert.IsTrue(targeted.All(a => string.Equals("getCurrentListId", a.ListId.Type, StringComparison.OrdinalIgnoreCase)), "Expected targeted list actions to use buildable current-list placeholders.");
-                Assert.IsTrue(targeted.All(a => Convert.ToInt32(a.ItemId.Literal) == 1), "Expected targeted list actions to use buildable integer itemId placeholders.");
+                Assert.IsTrue(targeted.All(a => string.Equals("getCurrentListId", a.ListId.Type, StringComparison.OrdinalIgnoreCase)), "Expected targeted list actions to preserve current-list expressions.");
+                Assert.IsTrue(targeted.All(a => a.ItemId.Literal == null), "Expected targeted list actions not to synthesize itemId: 1 when real identity expressions are present.");
+                Assert.IsTrue(targeted.Any(a => string.Equals("getCurrentItemGuid", a.ItemGuid.Type, StringComparison.OrdinalIgnoreCase)), "Expected targeted list actions to preserve current-item Guid identity expressions.");
+                Assert.AreEqual("formatString", firstUpdateTitle.Type, "Expected nested formatted string field value to be exported.");
+                Assert.AreEqual("custom string being built and lookup {0}", firstUpdateTitle.Literal);
+                Assert.AreEqual(1, firstUpdateTitle.Values.Count);
+                Assert.AreEqual("lookupListItemIntProperty", firstUpdateTitle.Values[0].ToString.Type, "Expected nested list item integer lookup to be exported through ToString.");
+                Assert.AreEqual("ID", firstUpdateTitle.Values[0].ToString.PropertyName);
             }
             finally
             {
@@ -274,6 +284,127 @@ namespace SPNet.Workflow.WfSerializer.Tests
                 if (File.Exists(inputPath)) File.Delete(inputPath);
                 if (File.Exists(outputPath)) File.Delete(outputPath);
             }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_RecognizesPlainAssignAndControlFlow()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-control-flow-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, @"<Activity x:Class=""ControlWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities"" xmlns:mva=""clr-namespace:Microsoft.VisualBasic.Activities;assembly=System.Activities""><Sequence DisplayName=""Control Stage""><Assign x:TypeArguments=""x:String""><Assign.To><OutArgument x:TypeArguments=""x:String""><ArgumentReference x:TypeArguments=""x:String"" ArgumentName=""currentWebUrl"" /></OutArgument></Assign.To><Assign.Value><InArgument x:TypeArguments=""x:String""><mva:VisualBasicValue x:TypeArguments=""x:String"" ExpressionText=""&amp;quot;hello&amp;quot;"" /></InArgument></Assign.Value></Assign><While><While.Condition><mva:VisualBasicValue x:TypeArguments=""x:Boolean"" ExpressionText=""unsupportedCondition"" /></While.Condition><While.Body><Sequence><local:WriteToHistory Message=""inside loop"" /></Sequence></While.Body></While><If><If.Condition><mva:VisualBasicValue x:TypeArguments=""x:Boolean"" ExpressionText=""unsupportedCondition"" /></If.Condition><If.Then><Sequence><local:WriteToHistory Message=""then branch"" /></Sequence></If.Then><If.Else><Sequence><local:WriteToHistory Message=""else branch"" /></Sequence></If.Else></If></Sequence></Activity>");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+                var actions = workflow.Stages.SelectMany(s => s.Actions).ToList();
+
+                var assign = actions.OfType<AssignActionYaml>().Single();
+                Assert.AreEqual("currentWebUrl", assign.To);
+                Assert.AreEqual("hello", assign.Value?.Literal);
+                Assert.IsTrue(actions.OfType<WhileActionYaml>().Single().Actions.OfType<WriteHistoryActionYaml>().Any(a => Convert.ToString(a.Message.Literal) == "inside loop"));
+                var ifAction = actions.OfType<IfActionYaml>().Single();
+                Assert.IsTrue(ifAction.Then.OfType<WriteHistoryActionYaml>().Any(a => Convert.ToString(a.Message.Literal) == "then branch"));
+                Assert.IsTrue(ifAction.Else.OfType<WriteHistoryActionYaml>().Any(a => Convert.ToString(a.Message.Literal) == "else branch"));
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_ReconstructsGeneratedComparisonAndStringExpressionShapes()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-generated-shapes-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, @"<Activity x:Class=""GeneratedShapes.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:p=""clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Sequence DisplayName=""Generated Stage""><Assign x:TypeArguments=""x:String""><Assign.To><OutArgument x:TypeArguments=""x:String""><ArgumentReference x:TypeArguments=""x:String"" ArgumentName=""replaceResult"" /></OutArgument></Assign.To><Assign.Value><InArgument x:TypeArguments=""x:String""><p:ReplaceString Input=""inputText"" Pattern=""old"" Replacement=""new"" /></InArgument></Assign.Value></Assign><Assign x:TypeArguments=""x:String""><Assign.To><OutArgument x:TypeArguments=""x:String""><ArgumentReference x:TypeArguments=""x:String"" ArgumentName=""substringResult"" /></OutArgument></Assign.To><Assign.Value><InArgument x:TypeArguments=""x:String""><p:Substring Input=""inputText"" StartIndex=""1"" Length=""2"" /></InArgument></Assign.Value></Assign><Assign x:TypeArguments=""x:String""><Assign.To><OutArgument x:TypeArguments=""x:String""><ArgumentReference x:TypeArguments=""x:String"" ArgumentName=""trimResult"" /></OutArgument></Assign.To><Assign.Value><InArgument x:TypeArguments=""x:String""><p:Trim Input=""inputText"" Characters="""" /></InArgument></Assign.Value></Assign><While><While.Condition><p:IsLessThan x:TypeArguments=""x:Double"" Left=""1"" Right=""2"" /></While.Condition><While.Body><Sequence><local:WriteToHistory Message=""inside generated loop"" /></Sequence></While.Body></While><If><If.Condition><p:IsGreaterThanOrEqual x:TypeArguments=""x:Double"" Left=""counter"" Right=""10"" /></If.Condition><If.Then><Sequence><local:WriteToHistory Message=""generated then"" /></Sequence></If.Then></If></Sequence></Activity>");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+                var actions = workflow.Stages.SelectMany(s => s.Actions).ToList();
+
+                var replace = actions.OfType<StringReplaceActionYaml>().Single();
+                Assert.AreEqual("inputText", replace.Text.Variable);
+                Assert.AreEqual("old", replace.OldValue.Literal);
+                Assert.AreEqual("new", replace.NewValue.Literal);
+                var substring = actions.OfType<StringSubstringActionYaml>().Single();
+                Assert.AreEqual("inputText", substring.Text.Variable);
+                Assert.AreEqual(1d, Convert.ToDouble(substring.StartIndex.Literal));
+                Assert.AreEqual(2d, Convert.ToDouble(substring.Length.Literal));
+                Assert.AreEqual("inputText", actions.OfType<StringTrimActionYaml>().Single().Text.Variable);
+                var whileAction = actions.OfType<WhileActionYaml>().Single();
+                Assert.AreEqual("isLessThan", whileAction.Condition.Type);
+                Assert.AreEqual(1d, Convert.ToDouble(whileAction.Condition.Left.Literal));
+                Assert.AreEqual(2d, Convert.ToDouble(whileAction.Condition.Right.Literal));
+                var ifAction = actions.OfType<IfActionYaml>().Single();
+                Assert.AreEqual("isGreaterThanOrEqual", ifAction.Condition.Type);
+                Assert.AreEqual("counter", ifAction.Condition.Left.Variable);
+                Assert.AreEqual(10d, Convert.ToDouble(ifAction.Condition.Right.Literal));
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_ReconstructsRecognizableNestedLookupExpressionShapes()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-nested-expression-shapes-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, @"<Activity x:Class=""NestedExpressions.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:p=""clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Sequence DisplayName=""Nested Stage""><Assign x:TypeArguments=""x:String""><Assign.To><OutArgument x:TypeArguments=""x:String""><ArgumentReference x:TypeArguments=""x:String"" ArgumentName=""currentWebUrl"" /></OutArgument></Assign.To><Assign.Value><InArgument x:TypeArguments=""x:String""><p:LookupWorkflowContextProperty PropertyName=""CurrentWebUrl"" /></InArgument></Assign.Value></Assign><Assign x:TypeArguments=""x:String""><Assign.To><OutArgument x:TypeArguments=""x:String""><ArgumentReference x:TypeArguments=""x:String"" ArgumentName=""readBackTitle"" /></OutArgument></Assign.To><Assign.Value><InArgument x:TypeArguments=""x:String""><p:LookupSPListItemStringProperty FieldName=""Title"" ItemId=""1""><p:LookupSPListItemStringProperty.ListId><InArgument x:TypeArguments=""x:Guid""><p:GetCurrentListId /></InArgument></p:LookupSPListItemStringProperty.ListId></p:LookupSPListItemStringProperty></InArgument></Assign.Value></Assign></Sequence></Activity>");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+                var assignments = workflow.Stages.SelectMany(s => s.Actions).OfType<AssignActionYaml>().ToList();
+
+                var context = assignments.Single(a => a.To == "currentWebUrl").Value;
+                Assert.AreEqual("lookupWorkflowContext", context.Type);
+                Assert.AreEqual("CurrentWebUrl", context.PropertyName);
+                var lookup = assignments.Single(a => a.To == "readBackTitle").Value;
+                Assert.AreEqual("lookupListItemStringProperty", lookup.Type);
+                Assert.AreEqual("getCurrentListId", lookup.ListId.Type);
+                Assert.AreEqual(1d, Convert.ToDouble(lookup.ItemId.Literal));
+                Assert.AreEqual("Title", lookup.FieldName);
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow("VisualBasicValue")]
+        [DataRow("VisualBasicReference")]
+        [DataRow("CSharpValue")]
+        [DataRow("CSharpReference")]
+        public void AddSharePointDesignerMetadata_RejectsRawLanguageExpressionActivities(string expressionActivityName)
+        {
+            var xaml = @"<Activity x:Class=""RawExpressionWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:mva=""clr-namespace:Microsoft.VisualBasic.Activities;assembly=System.Activities"" xmlns:mca=""clr-namespace:Microsoft.CSharp.Activities;assembly=System.Activities""><Sequence><Assign x:TypeArguments=""x:String""><Assign.To><OutArgument x:TypeArguments=""x:String""><ArgumentReference x:TypeArguments=""x:String"" ArgumentName=""target"" /></OutArgument></Assign.To><Assign.Value><InArgument x:TypeArguments=""x:String""><mva:" + expressionActivityName + @" x:TypeArguments=""x:String"" ExpressionText=""&amp;quot;blocked&amp;quot;"" /></InArgument></Assign.Value></Assign></Sequence></Activity>";
+
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => WfActivityBuilderSerializer.AddSharePointDesignerMetadata(xaml, "RawExpressionWorkflow"));
+
+            StringAssert.Contains(ex.Message, expressionActivityName);
+            StringAssert.Contains(ex.Message, "raw WF language expression");
+        }
+
+        [TestMethod]
+        public void AddSharePointDesignerMetadata_AllowsStructuredMicrosoftActivitiesExpressions()
+        {
+            var xaml = @"<Activity x:Class=""StructuredExpressionWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:p=""clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy""><Flowchart><FlowStep><Sequence DisplayName=""Stage 1""><Assign x:TypeArguments=""x:String""><Assign.To><OutArgument x:TypeArguments=""x:String""><ArgumentReference x:TypeArguments=""x:String"" ArgumentName=""target"" /></OutArgument></Assign.To><Assign.Value><InArgument x:TypeArguments=""x:String""><p:ReplaceString Input=""inputText"" Pattern=""old"" Replacement=""new"" /></InArgument></Assign.Value></Assign></Sequence></FlowStep></Flowchart></Activity>";
+
+            var normalized = WfActivityBuilderSerializer.AddSharePointDesignerMetadata(xaml, "StructuredExpressionWorkflow");
+
+            StringAssert.Contains(normalized, "ReplaceString");
+            Assert.IsFalse(normalized.Contains("VisualBasicValue"), "Generated metadata output should not contain raw VisualBasicValue.");
+            Assert.IsFalse(normalized.Contains("VisualBasicReference"), "Generated metadata output should not contain raw VisualBasicReference.");
+            Assert.IsFalse(normalized.Contains("CSharpValue"), "Generated metadata output should not contain raw CSharpValue.");
+            Assert.IsFalse(normalized.Contains("CSharpReference"), "Generated metadata output should not contain raw CSharpReference.");
         }
 
         private static WorkflowYaml LoadYaml(string yaml)

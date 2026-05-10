@@ -262,6 +262,8 @@ namespace SPNet.Workflow.WfSerializer
             var document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace);
             var root = document.Root ?? throw new InvalidOperationException("Workflow XAML has no root element.");
 
+            RejectRawLanguageExpressionActivities(document);
+
             EnsureNamespace(root, "mc", MarkupCompatibilityNamespace);
             EnsureNamespace(root, "mwaw", AuthoringNamespace);
             EnsureNamespace(root, "scg", "clr-namespace:System.Collections.Generic;assembly=mscorlib");
@@ -304,6 +306,17 @@ namespace SPNet.Workflow.WfSerializer
                 CreateCustomAttributes(SpdStageFooterAttribute)));
 
             return document.ToString(SaveOptions.DisableFormatting);
+        }
+
+        private static void RejectRawLanguageExpressionActivities(XDocument document)
+        {
+            // SharePoint Workflow Manager validation rejects raw VB/C# WF language expressions because they require compilation.
+            // Generated SPNet workflows must use structured SharePoint/Microsoft.Activities proxy expression activities instead.
+            // Exporter/parser code may still read these names for legacy/downloaded-XAML compatibility, but build output may not contain them.
+            var forbidden = document.Descendants()
+                .Select(e => e.Name.LocalName)
+                .FirstOrDefault(n => n == "VisualBasicValue" || n == "VisualBasicReference" || n == "CSharpValue" || n == "CSharpReference");
+            if (forbidden != null) throw new InvalidOperationException("Generated SharePoint workflow XAML must not contain raw WF language expression activity '" + forbidden + "'. Use structured SharePoint/Microsoft.Activities expression activities instead; raw VB/C# expressions require compilation and are rejected by Workflow Manager validation.");
         }
 
         private static void EnsureLifecycleListItemPropertiesElements(XDocument document)

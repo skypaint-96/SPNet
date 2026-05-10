@@ -95,7 +95,33 @@ namespace SPNet.Workflow.WfSerializer
         private static InArgument<object> ToObjectFieldArgument(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
         {
             expression = expression ?? new ExpressionYaml();
-            return new InArgument<object>((Activity<object>)new Cast<string, object> { Operand = ToInArgument<string>(expression, valueExpressionTypes) });
+            var valueType = InferObjectFieldValueType(expression);
+            var cast = Activator.CreateInstance(typeof(Cast<,>).MakeGenericType(valueType, typeof(object)))!;
+            ActivityReflectionWriter.SetProperty(cast, "Operand", ToTypedInArgument(expression, valueExpressionTypes, valueType));
+            return (InArgument<object>)ActivityReflectionWriter.CreateInArgument(typeof(object), cast);
+        }
+
+        private static object ToTypedInArgument(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes, Type valueType)
+        {
+            var method = typeof(WfActivityBuilderSerializer).GetMethod("ToInArgument", BindingFlags.Static | BindingFlags.NonPublic) ?? throw new InvalidOperationException("ToInArgument helper was not found.");
+            return method.MakeGenericMethod(valueType).Invoke(null, new object[] { expression, valueExpressionTypes }) ?? throw new InvalidOperationException("Could not create field value argument.");
+        }
+
+        private static Type InferObjectFieldValueType(ExpressionYaml expression)
+        {
+            var valueType = (expression.ValueType ?? string.Empty).Replace("System.", string.Empty).Replace("x:", string.Empty).Trim();
+            if (valueType.Equals("Guid", StringComparison.OrdinalIgnoreCase)) return typeof(Guid);
+            if (valueType.Equals("Int32", StringComparison.OrdinalIgnoreCase) || valueType.Equals("Int", StringComparison.OrdinalIgnoreCase)) return typeof(int);
+            if (valueType.Equals("Double", StringComparison.OrdinalIgnoreCase)) return typeof(double);
+            if (valueType.Equals("Boolean", StringComparison.OrdinalIgnoreCase) || valueType.Equals("Bool", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
+            if (expression.Literal is int) return typeof(int);
+            if (expression.Literal is bool) return typeof(bool);
+            if (expression.Literal is Guid) return typeof(Guid);
+            if (expression.Literal is double || expression.Literal is float || expression.Literal is decimal) return typeof(double);
+            var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+            if (type == "lookuplistitemintproperty" || type == "lookupsplistitemintproperty" || type == "lookupsplistitemint32property") return typeof(int);
+            if (type == "lookuplistitemguid" || type == "lookupsplistitemguid" || type == "getcurrentitemguid" || type == "getcurrentlistid") return typeof(Guid);
+            return typeof(string);
         }
 
         private static bool HasExpression(ExpressionYaml expression) => expression != null && (!string.IsNullOrWhiteSpace(expression.Variable) || !string.IsNullOrWhiteSpace(expression.Type) || expression.ToString != null || expression.Value != null || expression.Literal != null);

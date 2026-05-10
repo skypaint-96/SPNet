@@ -23,6 +23,8 @@ namespace SPNet.Workflow.WfSerializer
             DeleteListItem = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.DeleteListItem");
             LookupSPListItemStringProperty = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemStringProperty");
             LookupSPListItemIntProperty = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemIntProperty");
+            LookupSPListItemInt32Property = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemInt32Property");
+            LookupSPListItemGuid = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemGuid");
             CallHTTPWebService = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.CallHTTPWebService");
             Email = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Email");
             ExpandInitFormUsers = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.ExpandInitFormUsers");
@@ -53,6 +55,8 @@ namespace SPNet.Workflow.WfSerializer
         public Type DeleteListItem { get; }
         public Type LookupSPListItemStringProperty { get; }
         public Type? LookupSPListItemIntProperty { get; }
+        public Type? LookupSPListItemInt32Property { get; }
+        public Type? LookupSPListItemGuid { get; }
         public Type CallHTTPWebService { get; }
         public Type Email { get; }
         public Type ExpandInitFormUsers { get; }
@@ -68,7 +72,7 @@ namespace SPNet.Workflow.WfSerializer
         public WfActivityBuilderSerializer.ComparisonExpressionTypes ComparisonExpressionTypes { get; }
 
         public WfActivityBuilderSerializer.ValueExpressionTypes CreateValueExpressionTypes() =>
-            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, BuildDictionary);
+            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemGuid, BuildDictionary);
 
         public Dictionary<string, Type> CreateBuildContextTypes()
         {
@@ -96,6 +100,8 @@ namespace SPNet.Workflow.WfSerializer
                 ["GetDynamicValueProperty"] = GetDynamicValueProperty
             };
             if (LookupSPListItemIntProperty != null) types["LookupSPListItemIntProperty"] = LookupSPListItemIntProperty;
+            if (LookupSPListItemInt32Property != null) types["LookupSPListItemInt32Property"] = LookupSPListItemInt32Property;
+            if (LookupSPListItemGuid != null) types["LookupSPListItemGuid"] = LookupSPListItemGuid;
             return types;
         }
 
