@@ -22,19 +22,19 @@ namespace SPNet.Workflow.WfSerializer
             if (context == null) throw new ArgumentNullException(nameof(context));
 
             var flowchart = BuildFlowchart(workflow, context);
-            var outerSequence = new Sequence { DisplayName = workflow.Name };
-            flowchart.DisplayName = workflow.Name;
+            var outerSequence = new Sequence { DisplayName = workflow.EffectiveDisplayName };
+            flowchart.DisplayName = workflow.EffectiveDisplayName;
             outerSequence.Activities.Add(flowchart);
 
             var builder = new ActivityBuilder
             {
-                Name = string.IsNullOrWhiteSpace(workflow.TechnicalName)
-                    ? WfActivityBuilderSerializer.GetDottedWorkflowClassName(workflow.Name)
-                    : workflow.TechnicalName,
+                Name = string.IsNullOrWhiteSpace(workflow.EffectiveTechnicalName)
+                    ? WfActivityBuilderSerializer.GetDottedWorkflowClassName(workflow.EffectiveDisplayName)
+                    : workflow.EffectiveTechnicalName,
                 Implementation = outerSequence
             };
             AddVariableDeclarations(builder, context.VariableTypes);
-            AddParameterDeclarations(builder, workflow.Parameters ?? new List<ParameterYaml>(), context.ParameterTypes);
+            AddParameterDeclarations(builder, workflow.EffectiveFormFields, context.ParameterTypes);
             return builder;
         }
 

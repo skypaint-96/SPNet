@@ -15,6 +15,7 @@ param(
     [string]$WorkflowName,
     [string]$XamlPath,
     [string]$FormFieldXmlPath,
+    [string]$MetadataJsonPath,
     [string]$OutputXamlPath,
     [ValidateSet('WebLogin')]
     [string]$AuthMode = 'WebLogin',
@@ -144,7 +145,7 @@ function Invoke-SPNetCsomPublisher {
 
     $publisherProject = Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj'
     $publisherExe = if ([string]::IsNullOrWhiteSpace($PublisherExePath)) {
-        Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\bin\Debug\net48\SPNet.Workflow.Publisher.Csom.exe'
+        Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\bin\Release\net48\SPNet.Workflow.Publisher.Csom.exe'
     } else { $PublisherExePath }
     if (-not (Test-Path $publisherExe)) {
         if (-not (Test-Path $publisherProject)) { throw "CSOM publisher project not found at '$publisherProject'." }
@@ -164,6 +165,7 @@ function Invoke-SPNetCsomPublisher {
         '--if-exists', 'Fail'
     )
     if (-not [string]::IsNullOrWhiteSpace($FormFieldXmlPath)) { $publisherArgs += @('--form-field-xml', $FormFieldXmlPath) }
+    if (-not [string]::IsNullOrWhiteSpace($MetadataJsonPath)) { $publisherArgs += @('--metadata-json', $MetadataJsonPath) }
     if ($TargetType -eq 'List') {
         if ([string]::IsNullOrWhiteSpace($TargetListTitle)) { throw '-TargetListTitle is required for list workflow publication.' }
         $listGuid = [Guid]::Empty
@@ -568,6 +570,10 @@ if ($Action -eq 'Download') {
     } else {
         $formFieldXmlPath = $null
     }
+    $requiresInitiationForm = Get-SPNetWorkflowMetadataValue -Definition $definition -Name 'RequiresInitiationForm'
+    if ([string]::IsNullOrWhiteSpace([string]$requiresInitiationForm)) { $requiresInitiationForm = Get-SPNetWorkflowMetadataValue -Definition $definitionInfo -Name 'RequiresInitiationForm' }
+    $initiationUrl = Get-SPNetWorkflowMetadataValue -Definition $definition -Name 'InitiationUrl'
+    if ([string]::IsNullOrWhiteSpace([string]$initiationUrl)) { $initiationUrl = Get-SPNetWorkflowMetadataValue -Definition $definitionInfo -Name 'InitiationUrl' }
     $subscription = $null
     try {
         $subscriptions = $subscriptionService.EnumerateSubscriptionsByDefinition($definition.Id)
@@ -589,7 +595,39 @@ if ($Action -eq 'Download') {
         $status = Get-SPNetSubscriptionMetadataValue -Subscription $subscription -PropertyDefinitions $subscriptionProperties -Name 'StatusFieldName'
         $targetListName = Get-SPNetSubscriptionMetadataValue -Subscription $subscription -PropertyDefinitions $subscriptionProperties -Name 'Microsoft.SharePoint.ActivationProperties.ListName'
     }
-    Write-SPNetResult @{ Action = 'Download'; WorkflowName = $definition.DisplayName; DefinitionId = $definition.Id.ToString(); SubscriptionId = if ($subscription) { $subscription.Id.ToString() } else { $null }; XamlPath = $OutputXamlPath; FormFieldXmlPath = $formFieldXmlPath; HasFormField = -not [string]::IsNullOrWhiteSpace($formFieldXmlPath); TargetType = $targetType; TargetListTitle = $targetListName; StartManual = [bool]$manual; StartOnCreated = [bool]$created; StartOnUpdated = [bool]$updated; StatusColumn = $status }
+    $metadataJsonPath = $OutputXamlPath + '.metadata.json'
+    $formFields = @()
+    if (-not [string]::IsNullOrWhiteSpace($formFieldXmlPath)) {
+        [xml]$formFieldSidecar = Get-Content -Path $formFieldXmlPath -Raw
+        $formFields = @($formFieldSidecar.Fields.Field | ForEach-Object {
+            $field = $_
+            $choices = @($field.CHOICES.CHOICE | ForEach-Object { @{ value = [string]$_.'#text'; displayName = [string]$_.DisplayName } })
+            $value = [ordered]@{
+                name = [string]$field.Name
+                formType = [string]$field.FormType
+                type = [string]$field.Type
+                displayName = [string]$field.DisplayName
+                description = [string]$field.Description
+                direction = [string]$field.Direction
+            }
+            if ($null -ne $field.Default) { $value.default = [string]$field.Default }
+            if ($choices.Count -gt 0) { $value.choices = $choices }
+            foreach ($attributeName in @('Format','BaseType','MaxLength','NumLines','Sortable','RichTextMode','List','ShowField','Mult','UserSelectionMode','UserSelectionScope')) {
+                $attributeValue = [string]$field.$attributeName
+                if (-not [string]::IsNullOrWhiteSpace($attributeValue)) { $value[$attributeName.Substring(0,1).ToLowerInvariant() + $attributeName.Substring(1)] = $attributeValue }
+            }
+            $value
+        })
+    }
+    $metadata = [ordered]@{
+        displayName = [string]$definition.DisplayName
+        description = [string]$definition.Description
+        target = [ordered]@{ type = $targetType; listTitle = $targetListName }
+        start = [ordered]@{ manual = [bool]$manual; onCreated = [bool]$created; onUpdated = [bool]$updated }
+        initiation = [ordered]@{ requiresForm = (-not [string]::IsNullOrWhiteSpace($formFieldXmlPath) -or ([string]$requiresInitiationForm).ToLowerInvariant() -eq 'true'); url = [string]$initiationUrl; formFields = $formFields }
+    }
+    $metadata | ConvertTo-Json -Depth 20 | Set-Content -Path $metadataJsonPath -Encoding UTF8
+    Write-SPNetResult @{ Action = 'Download'; WorkflowName = $definition.DisplayName; DefinitionId = $definition.Id.ToString(); SubscriptionId = if ($subscription) { $subscription.Id.ToString() } else { $null }; XamlPath = $OutputXamlPath; FormFieldXmlPath = $formFieldXmlPath; MetadataJsonPath = $metadataJsonPath; HasFormField = -not [string]::IsNullOrWhiteSpace($formFieldXmlPath); HasMetadataJson = (Test-Path $metadataJsonPath); TargetType = $targetType; TargetListTitle = $targetListName; StartManual = [bool]$manual; StartOnCreated = [bool]$created; StartOnUpdated = [bool]$updated; StatusColumn = $status }
     return
 }
 
@@ -597,6 +635,7 @@ if ([string]::IsNullOrWhiteSpace($XamlPath)) { throw '-XamlPath is required for 
 if ([string]::IsNullOrWhiteSpace($WorkflowName)) { throw '-WorkflowName is required for Publish.' }
 $xamlContent = Get-Content -Path $XamlPath -Raw
 $effectiveFormFieldXmlPath = Get-SPNetFormFieldXmlPath -XamlFilePath $XamlPath -ExplicitFormFieldXmlPath $FormFieldXmlPath
+$effectiveMetadataJsonPath = Get-SPNetWorkflowMetadataJsonPath -XamlFilePath $XamlPath -ExplicitMetadataJsonPath $MetadataJsonPath
 $formFieldXml = Get-SPNetNormalizedFormFieldXml -Path $effectiveFormFieldXmlPath
 $existingDefinitions = Get-SPNetWorkflowDefinitionsByName -Name $WorkflowName
 if ($existingDefinitions.Count -gt 0 -and $IfExists -eq 'Fail') {

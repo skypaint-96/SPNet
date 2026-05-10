@@ -653,6 +653,145 @@ stages:
             }
         }
 
+        [TestMethod]
+        public void Load_DeserializesMetadataAndUsesItAsEffectiveValues()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: LegacyWorkflow
+start:
+  manual: true
+metadata:
+  displayName: Metadata Workflow
+  technicalName: Metadata.Workflow.MTW
+  description: Metadata description
+  target:
+    type: List
+    listTitle: Requests
+  start:
+    manual: false
+    onCreated: true
+    onUpdated: true
+  initiation:
+    formFields:
+      - name: titleParam
+        type: Text
+        displayName: Request title
+stages:
+  - name: Stage 1
+    actions:
+      - type: writeHistory
+        message: hello");
+
+            Assert.AreEqual("Metadata Workflow", workflow.EffectiveDisplayName);
+            Assert.AreEqual("Metadata.Workflow.MTW", workflow.EffectiveTechnicalName);
+            Assert.AreEqual("Requests", workflow.EffectiveTarget.ListTitle);
+            Assert.IsFalse(workflow.EffectiveStartManual);
+            Assert.IsTrue(workflow.EffectiveStartOnCreated);
+            Assert.IsTrue(workflow.EffectiveStartOnUpdated);
+            Assert.AreEqual("titleParam", workflow.EffectiveFormFields.Single().Name);
+        }
+
+        [TestMethod]
+        public void Save_RoundTripsMetadataYaml()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "spnet-metadata-roundtrip-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: LegacyWorkflow
+metadata:
+  displayName: Metadata Workflow
+  description: Metadata description
+  initiation:
+    formFields:
+      - name: titleParam
+        type: Text
+        default: hello
+stages:
+  - name: Stage 1
+    actions:
+      - type: writeHistory
+        message: hello");
+
+                workflow.Save(path);
+                var roundTripped = WorkflowYaml.Load(path);
+
+                Assert.AreEqual("Metadata Workflow", roundTripped.Metadata.DisplayName);
+                Assert.AreEqual("hello", roundTripped.Metadata.Initiation.FormFields.Single().Default);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [TestMethod]
+        public void MetadataFormFields_GenerateSameFormFieldXmlAsLegacyParameters()
+        {
+            var legacy = CreateParameterisedWFExParameters();
+            var workflow = new WorkflowYaml();
+            workflow.Metadata.Initiation.FormFields.AddRange(legacy);
+
+            Assert.AreEqual(WorkflowParameterFormFieldSerializer.Serialize(legacy), WorkflowParameterFormFieldSerializer.Serialize(workflow.EffectiveFormFields));
+        }
+
+        [TestMethod]
+        public void MetadataJson_SerializesAndDeserializesPublishContract()
+        {
+            var metadata = new WorkflowDefinitionMetadataYaml
+            {
+                DisplayName = "Metadata Workflow",
+                Description = "Metadata description",
+                Start = new WorkflowStartOptionsYaml { Manual = false, OnCreated = true, OnUpdated = true },
+                Initiation = new WorkflowInitiationMetadataYaml { FormFields = { new ParameterYaml { Name = "titleParam", Type = "Text", Default = "hello" } } }
+            };
+
+            var roundTripped = WorkflowDefinitionMetadataYaml.FromJson(metadata.ToJson());
+
+            Assert.AreEqual("Metadata Workflow", roundTripped.DisplayName);
+            Assert.IsFalse(roundTripped.Start.Manual.Value);
+            Assert.IsTrue(roundTripped.Start.OnCreated.Value);
+            Assert.AreEqual("titleParam", roundTripped.Initiation.FormFields.Single().Name);
+            Assert.AreEqual("hello", roundTripped.Initiation.FormFields.Single().Default);
+        }
+
+        [TestMethod]
+        public void SerializeYamlWorkflow_WritesMetadataJsonSidecar()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "spnet-metadata-json-sidecar-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var workflowPath = Path.Combine(directory, "workflow.yml");
+            var xamlPath = Path.Combine(directory, "workflow.xaml");
+            File.WriteAllText(workflowPath, @"schemaVersion: spnet.workflow/v1
+name: MetadataSidecarWorkflow
+parameters:
+  requestTitle:
+    type: Text
+    displayName: Request title
+stages:
+  - name: Stage 1
+    actions:
+      - type: writeHistory
+        message: Done
+");
+
+            try
+            {
+                WfActivityBuilderSerializer.SerializeYamlWorkflow(workflowPath, xamlPath, Environment.GetEnvironmentVariable("SPNET_SPD_CACHE") ?? @"C:\Users\mason.kerr\AppData\Local\Microsoft\WebsiteCache\PMteamblog\15.0.0.4455", new SpNetToolConfig());
+
+                var metadataPath = xamlPath + ".metadata.json";
+                Assert.IsTrue(File.Exists(metadataPath));
+                var metadata = WorkflowDefinitionMetadataYaml.FromJson(File.ReadAllText(metadataPath));
+                Assert.AreEqual("MetadataSidecarWorkflow", metadata.DisplayName);
+                Assert.IsTrue(metadata.Initiation.RequiresForm.Value);
+                Assert.AreEqual("requestTitle", metadata.Initiation.FormFields.Single().Name);
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
         private static Exception AssertThrowsWorkflowException(Action action)
         {
             try

@@ -4,6 +4,7 @@ param(
     [string]$Workflow = 'samples\workflow.example.yml',
     [string]$XamlPath = 'artifacts\workflow.xaml',
     [string]$FormFieldXmlPath = '',
+    [string]$MetadataJsonPath = '',
     [string]$Out = '',
     [string]$Config = 'config\spnet.local.yml',
     [string]$CacheFolder = '',
@@ -32,15 +33,18 @@ if (-not (Test-Path $tool)) {
     dotnet build (Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj') -c Release
 }
 
-$common = @()
-if ($Config) { $common += @('--config', $Config) }
-if ($CacheFolder) { $common += @('--cache-folder', $CacheFolder) }
-
 function Get-SPNetYamlScalar {
     param([string[]]$Lines, [string]$Name)
-    $match = $Lines | Select-String -Pattern ('^\s*' + [regex]::Escape($Name) + '\s*:\s*[''\"]?(.*?)[''\"]?\s*$') | Select-Object -First 1
+    $match = $Lines | Select-String -Pattern ('^' + [regex]::Escape($Name) + '\s*:\s*[''\"]?(.*?)[''\"]?\s*$') | Select-Object -First 1
     if ($match) { return $match.Matches[0].Groups[1].Value.Trim() }
     return ''
+}
+
+function Get-SPNetConfigScalar {
+    param([string]$Path, [string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path -PathType Leaf)) { return '' }
+    $lines = Get-Content -Path $Path
+    return Get-SPNetYamlScalar -Lines $lines -Name $Name
 }
 
 function ConvertTo-SPNetYamlBoolText {
@@ -54,6 +58,13 @@ function ConvertTo-SPNetYamlBoolText {
     if ([bool]::TryParse($text, [ref]$parsed)) { return $parsed.ToString().ToLowerInvariant() }
     throw "Cannot convert '$Value' to Boolean. Use true, false, 1, or 0."
 }
+
+if ([string]::IsNullOrWhiteSpace($SiteUrl)) { $SiteUrl = Get-SPNetConfigScalar -Path $Config -Name 'siteUrl' }
+if ([string]::IsNullOrWhiteSpace($CacheFolder)) { $CacheFolder = Get-SPNetConfigScalar -Path $Config -Name 'spdCacheFolder' }
+
+$common = @()
+if ($Config) { $common += @('--config', $Config) }
+if ($CacheFolder) { $common += @('--cache-folder', $CacheFolder) }
 
 switch ($Action) {
     'Build' { & $tool build --workflow $Workflow --out $XamlPath @common }
@@ -117,6 +128,12 @@ switch ($Action) {
         } else {
             $sidecarPath = $XamlPath + '.formfield.xml'
             if (Test-Path $sidecarPath -PathType Leaf) { $publishArgs.FormFieldXmlPath = $sidecarPath }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($MetadataJsonPath)) {
+            $publishArgs.MetadataJsonPath = $MetadataJsonPath
+        } else {
+            $metadataSidecarPath = $XamlPath + '.metadata.json'
+            if (Test-Path $metadataSidecarPath -PathType Leaf) { $publishArgs.MetadataJsonPath = $metadataSidecarPath }
         }
         if (-not [string]::IsNullOrWhiteSpace($ExpectedDefinitionId)) { $publishArgs.ExpectedDefinitionId = $ExpectedDefinitionId }
         if (-not [string]::IsNullOrWhiteSpace($BackupDirectory)) { $publishArgs.BackupDirectory = $BackupDirectory }
