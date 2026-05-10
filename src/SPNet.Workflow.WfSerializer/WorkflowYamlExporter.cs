@@ -54,6 +54,7 @@ namespace SPNet.Workflow.WfSerializer
             if (formFieldParameters.Count > 0)
             {
                 MergeFormFieldParameters(workflow, formFieldParameters);
+                workflow.Metadata.Initiation.FormFields = workflow.Parameters;
                 workflow.ExportWarnings.Add("FormField metadata export: parameters were populated from SharePoint workflow definition FormField metadata sidecar, preserving display names, defaults, choices, and field-specific settings where present.");
             }
             var stageElements = document.Descendants(ActivitiesNamespace + "Sequence").Where(e => !string.IsNullOrWhiteSpace((string?)e.Attribute("DisplayName"))).ToList();

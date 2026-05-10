@@ -95,7 +95,7 @@ namespace SPNet.Workflow.WfSerializer
                 var valueExpressionTypes = proxyTypes.CreateValueExpressionTypes();
 
                 var variableTypes = WorkflowVariableTypeInferer.Infer(workflow, proxyTypes.DynamicValue, SpdEmptyDynamicValueArgumentName, SpdRequestHeadersArgumentName);
-                var parameterTypes = (workflow.Parameters ?? new List<ParameterYaml>()).ToDictionary(p => p.Name, WorkflowTypeMapper.MapParameterType, StringComparer.OrdinalIgnoreCase);
+                var parameterTypes = workflow.EffectiveFormFields.ToDictionary(p => p.Name, WorkflowTypeMapper.MapParameterType, StringComparer.OrdinalIgnoreCase);
                 ValidateAssignments(workflow, variableTypes);
 
                 var buildContext = new WorkflowActivityBuildContext(proxyTypes.CreateBuildContextTypes(), valueExpressionTypes, proxyTypes.ComparisonExpressionTypes, proxyTypes.DynamicValue, variableTypes, parameterTypes);
@@ -113,10 +113,15 @@ namespace SPNet.Workflow.WfSerializer
 
         private static void WriteParameterFormFieldSidecar(WorkflowYaml workflow, string outputXamlPath)
         {
-            if (workflow.Parameters == null || workflow.Parameters.Count == 0) return;
+            var formFields = workflow.EffectiveFormFields;
+            var metadata = workflow.ToEffectiveMetadata();
+            var metadataOutputPath = Path.GetFullPath(outputXamlPath + ".metadata.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(metadataOutputPath) ?? Environment.CurrentDirectory);
+            File.WriteAllText(metadataOutputPath, metadata.ToJson());
+            if (formFields.Count == 0) return;
             var outputPath = Path.GetFullPath(outputXamlPath + ".formfield.xml");
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? Environment.CurrentDirectory);
-            File.WriteAllText(outputPath, WorkflowParameterFormFieldSerializer.Serialize(workflow.Parameters));
+            File.WriteAllText(outputPath, WorkflowParameterFormFieldSerializer.Serialize(formFields));
         }
 
         private delegate Activity ActionBuilder(WorkflowActionYaml action, WorkflowActivityBuildContext context);

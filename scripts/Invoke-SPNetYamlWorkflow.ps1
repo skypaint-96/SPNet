@@ -1,9 +1,25 @@
+<#
+.SYNOPSIS
+Builds, inspects, publishes, downloads, lists, and cleans up SPNet YAML-authored SharePoint workflows.
+
+.DESCRIPTION
+YAML is the authoring source of truth. The Build and Publish actions compile YAML to SharePoint Designer-compatible XAML and generate a `*.xaml.metadata.json` sidecar from effective YAML metadata/defaults. That metadata JSON is the normal publish contract for display name, technical name, description, target, start options, initiation settings, and form fields.
+
+The normal YAML publish flow is YAML -> XAML + metadata JSON -> publish with metadata JSON -> download XAML + metadata JSON. Legacy `*.xaml.formfield.xml` may still be emitted or downloaded for compatibility/inspection, but it is not the normal publish input.
+
+.PARAMETER MetadataJsonPath
+Explicit metadata JSON sidecar to use for Publish. If omitted, Publish requires and auto-discovers `-XamlPath + '.metadata.json'` after Build or beside an existing XAML when `-NoBuild` is used.
+
+.PARAMETER FormFieldXmlPath
+Deprecated for Publish. Passed only as an explicit fallback when metadata JSON cannot supply initiation form fields. For Export, this can still point at a legacy/downloaded FormField XML sidecar for compatibility inspection.
+#>
 param(
     [ValidateSet('Build','Export','Inspect','Publish','Download','List','Cleanup','ValidateConfig')]
     [string]$Action = 'Build',
     [string]$Workflow = 'samples\workflow.example.yml',
     [string]$XamlPath = 'artifacts\workflow.xaml',
     [string]$FormFieldXmlPath = '',
+    [string]$MetadataJsonPath = '',
     [string]$Out = '',
     [string]$Config = 'config\spnet.local.yml',
     [string]$CacheFolder = '',
@@ -32,15 +48,36 @@ if (-not (Test-Path $tool)) {
     dotnet build (Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj') -c Release
 }
 
-$common = @()
-if ($Config) { $common += @('--config', $Config) }
-if ($CacheFolder) { $common += @('--cache-folder', $CacheFolder) }
-
 function Get-SPNetYamlScalar {
     param([string[]]$Lines, [string]$Name)
-    $match = $Lines | Select-String -Pattern ('^\s*' + [regex]::Escape($Name) + '\s*:\s*[''\"]?(.*?)[''\"]?\s*$') | Select-Object -First 1
+    $match = $Lines | Select-String -Pattern ('^' + [regex]::Escape($Name) + '\s*:\s*[''\"]?(.*?)[''\"]?\s*$') | Select-Object -First 1
     if ($match) { return $match.Matches[0].Groups[1].Value.Trim() }
     return ''
+}
+
+function Get-SPNetConfigScalar {
+    param([string]$Path, [string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path -PathType Leaf)) { return '' }
+    $lines = Get-Content -Path $Path
+    return Get-SPNetYamlScalar -Lines $lines -Name $Name
+}
+
+function Get-SPNetWorkflowMetadataJsonPath {
+    param([string]$XamlFilePath, [string]$ExplicitMetadataJsonPath)
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitMetadataJsonPath)) {
+        if (-not (Test-Path $ExplicitMetadataJsonPath -PathType Leaf)) { throw "Metadata JSON file not found: $ExplicitMetadataJsonPath" }
+        return $ExplicitMetadataJsonPath
+    }
+    if ([string]::IsNullOrWhiteSpace($XamlFilePath)) { return '' }
+    $sidecarPath = $XamlFilePath + '.metadata.json'
+    if (-not (Test-Path $sidecarPath -PathType Leaf)) { throw "Metadata JSON sidecar not found: $sidecarPath. Build the YAML workflow before publishing." }
+    return $sidecarPath
+}
+
+function Read-SPNetWorkflowMetadataJson {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    return Get-Content -Path $Path -Raw | ConvertFrom-Json
 }
 
 function ConvertTo-SPNetYamlBoolText {
@@ -54,6 +91,13 @@ function ConvertTo-SPNetYamlBoolText {
     if ([bool]::TryParse($text, [ref]$parsed)) { return $parsed.ToString().ToLowerInvariant() }
     throw "Cannot convert '$Value' to Boolean. Use true, false, 1, or 0."
 }
+
+if ([string]::IsNullOrWhiteSpace($SiteUrl)) { $SiteUrl = Get-SPNetConfigScalar -Path $Config -Name 'siteUrl' }
+if ([string]::IsNullOrWhiteSpace($CacheFolder)) { $CacheFolder = Get-SPNetConfigScalar -Path $Config -Name 'spdCacheFolder' }
+
+$common = @()
+if ($Config) { $common += @('--config', $Config) }
+if ($CacheFolder) { $common += @('--cache-folder', $CacheFolder) }
 
 switch ($Action) {
     'Build' { & $tool build --workflow $Workflow --out $XamlPath @common }
@@ -85,23 +129,23 @@ switch ($Action) {
     }
     'Inspect' { & $tool inspect --xaml $XamlPath @common }
     'Publish' {
-        $workflowLines = @()
-        if ($Workflow -and (Test-Path $Workflow)) { $workflowLines = Get-Content -Path $Workflow }
         if (-not $NoBuild -and -not $PSBoundParameters.ContainsKey('XamlPath')) {
             $XamlPath = Join-Path 'artifacts' (([IO.Path]::GetFileNameWithoutExtension($Workflow)) + '.xaml')
         }
         if (-not $NoBuild -and $Workflow) { & $tool build --workflow $Workflow --out $XamlPath @common }
+        $effectiveMetadataJsonPath = Get-SPNetWorkflowMetadataJsonPath -XamlFilePath $XamlPath -ExplicitMetadataJsonPath $MetadataJsonPath
+        $metadata = Read-SPNetWorkflowMetadataJson -Path $effectiveMetadataJsonPath
         if (-not $WorkflowName) { $WorkflowName = [IO.Path]::GetFileNameWithoutExtension($XamlPath) }
-        if (-not $PSBoundParameters.ContainsKey('TargetType') -and $workflowLines.Count -gt 0) { $TargetType = Get-SPNetYamlScalar -Lines $workflowLines -Name 'type' }
+        if (-not $PSBoundParameters.ContainsKey('TargetType') -and $metadata -and $metadata.target -and $metadata.target.type) { $TargetType = [string]$metadata.target.type }
         if ([string]::IsNullOrWhiteSpace($TargetType)) { $TargetType = 'Site' }
-        if ([string]::IsNullOrWhiteSpace($TargetListTitle) -and $workflowLines.Count -gt 0) { $TargetListTitle = Get-SPNetYamlScalar -Lines $workflowLines -Name 'listTitle' }
+        if ([string]::IsNullOrWhiteSpace($TargetListTitle) -and $metadata -and $metadata.target -and $metadata.target.listTitle) { $TargetListTitle = [string]$metadata.target.listTitle }
         $defaultStartManual = 'true'
         $defaultStartCreated = 'false'
         $defaultStartUpdated = 'false'
-        if ($workflowLines.Count -gt 0) {
-            $defaultStartManual = Get-SPNetYamlScalar -Lines $workflowLines -Name 'manual'
-            $defaultStartCreated = Get-SPNetYamlScalar -Lines $workflowLines -Name 'autoStartCreate'
-            $defaultStartUpdated = Get-SPNetYamlScalar -Lines $workflowLines -Name 'autoStartChange'
+        if ($metadata -and $metadata.start) {
+            if ($null -ne $metadata.start.manual) { $defaultStartManual = [string]$metadata.start.manual }
+            if ($null -ne $metadata.start.onCreated) { $defaultStartCreated = [string]$metadata.start.onCreated }
+            if ($null -ne $metadata.start.onUpdated) { $defaultStartUpdated = [string]$metadata.start.onUpdated }
         }
         $startManualText = ConvertTo-SPNetYamlBoolText -Value $StartManual -Default $defaultStartManual
         $startCreatedText = ConvertTo-SPNetYamlBoolText -Value $StartOnCreated -Default $defaultStartCreated
@@ -113,11 +157,10 @@ switch ($Action) {
         if (-not [string]::IsNullOrWhiteSpace($TargetListTitle)) { $publishArgs.TargetListTitle = $TargetListTitle }
         if (-not [string]::IsNullOrWhiteSpace($StatusColumn)) { $publishArgs.StatusColumn = $StatusColumn }
         if (-not [string]::IsNullOrWhiteSpace($FormFieldXmlPath)) {
+            Write-Warning '-FormFieldXmlPath is deprecated for YAML publish. Metadata JSON is the normal publish contract; FormField XML is passed only as an explicit fallback.'
             $publishArgs.FormFieldXmlPath = $FormFieldXmlPath
-        } else {
-            $sidecarPath = $XamlPath + '.formfield.xml'
-            if (Test-Path $sidecarPath -PathType Leaf) { $publishArgs.FormFieldXmlPath = $sidecarPath }
         }
+        $publishArgs.MetadataJsonPath = $effectiveMetadataJsonPath
         if (-not [string]::IsNullOrWhiteSpace($ExpectedDefinitionId)) { $publishArgs.ExpectedDefinitionId = $ExpectedDefinitionId }
         if (-not [string]::IsNullOrWhiteSpace($BackupDirectory)) { $publishArgs.BackupDirectory = $BackupDirectory }
         if ($DryRun) { $publishArgs.DryRun = $true }

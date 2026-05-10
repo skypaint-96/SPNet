@@ -64,6 +64,8 @@ namespace SPNet.Workflow.WfSerializer
         public string Name { get; set; } = "GeneratedWorkflow";
         /// <summary>Gets or sets the optional WF technical class name.</summary>
         public string TechnicalName { get; set; } = string.Empty;
+        /// <summary>Gets or sets canonical non-XAML workflow definition metadata.</summary>
+        public WorkflowDefinitionMetadataYaml Metadata { get; set; } = new WorkflowDefinitionMetadataYaml();
         /// <summary>Gets or sets workflow start options used by publishing tooling.</summary>
         public StartFlagsYaml Start { get; set; } = new StartFlagsYaml();
         /// <summary>Gets or sets workflow target metadata used by publishing tooling.</summary>
@@ -76,6 +78,27 @@ namespace SPNet.Workflow.WfSerializer
         public List<StageYaml> Stages { get; set; } = new List<StageYaml>();
         /// <summary>Gets or sets warnings produced by partial XAML export.</summary>
         public List<string> ExportWarnings { get; set; } = new List<string>();
+
+        public string EffectiveDisplayName => !string.IsNullOrWhiteSpace(Metadata?.DisplayName) ? Metadata.DisplayName : Name;
+        public string EffectiveTechnicalName => !string.IsNullOrWhiteSpace(Metadata?.TechnicalName) ? Metadata.TechnicalName : TechnicalName;
+        public TargetYaml EffectiveTarget => Metadata?.Target ?? Target ?? new TargetYaml();
+        public bool EffectiveStartManual => Metadata?.Start?.Manual ?? Start?.Manual ?? true;
+        public bool EffectiveStartOnCreated => Metadata?.Start?.OnCreated ?? Start?.AutoStartCreate ?? false;
+        public bool EffectiveStartOnUpdated => Metadata?.Start?.OnUpdated ?? Start?.AutoStartChange ?? false;
+        public List<ParameterYaml> EffectiveFormFields => Metadata?.Initiation?.FormFields != null && Metadata.Initiation.FormFields.Count > 0 ? Metadata.Initiation.FormFields : Parameters ?? new List<ParameterYaml>();
+
+        public WorkflowDefinitionMetadataYaml ToEffectiveMetadata()
+        {
+            return new WorkflowDefinitionMetadataYaml
+            {
+                DisplayName = EffectiveDisplayName,
+                TechnicalName = EffectiveTechnicalName,
+                Description = Metadata?.Description ?? string.Empty,
+                Target = EffectiveTarget,
+                Start = new WorkflowStartOptionsYaml { Manual = EffectiveStartManual, OnCreated = EffectiveStartOnCreated, OnUpdated = EffectiveStartOnUpdated },
+                Initiation = new WorkflowInitiationMetadataYaml { RequiresForm = EffectiveFormFields.Count > 0, Url = Metadata?.Initiation?.Url ?? string.Empty, FormFields = EffectiveFormFields }
+            };
+        }
 
         /// <summary>
         /// Loads and validates a workflow YAML document.
@@ -116,7 +139,7 @@ namespace SPNet.Workflow.WfSerializer
         public void Validate()
         {
             if (!string.Equals(SchemaVersion, "spnet.workflow/v1", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unsupported schemaVersion: " + SchemaVersion);
-            if (string.IsNullOrWhiteSpace(Name)) throw new InvalidOperationException("Workflow name is required.");
+            if (string.IsNullOrWhiteSpace(EffectiveDisplayName)) throw new InvalidOperationException("Workflow name is required.");
             if (Stages == null || Stages.Count == 0) throw new InvalidOperationException("At least one stage is required.");
             ValidateNamesAndParameters();
             foreach (var action in Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>())) action.Validate();
@@ -132,13 +155,13 @@ namespace SPNet.Workflow.WfSerializer
                 WorkflowTypeMapper.MapDeclaredVariableType(variable.Type);
             }
 
-            foreach (var parameter in Parameters ?? new List<ParameterYaml>())
+            foreach (var parameter in EffectiveFormFields)
             {
                 parameter.Validate();
                 if (!names.Add(parameter.Name)) throw new InvalidOperationException("Duplicate variable/parameter name: " + parameter.Name);
             }
 
-            var parameterNames = new HashSet<string>((Parameters ?? new List<ParameterYaml>()).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            var parameterNames = new HashSet<string>(EffectiveFormFields.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
             foreach (var action in EnumerateActions(Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>())))
             {
                 if (action is ITargetedActionYaml targeted && parameterNames.Contains(targeted.To ?? string.Empty)) throw new InvalidOperationException(action.Type + " action cannot assign to initiation parameter: " + targeted.To);

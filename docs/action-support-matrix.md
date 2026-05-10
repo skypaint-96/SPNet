@@ -4,6 +4,8 @@ This matrix documents the current on-disk implementation under `src/SPNet.Workfl
 
 Raw WF language expression activities are forbidden in generated/published SharePoint workflow XAML. Do not emit `VisualBasicValue`, `VisualBasicReference`, `CSharpValue`, or `CSharpReference`: they require VB/C# compilation and are rejected by SharePoint Workflow Manager validation (a raw `Microsoft.CSharp.Activities.CSharpValue<TResult>` publish probe failed as an invalid type). Builders must prefer structured SharePoint Designer/Workflow Manager-safe nodes such as SharePoint proxy activities and `Microsoft.Activities.Expressions` proxy expression activities. Exporter recognition of raw VB expression text is legacy/downloaded-XAML compatibility only and must not be treated as permission to generate those nodes.
 
+YAML remains the authoring source of truth. Build output is the generated XAML plus a generated `*.xaml.metadata.json` sidecar. That metadata JSON is the normal publish contract for workflow display name/technical name/description, target, start options, initiation settings, and form fields. Legacy `*.xaml.formfield.xml` is compatibility/inspection output and an explicit deprecated fallback only; it is not the normal YAML publish input.
+
 | Action name | Aliases | YAML model | Builder / YAML-to-XAML status | Export status | Sample coverage | Test target | Validation status | Risk | Caveats |
 |---|---|---|---|---|---|---|---|---|---|
 | `calc` | none | `CalcActionYaml` | Supported; emits SharePoint `Calc`. | Partial structural export with placeholder expressions. | `samples/workflow.example.yml`, `samples/workflow.expanded-actions.yml` | Alias/model/required `to`. | Requires `to`. | Low | Target variable is inferred as `Double` if omitted from variables. |
@@ -48,6 +50,7 @@ Keep action additions narrow and make each supported action explicit across the 
 - Update `WorkflowVariableTypeInferer` when the action writes to workflow variables or requires implicit infrastructure variables.
 - Implement the activity builder in the appropriate file under `Actions/`, reusing `WorkflowExpressionBuilder` and preserving existing expression behavior.
 - Do not implement builders with raw WF language expression activities (`VisualBasicValue`, `VisualBasicReference`, `CSharpValue`, or `CSharpReference`). Use structured SharePoint proxy or `Microsoft.Activities.Expressions` nodes and add tests/guards proving the generated XAML avoids raw language expression types.
+- Keep publish metadata in YAML and ensure the effective metadata sidecar `*.xaml.metadata.json` remains authoritative for display name, technical name, description, target, start options, initiation settings, and form fields. Do not add a normal publish dependency on `*.xaml.formfield.xml`; FormField XML must remain deprecated fallback/compatibility output only.
 - Register the action model type in `WfActivityBuilderSerializer.CreateActionBuilders()` so dispatch is explicit and discoverable.
 - Decide whether the action is valid as a nested expression, a stage action, or both; document and test the expression behavior.
 - Update `WorkflowYamlExporter` only if structural export can recognize the action safely; otherwise mark export as unsupported in this matrix.
