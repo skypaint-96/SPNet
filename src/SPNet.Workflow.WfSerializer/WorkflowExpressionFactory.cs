@@ -47,6 +47,7 @@ namespace SPNet.Workflow.WfSerializer
             expression = expression ?? new ExpressionYaml();
             if (string.Equals(expression.Type, "toString", StringComparison.OrdinalIgnoreCase) && expression.Value != null) expression = new ExpressionYaml { ToString = expression.Value };
             if (!string.IsNullOrWhiteSpace(expression.Variable)) return new InArgument<T>(new ArgumentValue<T>(expression.Variable));
+            if (expression.Literal is string literal && string.Equals(literal, "<exported expression>", StringComparison.OrdinalIgnoreCase)) return new InArgument<T>((T)Convert.ChangeType(DefaultLiteral(typeof(T)), typeof(T)));
             if (expression.ToString != null)
             {
                 var toString = ActivityReflectionWriter.Create(valueExpressionTypes.ToStringExpression);
@@ -146,6 +147,28 @@ namespace SPNet.Workflow.WfSerializer
         {
             var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
             if (type == "formatstring") return CreateFormatStringExpression(expression, resultType);
+            if (type == "replacestring" || type == "replace") return CreateReplaceStringExpression(expression, resultType);
+            if (type == "substring" || type == "substringstring") return CreateSubstringExpression(expression, resultType);
+            if (type == "trim" || type == "trimstring") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(string), valueExpressionTypes.TrimExpression, "Input");
+            if (type == "tolowercase" || type == "lowercase" || type == "tolower") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(string), valueExpressionTypes.ToLowerCaseExpression, "Input");
+            if (type == "touppercase" || type == "uppercase" || type == "toupper") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(string), valueExpressionTypes.ToUpperCaseExpression, "Input");
+            if (type == "stringlength" || type == "lengthstring") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(int), valueExpressionTypes.StringLengthExpression, "Input");
+            if (type == "indexofstring" || type == "indexof") return CreateStringSearchValueExpression(expression, resultType, typeof(int), "Microsoft.Activities.Expressions.IndexOfString");
+            if (type == "isemptystring" || type == "stringisempty") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(bool), FindOptionalExpressionType("Microsoft.Activities.Expressions.IsEmptyString"), "Input");
+            if (type == "containsstring" || type == "contains") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.ContainsString");
+            if (type == "startswithstring" || type == "startswith") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.StartsWithString");
+            if (type == "endswithstring" || type == "endswith") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.EndsWithString");
+            if (type == "parseboolean" || type == "parsebool") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(bool), FindOptionalExpressionType("Microsoft.Activities.Expressions.ParseBoolean"), "Input");
+            if (type == "concatstring" || type == "concat") return CreateConcatStringExpression(expression, resultType);
+            if (type == "currentdate") return CreateParameterlessExpression(expression, resultType, typeof(DateTime), valueExpressionTypes.CurrentDateExpression);
+            if (type == "newguid") return CreateParameterlessExpression(expression, resultType, typeof(Guid), valueExpressionTypes.NewGuidExpression);
+            if (type == "parseguid") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(Guid), valueExpressionTypes.ParseGuidExpression, "Value");
+            if (type == "createtimespan") return CreateCreateTimeSpanExpression(expression, resultType);
+            if (type == "addtodate") return CreateDateOffsetExpression(expression, resultType, valueExpressionTypes.AddToDate);
+            if (type == "subtractfromdate") return CreateDateOffsetExpression(expression, resultType, valueExpressionTypes.SubtractFromDate);
+            if (type == "dateinrange") return CreateDateInRangeExpression(expression, resultType);
+            if (type == "containsdynamicvalueproperty" || type == "containsdictionaryproperty") return CreateContainsDynamicValuePropertyExpression(expression, resultType);
+            if (type == "isemptydynamicvalue" || type == "isemptydictionary") return CreateIsEmptyDynamicValueExpression(expression, resultType);
             if (type == "parsedate" || type == "parseutcdate" || type == "parseSpDate".ToLowerInvariant()) return CreateParseDateExpression(expression, resultType);
             if (type == "parsedynamicvalue") return CreateParseDynamicValueExpression(expression, resultType);
             if (type == "lookupworkflowcontext" || type == "lookupcontextproperty")
@@ -200,6 +223,142 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             return null;
+        }
+
+        private object CreateReplaceStringExpression(ExpressionYaml expression, Type resultType)
+        {
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(string));
+            var replace = ActivityReflectionWriter.Create(valueExpressionTypes.ReplaceStringExpression);
+            ActivityReflectionWriter.SetProperty(replace, "Input", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(replace, "Pattern", ToInArgument<string>(expression.Pattern ?? expression.OldValue ?? expression.Find ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(replace, "Replacement", ToInArgument<string>(expression.Replacement ?? expression.NewValue ?? expression.ReplaceWith ?? new ExpressionYaml { Literal = string.Empty }));
+            return replace;
+        }
+
+        private object CreateSubstringExpression(ExpressionYaml expression, Type resultType)
+        {
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(string));
+            var substring = ActivityReflectionWriter.Create(valueExpressionTypes.SubstringExpression);
+            ActivityReflectionWriter.SetProperty(substring, "Input", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(substring, "StartIndex", ToInArgument<int>(expression.StartIndex ?? new ExpressionYaml { Literal = 0 }));
+            if (HasExpression(expression.Length)) ActivityReflectionWriter.SetProperty(substring, "Length", ToInArgument<int>(expression.Length ?? new ExpressionYaml()));
+            return substring;
+        }
+
+        private object CreateStringSearchValueExpression(ExpressionYaml expression, Type resultType, Type expressionResultType, string typeName)
+        {
+            EnsureAssignableExpressionResult(expression.Type, resultType, expressionResultType);
+            var expressionType = FindOptionalExpressionType(typeName) ?? throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            var activity = ActivityReflectionWriter.Create(expressionType);
+            ActivityReflectionWriter.SetProperty(activity, "Input", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(activity, "SearchValue", ToInArgument<string>(expression.SearchValue ?? expression.Pattern ?? expression.Find ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetPropertyIfWritable(activity, "IgnoreCase", string.Equals(expression.ValueType, "StringIgnoreCase", StringComparison.OrdinalIgnoreCase));
+            return activity;
+        }
+
+        private Type? FindOptionalExpressionType(string typeName) => valueExpressionTypes.ToStringExpression.Assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
+
+        private object CreateUnaryExpression(ExpressionYaml expression, Type requestedResultType, Type inputType, Type expressionResultType, Type? expressionType, string inputPropertyName)
+        {
+            if (expressionType == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, requestedResultType, expressionResultType);
+            var activity = ActivityReflectionWriter.Create(expressionType);
+            ActivityReflectionWriter.SetProperty(activity, inputPropertyName, ToInArgument(expression.Value ?? new ExpressionYaml(), inputType));
+            return activity;
+        }
+
+        private object CreateParameterlessExpression(ExpressionYaml expression, Type requestedResultType, Type expressionResultType, Type? expressionType)
+        {
+            if (expressionType == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, requestedResultType, expressionResultType);
+            return ActivityReflectionWriter.Create(expressionType);
+        }
+
+        private object CreateConcatStringExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.ConcatStringExpression == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(string));
+            var concat = ActivityReflectionWriter.Create(valueExpressionTypes.ConcatStringExpression);
+            var inputs = ActivityReflectionWriter.GetProperty(concat, "Inputs", "ConcatString does not expose Inputs.");
+            var addMethod = inputs.GetType().GetMethods().First(m => m.Name == "Add" && m.GetParameters().Length == 1);
+            var values = expression.Values != null && expression.Values.Count > 0 ? expression.Values : expression.Value != null ? new System.Collections.Generic.List<ExpressionYaml> { expression.Value } : new System.Collections.Generic.List<ExpressionYaml>();
+            if (values.Count == 0) throw new InvalidOperationException(expression.Type + " expression requires 'value' or 'values'.");
+            foreach (var value in values) addMethod.Invoke(inputs, new object[] { ToInArgument<string>(value) });
+            return concat;
+        }
+
+        private object CreateContainsDynamicValuePropertyExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.ContainsDynamicValueProperty == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(bool));
+            var contains = ActivityReflectionWriter.Create(valueExpressionTypes.ContainsDynamicValueProperty);
+            ActivityReflectionWriter.SetProperty(contains, "Source", CreateDynamicValueObjectArgument(expression.Source ?? expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(contains, "PropertyName", ToInArgument<string>(string.IsNullOrWhiteSpace(expression.PropertyName) ? new ExpressionYaml { Literal = Convert.ToString(expression.Literal ?? string.Empty) ?? string.Empty } : new ExpressionYaml { Literal = expression.PropertyName }));
+            return contains;
+        }
+
+        private object CreateCreateTimeSpanExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.CreateTimeSpan == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(TimeSpan));
+            var timeSpan = ActivityReflectionWriter.Create(valueExpressionTypes.CreateTimeSpan);
+            ActivityReflectionWriter.SetProperty(timeSpan, "Days", ToInArgument<double>(expression.Days ?? new ExpressionYaml { Literal = 0 }));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Hours", ToInArgument<double>(expression.Hours ?? new ExpressionYaml { Literal = 0 }));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Minutes", ToInArgument<double>(expression.Minutes ?? new ExpressionYaml { Literal = 0 }));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Seconds", ToInArgument<double>(expression.Seconds ?? new ExpressionYaml { Literal = 0 }));
+            return timeSpan;
+        }
+
+        private object CreateDateOffsetExpression(ExpressionYaml expression, Type resultType, Type? expressionType)
+        {
+            if (expressionType == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(DateTime));
+            var offset = ActivityReflectionWriter.Create(expressionType);
+            ActivityReflectionWriter.SetProperty(offset, "Input", ToInArgument<DateTime>(expression.Input ?? expression.Value ?? new ExpressionYaml()));
+            if (HasExpression(expression.TimeSpan)) ActivityReflectionWriter.SetProperty(offset, "TimeSpan", ToInArgument<TimeSpan>(expression.TimeSpan ?? new ExpressionYaml()));
+            SetNumericInArgumentIfWritable(offset, "Days", expression.Days ?? new ExpressionYaml { Literal = 0 });
+            SetNumericInArgumentIfWritable(offset, "Hours", expression.Hours ?? new ExpressionYaml { Literal = 0 });
+            SetNumericInArgumentIfWritable(offset, "Minutes", expression.Minutes ?? new ExpressionYaml { Literal = 0 });
+            SetNumericInArgumentIfWritable(offset, "Seconds", expression.Seconds ?? new ExpressionYaml { Literal = 0 });
+            return offset;
+        }
+
+        private void SetNumericInArgumentIfWritable(object activity, string propertyName, ExpressionYaml expression)
+        {
+            var property = activity.GetType().GetProperty(propertyName);
+            if (property == null || !property.CanWrite) return;
+            if (property.PropertyType == typeof(InArgument<int>)) ActivityReflectionWriter.SetProperty(activity, propertyName, ToInArgument<int>(expression));
+            else ActivityReflectionWriter.SetProperty(activity, propertyName, ToInArgument<double>(expression));
+        }
+
+        private object CreateDateInRangeExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.DateInRange == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(bool));
+            var range = ActivityReflectionWriter.Create(valueExpressionTypes.DateInRange);
+            ActivityReflectionWriter.SetProperty(range, "Input", ToInArgument<DateTime>(expression.Input ?? expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(range, "Start", ToInArgument<DateTime>(expression.Start ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(range, "End", ToInArgument<DateTime>(expression.End ?? new ExpressionYaml()));
+            return range;
+        }
+
+        private object CreateIsEmptyDynamicValueExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.IsEmptyDynamicValue == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(bool));
+            var isEmpty = ActivityReflectionWriter.Create(valueExpressionTypes.IsEmptyDynamicValue);
+            ActivityReflectionWriter.SetProperty(isEmpty, "Input", CreateDynamicValueObjectArgument(expression.Source ?? expression.Value ?? new ExpressionYaml()));
+            return isEmpty;
+        }
+
+        private object CreateDynamicValueObjectArgument(ExpressionYaml expression)
+        {
+            return ToInArgument(expression, valueExpressionTypes.DynamicValue);
+        }
+
+        private static void EnsureAssignableExpressionResult(string expressionType, Type requestedResultType, Type expressionResultType)
+        {
+            if (requestedResultType != expressionResultType && requestedResultType != typeof(object)) throw new InvalidOperationException(expressionType + " expressions can only be assigned to " + expressionResultType.Name + "/Object arguments.");
         }
 
         private object CreateParseDynamicValueExpression(ExpressionYaml expression, Type resultType)

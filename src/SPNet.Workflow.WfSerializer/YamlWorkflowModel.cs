@@ -253,8 +253,9 @@ namespace SPNet.Workflow.WfSerializer
             if (string.Equals(type, "Double", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
             if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Bool", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
             if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Date", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
+            if (string.Equals(type, "TimeSpan", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Duration", StringComparison.OrdinalIgnoreCase)) return typeof(TimeSpan);
             if (string.Equals(type, "Guid", StringComparison.OrdinalIgnoreCase)) return typeof(Guid);
-            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("DynamicValue variables are only available as HTTP response targets and are emitted using the SharePoint Designer proxy type at build time.");
+            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) return Type.GetType("Microsoft.Activities.DynamicValue, Microsoft.Activities.Proxy", throwOnError: false) ?? typeof(object);
             if (string.Equals(type, "Int32", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Int", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Integer", StringComparison.OrdinalIgnoreCase)) return typeof(int);
             if (string.Equals(type, "String", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Text", StringComparison.OrdinalIgnoreCase)) return typeof(string);
             throw new InvalidOperationException("Unsupported variable type: " + type);
@@ -265,6 +266,7 @@ namespace SPNet.Workflow.WfSerializer
             var xamlType = parameter.XamlType ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(xamlType))
             {
+                if (xamlType.Equals("Object", StringComparison.OrdinalIgnoreCase) && string.Equals(parameter.Type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) return Type.GetType("Microsoft.Activities.DynamicValue, Microsoft.Activities.Proxy", throwOnError: false) ?? typeof(object);
                 if (xamlType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(bool);
                 if (xamlType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(double);
                 if (xamlType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(DateTime);
@@ -421,6 +423,94 @@ namespace SPNet.Workflow.WfSerializer
             base.Validate();
             RequireTo();
         }
+    }
+
+    public sealed class BuildUriActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public BuildUriActionYaml() { Type = "buildUri"; }
+        public ExpressionYaml Source { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Scheme { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Host { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Port { get; set; } = new ExpressionYaml { Literal = -1 };
+        public ExpressionYaml Path { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Query { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Fragment { get; set; } = new ExpressionYaml();
+        public string To { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); RequireTo(); }
+    }
+
+    public sealed class GetConfigurationValueActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public GetConfigurationValueActionYaml() { Type = "getConfigurationValue"; }
+        public string Name { get; set; } = string.Empty;
+        public ExpressionYaml DefaultValue { get; set; } = new ExpressionYaml();
+        public string To { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); if (string.IsNullOrWhiteSpace(Name)) throw new InvalidOperationException(Type + " action requires 'name'."); RequireTo(); }
+    }
+
+    public sealed class GetInstanceAddressActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public GetInstanceAddressActionYaml() { Type = "getInstanceAddress"; }
+        public string To { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); RequireTo(); }
+    }
+
+    public sealed class SetUserStatusActionYaml : WorkflowActionYaml
+    {
+        public SetUserStatusActionYaml() { Type = "setUserStatus"; }
+        public ExpressionYaml Description { get; set; } = new ExpressionYaml();
+        public override void Validate() => base.Validate();
+    }
+
+    public sealed class CreateTimeSpanActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public CreateTimeSpanActionYaml() { Type = "createTimeSpan"; }
+        public ExpressionYaml Days { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Hours { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Minutes { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Seconds { get; set; } = new ExpressionYaml { Literal = 0 };
+        public string To { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); RequireTo(); }
+    }
+
+    public sealed class GetTimeSpanFieldsActionYaml : WorkflowActionYaml
+    {
+        public GetTimeSpanFieldsActionYaml() { Type = "getTimeSpanFields"; }
+        public ExpressionYaml Input { get; set; } = new ExpressionYaml();
+        public string DaysTo { get; set; } = string.Empty;
+        public string HoursTo { get; set; } = string.Empty;
+        public string MinutesTo { get; set; } = string.Empty;
+        public string SecondsTo { get; set; } = string.Empty;
+        public string TotalDaysTo { get; set; } = string.Empty;
+        public string TotalHoursTo { get; set; } = string.Empty;
+        public string TotalMinutesTo { get; set; } = string.Empty;
+        public string TotalSecondsTo { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); if (string.IsNullOrWhiteSpace(DaysTo) && string.IsNullOrWhiteSpace(HoursTo) && string.IsNullOrWhiteSpace(MinutesTo) && string.IsNullOrWhiteSpace(SecondsTo) && string.IsNullOrWhiteSpace(TotalDaysTo) && string.IsNullOrWhiteSpace(TotalHoursTo) && string.IsNullOrWhiteSpace(TotalMinutesTo) && string.IsNullOrWhiteSpace(TotalSecondsTo)) throw new InvalidOperationException(Type + " action requires at least one output target."); }
+    }
+
+    public abstract class DateOffsetActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public ExpressionYaml Input { get; set; } = new ExpressionYaml();
+        public ExpressionYaml TimeSpan { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Days { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Hours { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Minutes { get; set; } = new ExpressionYaml { Literal = 0 };
+        public ExpressionYaml Seconds { get; set; } = new ExpressionYaml { Literal = 0 };
+        public string To { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); RequireTo(); }
+    }
+
+    public sealed class AddToDateActionYaml : DateOffsetActionYaml { public AddToDateActionYaml() { Type = "addToDate"; } }
+    public sealed class SubtractFromDateActionYaml : DateOffsetActionYaml { public SubtractFromDateActionYaml() { Type = "subtractFromDate"; } }
+
+    public sealed class DateInRangeActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public DateInRangeActionYaml() { Type = "dateInRange"; }
+        public ExpressionYaml Input { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Start { get; set; } = new ExpressionYaml();
+        public ExpressionYaml End { get; set; } = new ExpressionYaml();
+        public string To { get; set; } = string.Empty;
+        public override void Validate() { base.Validate(); RequireTo(); }
     }
 
     public sealed class LookupWorkflowContextActionYaml : WorkflowActionYaml, ITargetedActionYaml
@@ -642,6 +732,7 @@ namespace SPNet.Workflow.WfSerializer
         public string Source { get; set; } = string.Empty;
         public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
         public string To { get; set; } = string.Empty;
+        public string ValueType { get; set; } = string.Empty;
 
         public override void Validate()
         {
@@ -649,6 +740,58 @@ namespace SPNet.Workflow.WfSerializer
             if (string.IsNullOrWhiteSpace(Source)) throw new InvalidOperationException(Type + " action requires 'source'.");
             RequireTo();
         }
+    }
+
+    public sealed class CountDynamicValueItemsActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public CountDynamicValueItemsActionYaml() { Type = "countDynamicValueItems"; }
+        public string Source { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (string.IsNullOrWhiteSpace(Source)) throw new InvalidOperationException(Type + " action requires 'source'.");
+            RequireTo();
+        }
+    }
+
+    public sealed class SetDynamicValuePropertyActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public SetDynamicValuePropertyActionYaml() { Type = "setDynamicValueProperty"; }
+        public string Source { get; set; } = string.Empty;
+        public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Value { get; set; } = new ExpressionYaml();
+        public string ValueType { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (string.IsNullOrWhiteSpace(Source)) throw new InvalidOperationException(Type + " action requires 'source'.");
+        }
+    }
+
+    public sealed class BuildDynamicValueActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public BuildDynamicValueActionYaml() { Type = "buildDynamicValue"; }
+        public List<DynamicValueEntryYaml> Entries { get; set; } = new List<DynamicValueEntryYaml>();
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireTo();
+            if (Entries == null || Entries.Count == 0) throw new InvalidOperationException(Type + " action requires at least one entry.");
+            if (Entries.Any(e => e == null || string.IsNullOrWhiteSpace(e.Key))) throw new InvalidOperationException(Type + " action entries require non-empty keys.");
+        }
+    }
+
+    public sealed class DynamicValueEntryYaml
+    {
+        public string Key { get; set; } = string.Empty;
+        public ExpressionYaml Value { get; set; } = new ExpressionYaml();
+        public string ValueType { get; set; } = string.Empty;
     }
 
     public sealed class LookupRestPropertyNameActionYaml : WorkflowActionYaml, ITargetedActionYaml
@@ -729,6 +872,15 @@ namespace SPNet.Workflow.WfSerializer
             Register(factories, y => new StringReplaceActionYaml { Type = y.Type ?? string.Empty, Text = y.Text ?? y.Value ?? new ExpressionYaml(), OldValue = y.OldValue ?? y.Find ?? new ExpressionYaml(), NewValue = y.NewValue ?? y.ReplaceWith ?? new ExpressionYaml { Literal = string.Empty }, To = ReadString(y.To) }, "replaceString", "stringReplace");
             Register(factories, y => new StringSubstringActionYaml { Type = y.Type ?? string.Empty, Text = y.Text ?? y.Value ?? new ExpressionYaml(), StartIndex = y.StartIndex ?? new ExpressionYaml { Literal = 0 }, Length = y.Length ?? new ExpressionYaml(), To = ReadString(y.To) }, "substring", "substringString");
             Register(factories, y => new StringTrimActionYaml { Type = y.Type ?? string.Empty, Text = y.Text ?? y.Value ?? new ExpressionYaml(), To = ReadString(y.To) }, "trimString", "stringTrim");
+            Register(factories, y => new BuildUriActionYaml { Type = y.Type ?? string.Empty, Source = y.SourceExpression ?? y.SourceValue ?? new ExpressionYaml(), Scheme = y.Scheme ?? new ExpressionYaml(), Host = y.Host ?? new ExpressionYaml(), Port = y.Port ?? new ExpressionYaml { Literal = -1 }, Path = y.Path ?? new ExpressionYaml(), Query = y.Query ?? new ExpressionYaml(), Fragment = y.Fragment ?? new ExpressionYaml(), To = ReadString(y.To) }, "buildUri");
+            Register(factories, y => new GetConfigurationValueActionYaml { Type = y.Type ?? string.Empty, Name = y.Name ?? string.Empty, DefaultValue = y.DefaultValue ?? new ExpressionYaml(), To = ReadString(y.To) }, "getConfigurationValue");
+            Register(factories, y => new GetInstanceAddressActionYaml { Type = y.Type ?? string.Empty, To = ReadString(y.To) }, "getInstanceAddress");
+            Register(factories, y => new SetUserStatusActionYaml { Type = y.Type ?? string.Empty, Description = y.Description ?? y.Message ?? new ExpressionYaml() }, "setUserStatus");
+            Register(factories, y => new CreateTimeSpanActionYaml { Type = y.Type ?? string.Empty, Days = y.Days ?? new ExpressionYaml { Literal = 0 }, Hours = y.Hours ?? new ExpressionYaml { Literal = 0 }, Minutes = y.Minutes ?? new ExpressionYaml { Literal = 0 }, Seconds = y.Seconds ?? new ExpressionYaml { Literal = 0 }, To = ReadString(y.To) }, "createTimeSpan");
+            Register(factories, y => new GetTimeSpanFieldsActionYaml { Type = y.Type ?? string.Empty, Input = y.Input ?? y.Value ?? new ExpressionYaml(), DaysTo = y.DaysTo ?? string.Empty, HoursTo = y.HoursTo ?? string.Empty, MinutesTo = y.MinutesTo ?? string.Empty, SecondsTo = y.SecondsTo ?? string.Empty, TotalDaysTo = y.TotalDaysTo ?? string.Empty, TotalHoursTo = y.TotalHoursTo ?? string.Empty, TotalMinutesTo = y.TotalMinutesTo ?? string.Empty, TotalSecondsTo = y.TotalSecondsTo ?? string.Empty }, "getTimeSpanFields");
+            Register(factories, y => new AddToDateActionYaml { Type = y.Type ?? string.Empty, Input = y.Input ?? y.Date ?? new ExpressionYaml(), TimeSpan = y.TimeSpan ?? new ExpressionYaml(), Days = y.Days ?? new ExpressionYaml { Literal = 0 }, Hours = y.Hours ?? new ExpressionYaml { Literal = 0 }, Minutes = y.Minutes ?? new ExpressionYaml { Literal = 0 }, Seconds = y.Seconds ?? new ExpressionYaml { Literal = 0 }, To = ReadString(y.To) }, "addToDate");
+            Register(factories, y => new SubtractFromDateActionYaml { Type = y.Type ?? string.Empty, Input = y.Input ?? y.Date ?? new ExpressionYaml(), TimeSpan = y.TimeSpan ?? new ExpressionYaml(), Days = y.Days ?? new ExpressionYaml { Literal = 0 }, Hours = y.Hours ?? new ExpressionYaml { Literal = 0 }, Minutes = y.Minutes ?? new ExpressionYaml { Literal = 0 }, Seconds = y.Seconds ?? new ExpressionYaml { Literal = 0 }, To = ReadString(y.To) }, "subtractFromDate");
+            Register(factories, y => new DateInRangeActionYaml { Type = y.Type ?? string.Empty, Input = y.Input ?? y.Date ?? new ExpressionYaml(), Start = y.Start ?? new ExpressionYaml(), End = y.End ?? new ExpressionYaml(), To = ReadString(y.To) }, "dateInRange");
             Register(factories, y => new LookupWorkflowContextActionYaml { Type = y.Type ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupWorkflowContext", "lookupContextProperty");
             Register(factories, y => new GetCurrentListIdActionYaml { Type = y.Type ?? string.Empty, To = ReadString(y.To) }, "getCurrentListId");
             Register(factories, y => new GetCurrentItemGuidActionYaml { Type = y.Type ?? string.Empty, To = ReadString(y.To) }, "getCurrentItemGuid");
@@ -741,7 +893,10 @@ namespace SPNet.Workflow.WfSerializer
             Register(factories, y => new CallHttpWebServiceActionYaml { Type = y.Type ?? string.Empty, Address = y.Address ?? new ExpressionYaml(), RequestType = y.RequestType ?? new ExpressionYaml { Literal = "GET" }, ResponseStatusCodeTo = y.ResponseStatusCodeTo ?? y.StatusCodeTo ?? string.Empty, ResponseContentTo = y.ResponseContentTo ?? y.ContentTo ?? string.Empty, ResponseHeadersTo = y.ResponseHeadersTo ?? y.HeadersTo ?? string.Empty }, "callHttpWebService", "callHttp", "http");
             Register(factories, y => new SendEmailActionYaml { Type = y.Type ?? string.Empty, To = y.To ?? new ExpressionYaml(), Cc = y.Cc ?? new ExpressionYaml { Literal = string.Empty }, Subject = y.Subject ?? new ExpressionYaml { Literal = string.Empty }, Body = y.Body ?? y.BodyExpression ?? new ExpressionYaml { Literal = string.Empty } }, "sendEmail", "email");
             Register(factories, y => new SingleTaskActionYaml { Type = y.Type ?? string.Empty, AssignedTo = y.AssignedTo ?? new ExpressionYaml(), Title = y.Title ?? new ExpressionYaml(), Body = y.TaskBody ?? y.BodyExpression ?? y.Body ?? new ExpressionYaml { Literal = string.Empty }, DueDate = y.DueDate ?? new ExpressionYaml(), AssignmentEmailSubject = y.AssignmentEmailSubject ?? new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" }, AssignmentEmailBody = y.AssignmentEmailBody ?? new ExpressionYaml(), WaitForTaskCompletion = y.WaitForTaskCompletion, WaiveAssignmentEmail = y.WaiveAssignmentEmail, WaiveCancelationEmail = y.WaiveCancelationEmail, ContentTypeId = y.ContentTypeId ?? string.Empty, OutcomeFieldName = y.OutcomeFieldName ?? string.Empty, CompletedStatus = y.CompletedStatus ?? string.Empty, TaskIdTo = y.TaskIdTo ?? string.Empty, OutcomeTo = y.OutcomeTo ?? string.Empty }, "singleTask", "task");
-            Register(factories, y => new GetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), To = ReadString(y.To) }, "getDynamicValueProperty", "getDictionaryItem", "getDictionaryValue", "getResponseProperty");
+            Register(factories, y => new GetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), To = ReadString(y.To), ValueType = y.ValueType ?? string.Empty }, "getDynamicValueProperty", "getDictionaryItem", "getDictionaryValue", "getResponseProperty");
+            Register(factories, y => new SetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), Value = y.Value ?? new ExpressionYaml(), ValueType = y.ValueType ?? string.Empty, To = ReadString(y.To) }, "setDynamicValueProperty", "setDictionaryItem", "setDictionaryValue", "setResponseProperty");
+            Register(factories, y => new CountDynamicValueItemsActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, To = ReadString(y.To) }, "countDynamicValueItems", "countDictionaryItems");
+            Register(factories, y => new BuildDynamicValueActionYaml { Type = y.Type ?? string.Empty, Entries = y.Entries ?? new List<DynamicValueEntryYaml>(), To = ReadString(y.To) }, "buildDynamicValue", "buildDictionary", "createDictionary");
             Register(factories, y => new LookupRestPropertyNameActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml(), PropertyName = y.PropertyName ?? new ExpressionYaml(), To = ReadString(y.To) }, "lookupRestPropertyName", "lookupSPGetItemPropertyNameInREST", "lookupSPListItemPropertyNameInREST");
             Register(factories, y => new WhileActionYaml { Type = y.Type ?? string.Empty, Condition = y.Condition ?? new ComparisonExpressionYaml(), Actions = y.Actions ?? new List<WorkflowActionYaml>() }, "while", "loop");
             Register(factories, y => new IfActionYaml { Type = y.Type ?? string.Empty, Condition = y.Condition ?? new ComparisonExpressionYaml(), Then = y.Then ?? new List<WorkflowActionYaml>(), Else = y.Else ?? new List<WorkflowActionYaml>() }, "if");
@@ -797,6 +952,38 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", trimString.Type); WriteObject(emitter, serializer, "text", trimString.Text); WriteScalar(emitter, "to", trimString.To);
             }
+            else if (value is BuildUriActionYaml buildUri)
+            {
+                WriteScalar(emitter, "type", buildUri.Type); WriteObject(emitter, serializer, "source", buildUri.Source); WriteObject(emitter, serializer, "scheme", buildUri.Scheme); WriteObject(emitter, serializer, "host", buildUri.Host); WriteObject(emitter, serializer, "port", buildUri.Port); WriteObject(emitter, serializer, "path", buildUri.Path); WriteObject(emitter, serializer, "query", buildUri.Query); WriteObject(emitter, serializer, "fragment", buildUri.Fragment); WriteScalar(emitter, "to", buildUri.To);
+            }
+            else if (value is GetConfigurationValueActionYaml configuration)
+            {
+                WriteScalar(emitter, "type", configuration.Type); WriteScalar(emitter, "name", configuration.Name); WriteObject(emitter, serializer, "defaultValue", configuration.DefaultValue); WriteScalar(emitter, "to", configuration.To);
+            }
+            else if (value is GetInstanceAddressActionYaml instanceAddress)
+            {
+                WriteScalar(emitter, "type", instanceAddress.Type); WriteScalar(emitter, "to", instanceAddress.To);
+            }
+            else if (value is SetUserStatusActionYaml userStatus)
+            {
+                WriteScalar(emitter, "type", userStatus.Type); WriteObject(emitter, serializer, "description", userStatus.Description);
+            }
+            else if (value is CreateTimeSpanActionYaml createTimeSpan)
+            {
+                WriteScalar(emitter, "type", createTimeSpan.Type); WriteObject(emitter, serializer, "days", createTimeSpan.Days); WriteObject(emitter, serializer, "hours", createTimeSpan.Hours); WriteObject(emitter, serializer, "minutes", createTimeSpan.Minutes); WriteObject(emitter, serializer, "seconds", createTimeSpan.Seconds); WriteScalar(emitter, "to", createTimeSpan.To);
+            }
+            else if (value is GetTimeSpanFieldsActionYaml timeSpanFields)
+            {
+                WriteScalar(emitter, "type", timeSpanFields.Type); WriteObject(emitter, serializer, "input", timeSpanFields.Input); WriteScalar(emitter, "daysTo", timeSpanFields.DaysTo); WriteScalar(emitter, "hoursTo", timeSpanFields.HoursTo); WriteScalar(emitter, "minutesTo", timeSpanFields.MinutesTo); WriteScalar(emitter, "secondsTo", timeSpanFields.SecondsTo); WriteScalar(emitter, "totalDaysTo", timeSpanFields.TotalDaysTo); WriteScalar(emitter, "totalHoursTo", timeSpanFields.TotalHoursTo); WriteScalar(emitter, "totalMinutesTo", timeSpanFields.TotalMinutesTo); WriteScalar(emitter, "totalSecondsTo", timeSpanFields.TotalSecondsTo);
+            }
+            else if (value is DateOffsetActionYaml dateOffset)
+            {
+                WriteScalar(emitter, "type", dateOffset.Type); WriteObject(emitter, serializer, "input", dateOffset.Input); WriteObject(emitter, serializer, "timeSpan", dateOffset.TimeSpan); WriteObject(emitter, serializer, "days", dateOffset.Days); WriteObject(emitter, serializer, "hours", dateOffset.Hours); WriteObject(emitter, serializer, "minutes", dateOffset.Minutes); WriteObject(emitter, serializer, "seconds", dateOffset.Seconds); WriteScalar(emitter, "to", dateOffset.To);
+            }
+            else if (value is DateInRangeActionYaml dateInRange)
+            {
+                WriteScalar(emitter, "type", dateInRange.Type); WriteObject(emitter, serializer, "input", dateInRange.Input); WriteObject(emitter, serializer, "start", dateInRange.Start); WriteObject(emitter, serializer, "end", dateInRange.End); WriteScalar(emitter, "to", dateInRange.To);
+            }
             else if (value is LookupWorkflowContextActionYaml context)
             {
                 WriteScalar(emitter, "type", context.Type); WriteScalar(emitter, "propertyName", context.PropertyName); WriteScalar(emitter, "to", context.To);
@@ -843,7 +1030,19 @@ namespace SPNet.Workflow.WfSerializer
             }
             else if (value is GetDynamicValuePropertyActionYaml dynamicProperty)
             {
-                WriteScalar(emitter, "type", dynamicProperty.Type); WriteScalar(emitter, "source", dynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", dynamicProperty.PropertyName); WriteScalar(emitter, "to", dynamicProperty.To);
+                WriteScalar(emitter, "type", dynamicProperty.Type); WriteScalar(emitter, "source", dynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", dynamicProperty.PropertyName); WriteScalar(emitter, "to", dynamicProperty.To); WriteScalar(emitter, "valueType", dynamicProperty.ValueType);
+            }
+            else if (value is CountDynamicValueItemsActionYaml countDynamicValueItems)
+            {
+                WriteScalar(emitter, "type", countDynamicValueItems.Type); WriteScalar(emitter, "source", countDynamicValueItems.Source); WriteScalar(emitter, "to", countDynamicValueItems.To);
+            }
+            else if (value is SetDynamicValuePropertyActionYaml setDynamicProperty)
+            {
+                WriteScalar(emitter, "type", setDynamicProperty.Type); WriteScalar(emitter, "source", setDynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", setDynamicProperty.PropertyName); WriteObject(emitter, serializer, "value", setDynamicProperty.Value); WriteScalar(emitter, "valueType", setDynamicProperty.ValueType); WriteScalar(emitter, "to", setDynamicProperty.To);
+            }
+            else if (value is BuildDynamicValueActionYaml buildDynamicValue)
+            {
+                WriteScalar(emitter, "type", buildDynamicValue.Type); WriteObject(emitter, serializer, "entries", buildDynamicValue.Entries); WriteScalar(emitter, "to", buildDynamicValue.To);
             }
             else if (value is LookupRestPropertyNameActionYaml restProperty)
             {
@@ -902,6 +1101,8 @@ namespace SPNet.Workflow.WfSerializer
             public string OutcomeTo { get; set; } = string.Empty;
             public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
             public ExpressionYaml Key { get; set; } = new ExpressionYaml();
+            public string ValueType { get; set; } = string.Empty;
+            public List<DynamicValueEntryYaml> Entries { get; set; } = new List<DynamicValueEntryYaml>();
             public string FieldName { get; set; } = string.Empty;
             public string Source { get; set; } = string.Empty;
             public string From { get; set; } = string.Empty;
@@ -923,6 +1124,29 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml Message { get; set; } = new ExpressionYaml();
             public string Status { get; set; } = string.Empty;
             public ExpressionYaml Text { get; set; } = new ExpressionYaml();
+            public ExpressionYaml SourceExpression { get; set; } = new ExpressionYaml();
+            public ExpressionYaml SourceValue { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Scheme { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Host { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Port { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Path { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Query { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Fragment { get; set; } = new ExpressionYaml();
+            public string Name { get; set; } = string.Empty;
+            public ExpressionYaml DefaultValue { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Description { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Input { get; set; } = new ExpressionYaml();
+            public ExpressionYaml TimeSpan { get; set; } = new ExpressionYaml();
+            public ExpressionYaml Start { get; set; } = new ExpressionYaml();
+            public ExpressionYaml End { get; set; } = new ExpressionYaml();
+            public string DaysTo { get; set; } = string.Empty;
+            public string HoursTo { get; set; } = string.Empty;
+            public string MinutesTo { get; set; } = string.Empty;
+            public string SecondsTo { get; set; } = string.Empty;
+            public string TotalDaysTo { get; set; } = string.Empty;
+            public string TotalHoursTo { get; set; } = string.Empty;
+            public string TotalMinutesTo { get; set; } = string.Empty;
+            public string TotalSecondsTo { get; set; } = string.Empty;
             public ExpressionYaml OldValue { get; set; } = new ExpressionYaml();
             public ExpressionYaml NewValue { get; set; } = new ExpressionYaml();
             public ExpressionYaml Find { get; set; } = new ExpressionYaml();
@@ -932,6 +1156,7 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml Days { get; set; } = new ExpressionYaml { Literal = 0 };
             public ExpressionYaml Hours { get; set; } = new ExpressionYaml { Literal = 0 };
             public ExpressionYaml Minutes { get; set; } = new ExpressionYaml { Literal = 0 };
+            public ExpressionYaml Seconds { get; set; } = new ExpressionYaml { Literal = 0 };
             public ExpressionYaml Date { get; set; } = new ExpressionYaml();
             public ComparisonExpressionYaml Condition { get; set; } = new ComparisonExpressionYaml();
             public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>();
@@ -998,6 +1223,34 @@ namespace SPNet.Workflow.WfSerializer
         public ExpressionYaml? Value { get; set; }
         /// <summary>Gets or sets ordered nested expression values used by formatString.</summary>
         public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
+        /// <summary>Gets or sets a string pattern/search operand for dev-only Microsoft.Activities string expressions.</summary>
+        public ExpressionYaml? Pattern { get; set; }
+        /// <summary>Gets or sets a string replacement operand for dev-only Microsoft.Activities string expressions.</summary>
+        public ExpressionYaml? Replacement { get; set; }
+        /// <summary>Gets or sets a string search operand for dev-only Microsoft.Activities string predicate expressions.</summary>
+        public ExpressionYaml? SearchValue { get; set; }
+        /// <summary>Gets or sets an alternate old-value operand alias for replaceString expressions.</summary>
+        public ExpressionYaml? OldValue { get; set; }
+        /// <summary>Gets or sets an alternate new-value operand alias for replaceString expressions.</summary>
+        public ExpressionYaml? NewValue { get; set; }
+        /// <summary>Gets or sets an alternate find operand alias for string search/replace expressions.</summary>
+        public ExpressionYaml? Find { get; set; }
+        /// <summary>Gets or sets an alternate replace-with operand alias for replaceString expressions.</summary>
+        public ExpressionYaml? ReplaceWith { get; set; }
+        /// <summary>Gets or sets a substring start-index operand for dev-only Microsoft.Activities substring expressions.</summary>
+        public ExpressionYaml? StartIndex { get; set; }
+        /// <summary>Gets or sets an optional substring length operand for dev-only Microsoft.Activities substring expressions.</summary>
+        public ExpressionYaml? Length { get; set; }
+        /// <summary>Gets or sets a DynamicValue source variable/expression for dev-only Microsoft.Activities predicates.</summary>
+        public ExpressionYaml? Source { get; set; }
+        public ExpressionYaml? Input { get; set; }
+        public ExpressionYaml? TimeSpan { get; set; }
+        public ExpressionYaml? Days { get; set; }
+        public ExpressionYaml? Hours { get; set; }
+        public ExpressionYaml? Minutes { get; set; }
+        public ExpressionYaml? Seconds { get; set; }
+        public ExpressionYaml? Start { get; set; }
+        public ExpressionYaml? End { get; set; }
         /// <summary>Gets or sets optional CLR/XAML type metadata used when an object-valued field expression must preserve a non-string type.</summary>
         public string ValueType { get; set; } = string.Empty;
         /// <summary>Gets or sets the optional SharePoint Designer custom attribute Id for expression activities.</summary>
@@ -1019,7 +1272,7 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             return rootDeserializer(typeof(ExpressionYamlSurrogate)) is ExpressionYamlSurrogate s
-                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), ValueType = s.ValueType ?? string.Empty, DesignerId = s.DesignerId ?? string.Empty, ToString = s.ToString }
+                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), Pattern = s.Pattern, Replacement = s.Replacement, SearchValue = s.SearchValue, OldValue = s.OldValue, NewValue = s.NewValue, Find = s.Find, ReplaceWith = s.ReplaceWith, StartIndex = s.StartIndex, Length = s.Length, Source = s.Source, Input = s.Input, TimeSpan = s.TimeSpan, Days = s.Days, Hours = s.Hours, Minutes = s.Minutes, Seconds = s.Seconds, Start = s.Start, End = s.End, ValueType = s.ValueType ?? string.Empty, DesignerId = s.DesignerId ?? string.Empty, ToString = s.ToString }
                 : new ExpressionYaml();
         }
 
@@ -1043,6 +1296,24 @@ namespace SPNet.Workflow.WfSerializer
             if (expression.ItemGuid != null) WriteObject(emitter, serializer, "itemGuid", expression.ItemGuid);
             if (expression.Value != null) WriteObject(emitter, serializer, "value", expression.Value);
             if (expression.Values != null && expression.Values.Count > 0) WriteObject(emitter, serializer, "values", expression.Values);
+            if (expression.Pattern != null) WriteObject(emitter, serializer, "pattern", expression.Pattern);
+            if (expression.Replacement != null) WriteObject(emitter, serializer, "replacement", expression.Replacement);
+            if (expression.SearchValue != null) WriteObject(emitter, serializer, "searchValue", expression.SearchValue);
+            if (expression.OldValue != null) WriteObject(emitter, serializer, "oldValue", expression.OldValue);
+            if (expression.NewValue != null) WriteObject(emitter, serializer, "newValue", expression.NewValue);
+            if (expression.Find != null) WriteObject(emitter, serializer, "find", expression.Find);
+            if (expression.ReplaceWith != null) WriteObject(emitter, serializer, "replaceWith", expression.ReplaceWith);
+            if (expression.StartIndex != null) WriteObject(emitter, serializer, "startIndex", expression.StartIndex);
+            if (expression.Length != null) WriteObject(emitter, serializer, "length", expression.Length);
+            if (expression.Source != null) WriteObject(emitter, serializer, "source", expression.Source);
+            if (expression.Input != null) WriteObject(emitter, serializer, "input", expression.Input);
+            if (expression.TimeSpan != null) WriteObject(emitter, serializer, "timeSpan", expression.TimeSpan);
+            if (expression.Days != null) WriteObject(emitter, serializer, "days", expression.Days);
+            if (expression.Hours != null) WriteObject(emitter, serializer, "hours", expression.Hours);
+            if (expression.Minutes != null) WriteObject(emitter, serializer, "minutes", expression.Minutes);
+            if (expression.Seconds != null) WriteObject(emitter, serializer, "seconds", expression.Seconds);
+            if (expression.Start != null) WriteObject(emitter, serializer, "start", expression.Start);
+            if (expression.End != null) WriteObject(emitter, serializer, "end", expression.End);
             if (!string.IsNullOrWhiteSpace(expression.ValueType)) WriteScalar(emitter, "valueType", expression.ValueType);
             if (!string.IsNullOrWhiteSpace(expression.DesignerId)) WriteScalar(emitter, "designerId", expression.DesignerId);
             if (expression.ToString != null) WriteObject(emitter, serializer, "toString", expression.ToString);
@@ -1060,6 +1331,24 @@ namespace SPNet.Workflow.WfSerializer
             expression.ItemGuid == null &&
             expression.Value == null &&
             (expression.Values == null || expression.Values.Count == 0) &&
+            expression.Pattern == null &&
+            expression.Replacement == null &&
+            expression.SearchValue == null &&
+            expression.OldValue == null &&
+            expression.NewValue == null &&
+            expression.Find == null &&
+            expression.ReplaceWith == null &&
+            expression.StartIndex == null &&
+            expression.Length == null &&
+            expression.Source == null &&
+            expression.Input == null &&
+            expression.TimeSpan == null &&
+            expression.Days == null &&
+            expression.Hours == null &&
+            expression.Minutes == null &&
+            expression.Seconds == null &&
+            expression.Start == null &&
+            expression.End == null &&
             string.IsNullOrWhiteSpace(expression.ValueType) &&
             string.IsNullOrWhiteSpace(expression.DesignerId) &&
             expression.ToString == null;
@@ -1088,6 +1377,24 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml? ItemGuid { get; set; }
             public ExpressionYaml? Value { get; set; }
             public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
+            public ExpressionYaml? Pattern { get; set; }
+            public ExpressionYaml? Replacement { get; set; }
+            public ExpressionYaml? SearchValue { get; set; }
+            public ExpressionYaml? OldValue { get; set; }
+            public ExpressionYaml? NewValue { get; set; }
+            public ExpressionYaml? Find { get; set; }
+            public ExpressionYaml? ReplaceWith { get; set; }
+            public ExpressionYaml? StartIndex { get; set; }
+            public ExpressionYaml? Length { get; set; }
+            public ExpressionYaml? Source { get; set; }
+            public ExpressionYaml? Input { get; set; }
+            public ExpressionYaml? TimeSpan { get; set; }
+            public ExpressionYaml? Days { get; set; }
+            public ExpressionYaml? Hours { get; set; }
+            public ExpressionYaml? Minutes { get; set; }
+            public ExpressionYaml? Seconds { get; set; }
+            public ExpressionYaml? Start { get; set; }
+            public ExpressionYaml? End { get; set; }
             public string ValueType { get; set; } = string.Empty;
             public string DesignerId { get; set; } = string.Empty;
             public new ExpressionYaml? ToString { get; set; }

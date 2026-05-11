@@ -44,11 +44,12 @@ namespace SPNet.Workflow.WfSerializer
             var workflow = new WorkflowYaml { Name = name, TechnicalName = className };
             var assignedTargets = FindAssignedArgumentNames(document);
             var formFieldParameters = LoadFormFieldParameters(inputXamlPath, formFieldXmlPath);
+            var formFieldParameterNames = new HashSet<string>(formFieldParameters.Select(p => p.Name).Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase);
             foreach (var property in root.Element(XamlNamespace + "Members")?.Elements(XamlNamespace + "Property") ?? Enumerable.Empty<XElement>())
             {
                 var propertyName = (string?)property.Attribute("Name") ?? "variable";
                 var propertyType = (string?)property.Attribute("Type") ?? string.Empty;
-                if (IsExportableParameterType(propertyType) && !assignedTargets.Contains(propertyName)) workflow.Parameters.Add(new ParameterYaml { Name = propertyName, Type = MapXamlTypeToParameterType(propertyType), XamlType = propertyType, DisplayName = propertyName });
+                if (IsExportableParameterType(propertyType) && formFieldParameterNames.Contains(propertyName) && !assignedTargets.Contains(propertyName)) workflow.Parameters.Add(new ParameterYaml { Name = propertyName, Type = MapXamlTypeToParameterType(propertyType), XamlType = propertyType, DisplayName = propertyName });
                 else workflow.Variables.Add(new VariableYaml { Name = propertyName, Type = MapXamlTypeToVariableType(propertyType) });
             }
             if (formFieldParameters.Count > 0)
@@ -64,10 +65,41 @@ namespace SPNet.Workflow.WfSerializer
                 foreach (var action in ExportActions(stageElement)) stage.Actions.Add(action);
                 if (stage.Actions.Count > 0) workflow.Stages.Add(stage);
             }
+            MoveAssignedParametersToVariables(workflow);
             workflow.ExportWarnings.Add("Partial structural export: supported SharePoint actions are listed, but expressions and list dictionaries may be placeholders when WF deserialization is not used.");
-            if (workflow.Parameters.Count > 0 && formFieldParameters.Count == 0) workflow.ExportWarnings.Add("XAML-only parameter export: x:Members InArgument entries were exported as parameters, but SharePoint FormField metadata is not present in XAML so display names, choices, URL/person/note settings, and authoritative defaults may be incomplete.");
+            if (workflow.Parameters.Count == 0 && formFieldParameters.Count == 0) workflow.ExportWarnings.Add("XAML-only variable export: no SharePoint FormField metadata was present, so x:Members InArgument entries were exported as workflow variables rather than initiation parameters.");
             if (workflow.Stages.Count == 0) workflow.Stages.Add(new StageYaml { Name = "Unsupported XAML", Actions = new System.Collections.Generic.List<WorkflowActionYaml>() });
             workflow.Save(outputYamlPath);
+        }
+
+        private static void MoveAssignedParametersToVariables(WorkflowYaml workflow)
+        {
+            var assigned = new HashSet<string>(workflow.Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>()).SelectMany(EnumerateActions).OfType<ITargetedActionYaml>().Select(a => a.To ?? string.Empty).Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase);
+            if (workflow.Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>()).SelectMany(EnumerateActions).OfType<CallHttpWebServiceActionYaml>().Any()) assigned.Add("varRequestHeaders");
+            if (assigned.Count == 0) return;
+
+            var remainingParameters = new List<ParameterYaml>();
+            foreach (var parameter in workflow.Parameters ?? new List<ParameterYaml>())
+            {
+                if (assigned.Contains(parameter.Name)) workflow.Variables.Add(new VariableYaml { Name = parameter.Name, Type = string.IsNullOrWhiteSpace(parameter.Type) ? MapXamlTypeToVariableType(parameter.XamlType) : parameter.Type });
+                else remainingParameters.Add(parameter);
+            }
+
+            workflow.Parameters = remainingParameters;
+        }
+
+        private static IEnumerable<WorkflowActionYaml> EnumerateActions(WorkflowActionYaml action)
+        {
+            yield return action;
+            if (action is IfActionYaml ifAction)
+            {
+                foreach (var child in (ifAction.Then ?? new List<WorkflowActionYaml>()).SelectMany(EnumerateActions)) yield return child;
+                foreach (var child in (ifAction.Else ?? new List<WorkflowActionYaml>()).SelectMany(EnumerateActions)) yield return child;
+            }
+            else if (action is WhileActionYaml whileAction)
+            {
+                foreach (var child in (whileAction.Actions ?? new List<WorkflowActionYaml>()).SelectMany(EnumerateActions)) yield return child;
+            }
         }
 
         private static List<ParameterYaml> LoadFormFieldParameters(string inputXamlPath, string explicitFormFieldXmlPath)
@@ -171,6 +203,9 @@ namespace SPNet.Workflow.WfSerializer
         private static WorkflowActionYaml? TryExportAction(XElement child)
         {
             if (child.Name.Namespace == SharePointNamespace) return TryExportSharePointAction(child);
+            if (child.Name.LocalName == "BuildDynamicValue") return TryExportBuildDynamicValueAction(child);
+            if (child.Name.LocalName == "GetDynamicValueProperty") return TryExportGetDynamicValuePropertyAction(child);
+            if (child.Name.LocalName == "CountDynamicValueItems") return TryExportCountDynamicValueItemsAction(child);
             if (child.Name.Namespace == ActivitiesNamespace && child.Name.LocalName == "Assign") return TryExportAssignAction(child);
             if (child.Name.Namespace == ActivitiesNamespace && child.Name.LocalName == "While") return TryExportWhileAction(child);
             if (child.Name.Namespace == ActivitiesNamespace && child.Name.LocalName == "If") return TryExportIfAction(child);
@@ -187,12 +222,36 @@ namespace SPNet.Workflow.WfSerializer
             if (child.Name.LocalName == "DelayUntil") return new DelayUntilActionYaml { Date = ReadExpressionAttributeOrPlaceholder(child, "Date") };
             if (child.Name.LocalName == "SetField") return new SetFieldActionYaml { FieldName = ReadStringAttributeOrPlaceholder(child, "FieldName"), Value = ReadExpressionAttributeOrPlaceholder(child, "FieldValue") };
             if (child.Name.LocalName == "Email") return new SendEmailActionYaml { To = new ExpressionYaml { Literal = "<exported recipients>" }, Cc = new ExpressionYaml { Literal = "<exported recipients>" }, Subject = ReadExpressionAttributeOrPlaceholder(child, "Subject"), Body = ReadExpressionAttributeOrPlaceholder(child, "Body") };
-            if (child.Name.LocalName == "CallHTTPWebService") return new CallHttpWebServiceActionYaml { Address = ReadExpressionAttributeOrPlaceholder(child, "Address"), RequestType = ReadExpressionAttributeOrPlaceholder(child, "RequestType"), ResponseStatusCodeTo = ReadOutArgumentTargetOrPlaceholder(child, "ResponseStatusCode") };
+            if (child.Name.LocalName == "CallHTTPWebService") return new CallHttpWebServiceActionYaml { Address = ReadActivityPropertyExpression(child, "Address"), RequestType = ReadHttpRequestTypeExpression(child), ResponseStatusCodeTo = ReadOutArgumentTargetOrPlaceholder(child, "ResponseStatusCode"), ResponseContentTo = ReadOutArgumentTarget(child, "ResponseContent") ?? string.Empty, ResponseHeadersTo = ReadOutArgumentTarget(child, "ResponseHeaders") ?? string.Empty };
             if (child.Name.LocalName == "SingleTask") return new SingleTaskActionYaml { AssignedTo = ReadExpressionAttributeOrPlaceholder(child, "AssignedTo"), Title = ReadExpressionAttributeOrPlaceholder(child, "Title"), Body = ReadExpressionAttributeOrPlaceholder(child, "Body"), DueDate = ReadExpressionAttributeOrPlaceholder(child, "DueDate"), TaskIdTo = ReadOutArgumentTarget(child, "TaskId"), OutcomeTo = ReadOutArgumentTarget(child, "Outcome") };
             if (child.Name.LocalName == "CreateListItem") return new CreateListItemActionYaml { ListId = ReadActivityPropertyExpression(child, "ListId"), Fields = ReadListItemProperties(child), ItemIdTo = ReadOutArgumentTarget(child, "ItemId"), ItemGuidTo = ReadOutArgumentTarget(child, "ItemGuid") ?? ReadOutArgumentTarget(child, "Result") };
             if (child.Name.LocalName == "UpdateListItem") return new UpdateListItemActionYaml { ListId = ReadActivityPropertyExpression(child, "ListId"), ItemId = ReadOptionalActivityPropertyExpression(child, "ItemId") ?? new ExpressionYaml(), ItemGuid = ReadOptionalActivityPropertyExpression(child, "ItemGuid") ?? new ExpressionYaml(), Fields = ReadListItemProperties(child) };
             if (child.Name.LocalName == "DeleteListItem") return new DeleteListItemActionYaml { ListId = ReadActivityPropertyExpression(child, "ListId"), ItemId = ReadOptionalActivityPropertyExpression(child, "ItemId") ?? new ExpressionYaml(), ItemGuid = ReadOptionalActivityPropertyExpression(child, "ItemGuid") ?? new ExpressionYaml() };
             return null;
+        }
+
+        private static WorkflowActionYaml? TryExportBuildDynamicValueAction(XElement child)
+        {
+            // BuildDynamicValue export is intentionally conservative: generated HTTP actions already
+            // allocate the standard request-header DynamicValue variable, and incomplete dictionary
+            // reconstruction can prevent otherwise valid structural roundtrips.
+            return null;
+        }
+
+        private static WorkflowActionYaml? TryExportGetDynamicValuePropertyAction(XElement child)
+        {
+            var target = ReadOutArgumentTarget(child, "Result");
+            var source = ReadArgumentName(child, "Source");
+            if (string.IsNullOrWhiteSpace(target) || string.IsNullOrWhiteSpace(source)) return null;
+            return new GetDynamicValuePropertyActionYaml { Source = source ?? string.Empty, PropertyName = ReadActivityStringPropertyExpression(child, "PropertyName"), To = target ?? string.Empty, ValueType = MapXamlTypeArgumentToVariableType(ReadXamlTypeArgument(child)) };
+        }
+
+        private static WorkflowActionYaml? TryExportCountDynamicValueItemsAction(XElement child)
+        {
+            var target = ReadOutArgumentTarget(child, "Result");
+            var source = ReadArgumentName(child, "Source");
+            if (string.IsNullOrWhiteSpace(target) || string.IsNullOrWhiteSpace(source)) return null;
+            return new CountDynamicValueItemsActionYaml { Source = source ?? string.Empty, To = target ?? string.Empty };
         }
 
         private static WorkflowActionYaml? TryExportAssignAction(XElement assign)
@@ -221,8 +280,17 @@ namespace SPNet.Workflow.WfSerializer
         private static WorkflowActionYaml TryExportWhileAction(XElement whileElement) => new WhileActionYaml
         {
             Condition = ReadConditionOrPlaceholder(whileElement.Element(ActivitiesNamespace + "While.Condition")),
-            Actions = ExportActions(whileElement.Element(ActivitiesNamespace + "While.Body")?.Elements().FirstOrDefault() ?? whileElement).ToList()
+            Actions = ExportActions(FindWhileBodyContainer(whileElement)).ToList()
         };
+
+        private static XElement FindWhileBodyContainer(XElement whileElement)
+        {
+            var explicitBody = whileElement.Element(ActivitiesNamespace + "While.Body")?.Elements().FirstOrDefault();
+            if (explicitBody != null) return explicitBody;
+
+            var conditionElement = whileElement.Element(ActivitiesNamespace + "While.Condition");
+            return whileElement.Elements().FirstOrDefault(e => !object.ReferenceEquals(e, conditionElement) && !e.Name.LocalName.Equals("While.Condition", StringComparison.OrdinalIgnoreCase)) ?? whileElement;
+        }
 
         private static WorkflowActionYaml TryExportIfAction(XElement ifElement) => new IfActionYaml
         {
@@ -232,6 +300,17 @@ namespace SPNet.Workflow.WfSerializer
         };
 
         private static ExpressionYaml ExportedStringExpression() => new ExpressionYaml { Literal = "<exported expression>" };
+
+        private static ExpressionYaml ReadHttpRequestTypeExpression(XElement element)
+        {
+            var expression = ReadActivityPropertyExpression(element, "RequestType");
+            if (string.IsNullOrWhiteSpace(expression.Variable)) return expression;
+
+            var normalized = expression.Variable.Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToUpperInvariant();
+            return normalized == "GET" || normalized == "POST" || normalized == "PUT" || normalized == "DELETE" || normalized == "HTTPGET" || normalized == "HTTPPOST" || normalized == "HTTPPUT" || normalized == "HTTPDELETE"
+                ? new ExpressionYaml { Literal = expression.Variable }
+                : expression;
+        }
 
         private static ExpressionYaml ReadExpressionAttributeOrPlaceholder(XElement element, string attributeName) => element.Attribute(attributeName) is XAttribute attribute ? ReadExpressionText(attribute.Value) : new ExpressionYaml { Literal = "<exported expression>" };
 
@@ -248,6 +327,7 @@ namespace SPNet.Workflow.WfSerializer
             var visualBasic = element.Descendants().FirstOrDefault(e => e.Name.LocalName == "VisualBasicValue")?.Attribute("ExpressionText")?.Value ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(visualBasic)) return ReadExpressionText(visualBasic);
             var literal = element.Descendants().FirstOrDefault(e => e.Name.LocalName == "Literal")?.Attribute("Value")?.Value ?? string.Empty;
+            if (!element.Elements().Any() && !string.IsNullOrWhiteSpace(element.Value)) return ReadExpressionText(element.Value);
             return !string.IsNullOrWhiteSpace(literal) ? ReadExpressionText(literal) : new ExpressionYaml { Literal = "<exported expression>" };
         }
 
@@ -400,6 +480,25 @@ namespace SPNet.Workflow.WfSerializer
         {
             var propertyElement = element.Element(element.Name.Namespace + (element.Name.LocalName + "." + propertyName));
             return propertyElement?.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value ?? string.Empty;
+        }
+
+        private static string ReadArgumentName(XElement element, string propertyName)
+        {
+            var propertyElement = element.Element(element.Name.Namespace + (element.Name.LocalName + "." + propertyName)) ?? element.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(element.Name.LocalName + "." + propertyName, StringComparison.OrdinalIgnoreCase));
+            return propertyElement?.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentValue" || e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value ?? string.Empty;
+        }
+
+        private static string ReadXamlTypeArgument(XElement element) => (string?)element.Attribute(XamlNamespace + "TypeArguments") ?? string.Empty;
+
+        private static string MapXamlTypeArgumentToVariableType(string typeArgument)
+        {
+            if (typeArgument.IndexOf("DynamicValue", StringComparison.OrdinalIgnoreCase) >= 0) return "DynamicValue";
+            if (typeArgument.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return "Boolean";
+            if (typeArgument.IndexOf("Int32", StringComparison.OrdinalIgnoreCase) >= 0) return "Int32";
+            if (typeArgument.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return "Double";
+            if (typeArgument.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return "DateTime";
+            if (typeArgument.IndexOf("Guid", StringComparison.OrdinalIgnoreCase) >= 0) return "Guid";
+            return "String";
         }
 
         private static Dictionary<string, ExpressionYaml> ReadListItemProperties(XElement element)

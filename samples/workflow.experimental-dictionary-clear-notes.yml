@@ -1,0 +1,22 @@
+# Experimental note for Microsoft.Activities.ClearDictionary.
+# This intentionally stays buildable without ClearDictionary: the current YAML model
+# supports Microsoft.Activities.DynamicValue, but ClearDictionary`2 requires an
+# IDictionary<TKey,TValue> variable/action surface that SharePoint Designer hidden
+# actions expose separately from DynamicValue. Use this sample as a safe baseline
+# before adding a future IDictionary-specific model.
+schemaVersion: spnet.workflow/v1
+name: ExperimentalDictionaryClearNotes
+metadata:
+  displayName: Experimental Dictionary Clear Notes
+  description: "Documents the current limitation: ClearDictionary requires IDictionary<TKey,TValue>, which is not yet represented by the SPNet YAML variable model."
+  target:
+    type: Site
+  start:
+    manual: true
+    onCreated: false
+    onUpdated: false
+stages:
+  - name: ClearDictionary limitation
+    actions:
+      - type: writeHistory
+        message: "ClearDictionary is not emitted by this sample because the current SPNet YAML model has DynamicValue support, not IDictionary variables."

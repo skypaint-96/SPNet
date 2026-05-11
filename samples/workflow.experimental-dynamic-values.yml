@@ -1,0 +1,53 @@
+# Experimental hidden Microsoft.Activities DynamicValue actions.
+# Safe/manual test: builds an in-memory DynamicValue, sets one property using
+# SetDynamicValueProperty, reads it back, counts items, and writes history only.
+# No SharePoint list data is mutated and no email/task actions are sent.
+schemaVersion: spnet.workflow/v1
+name: ExperimentalDynamicValues
+metadata:
+  displayName: Experimental DynamicValues
+  technicalName: ExperimentalDynamicValues.MTW
+  description: "Experimental sample for hidden Microsoft.Activities SetDynamicValueProperty with existing DynamicValue read/count actions. Manual publish test only."
+  target:
+    type: Site
+  start:
+    manual: true
+    onCreated: false
+    onUpdated: false
+variables:
+  - name: experimentDictionary
+    type: DynamicValue
+  - name: updatedDictionary
+    type: DynamicValue
+  - name: readBackTitle
+    type: String
+  - name: itemCount
+    type: Int32
+stages:
+  - name: DynamicValue experiment
+    actions:
+      - type: buildDynamicValue
+        to: experimentDictionary
+        entries:
+          - key: OriginalTitle
+            value: Before SetDynamicValueProperty
+          - key: Enabled
+            value: true
+            valueType: Boolean
+      - type: setDynamicValueProperty
+        source: experimentDictionary
+        propertyName: Title
+        value: Set by hidden Microsoft.Activities.SetDynamicValueProperty
+        valueType: String
+        to: updatedDictionary
+      - type: getDynamicValueProperty
+        source: updatedDictionary
+        propertyName: Title
+        to: readBackTitle
+        valueType: String
+      - type: countDynamicValueItems
+        source: updatedDictionary
+        to: itemCount
+      - type: writeHistory
+        message:
+          variable: readBackTitle

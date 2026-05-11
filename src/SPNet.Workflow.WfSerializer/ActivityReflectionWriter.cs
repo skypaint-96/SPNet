@@ -12,7 +12,10 @@ namespace SPNet.Workflow.WfSerializer
 
         public static void SetProperty(object target, string propertyName, object value)
         {
-            var property = target.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).FirstOrDefault(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal) && p.CanWrite);
+            var property = target.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .Where(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal) && p.CanWrite)
+                .OrderByDescending(p => value == null || p.PropertyType.IsInstanceOfType(value))
+                .FirstOrDefault();
             if (property == null || !property.CanWrite) throw new InvalidOperationException("Type " + target.GetType().FullName + " does not expose writable property " + propertyName + ".");
             property.SetValue(target, value, null);
         }
@@ -43,12 +46,38 @@ namespace SPNet.Workflow.WfSerializer
             return new InArgument<string>(stringActivity);
         }
 
+        public static InArgument<bool> CreateBooleanInArgumentFromActivity(object expressionActivity)
+        {
+            if (!(expressionActivity is Activity<bool> boolActivity)) throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<Boolean>.");
+            return new InArgument<bool>(boolActivity);
+        }
+
+        public static InArgument<DateTime> CreateDateTimeInArgumentFromActivity(object expressionActivity)
+        {
+            if (!(expressionActivity is Activity<DateTime> dateTimeActivity)) throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<DateTime>.");
+            return new InArgument<DateTime>(dateTimeActivity);
+        }
+
+        public static InArgument<TimeSpan> CreateTimeSpanInArgumentFromActivity(object expressionActivity)
+        {
+            if (!(expressionActivity is Activity<TimeSpan> timeSpanActivity)) throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<TimeSpan>.");
+            return new InArgument<TimeSpan>(timeSpanActivity);
+        }
+
         public static object CreateOutArgument(Type resultType, string variableName)
         {
             var argumentReferenceType = typeof(ArgumentReference<>).MakeGenericType(resultType);
             var argumentReference = Activator.CreateInstance(argumentReferenceType, variableName)!;
             var outArgumentType = typeof(OutArgument<>).MakeGenericType(resultType);
             return Activator.CreateInstance(outArgumentType, argumentReference)!;
+        }
+
+        public static object CreateInOutArgument(Type resultType, string variableName)
+        {
+            var argumentReferenceType = typeof(ArgumentReference<>).MakeGenericType(resultType);
+            var argumentReference = Activator.CreateInstance(argumentReferenceType, variableName)!;
+            var inOutArgumentType = typeof(InOutArgument<>).MakeGenericType(resultType);
+            return Activator.CreateInstance(inOutArgumentType, argumentReference)!;
         }
 
         public static object CreateInArgumentReference(Type resultType, string variableName)

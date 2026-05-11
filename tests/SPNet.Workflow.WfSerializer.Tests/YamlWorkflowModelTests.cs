@@ -29,6 +29,13 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("getDictionaryItem", typeof(GetDynamicValuePropertyActionYaml))]
         [DataRow("getDictionaryValue", typeof(GetDynamicValuePropertyActionYaml))]
         [DataRow("getResponseProperty", typeof(GetDynamicValuePropertyActionYaml))]
+        [DataRow("setDynamicValueProperty", typeof(SetDynamicValuePropertyActionYaml))]
+        [DataRow("setDictionaryItem", typeof(SetDynamicValuePropertyActionYaml))]
+        [DataRow("setDictionaryValue", typeof(SetDynamicValuePropertyActionYaml))]
+        [DataRow("setResponseProperty", typeof(SetDynamicValuePropertyActionYaml))]
+        [DataRow("buildDynamicValue", typeof(BuildDynamicValueActionYaml))]
+        [DataRow("buildDictionary", typeof(BuildDynamicValueActionYaml))]
+        [DataRow("createDictionary", typeof(BuildDynamicValueActionYaml))]
         [DataRow("createListItem", typeof(CreateListItemActionYaml))]
         [DataRow("updateListItem", typeof(UpdateListItemActionYaml))]
         [DataRow("deleteListItem", typeof(DeleteListItemActionYaml))]
@@ -38,6 +45,15 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("substringString", typeof(StringSubstringActionYaml))]
         [DataRow("trimString", typeof(StringTrimActionYaml))]
         [DataRow("stringTrim", typeof(StringTrimActionYaml))]
+        [DataRow("buildUri", typeof(BuildUriActionYaml))]
+        [DataRow("getConfigurationValue", typeof(GetConfigurationValueActionYaml))]
+        [DataRow("getInstanceAddress", typeof(GetInstanceAddressActionYaml))]
+        [DataRow("setUserStatus", typeof(SetUserStatusActionYaml))]
+        [DataRow("createTimeSpan", typeof(CreateTimeSpanActionYaml))]
+        [DataRow("getTimeSpanFields", typeof(GetTimeSpanFieldsActionYaml))]
+        [DataRow("addToDate", typeof(AddToDateActionYaml))]
+        [DataRow("subtractFromDate", typeof(SubtractFromDateActionYaml))]
+        [DataRow("dateInRange", typeof(DateInRangeActionYaml))]
         public void Load_RecognizesSupportedActionAliases(string actionType, Type expectedModelType)
         {
             var workflow = LoadYaml(CreateWorkflowYaml(CreateActionYaml(actionType)));
@@ -57,6 +73,17 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow(typeof(StringReplaceActionYaml))]
         [DataRow(typeof(StringSubstringActionYaml))]
         [DataRow(typeof(StringTrimActionYaml))]
+        [DataRow(typeof(BuildUriActionYaml))]
+        [DataRow(typeof(GetConfigurationValueActionYaml))]
+        [DataRow(typeof(GetInstanceAddressActionYaml))]
+        [DataRow(typeof(SetUserStatusActionYaml))]
+        [DataRow(typeof(CreateTimeSpanActionYaml))]
+        [DataRow(typeof(GetTimeSpanFieldsActionYaml))]
+        [DataRow(typeof(AddToDateActionYaml))]
+        [DataRow(typeof(SubtractFromDateActionYaml))]
+        [DataRow(typeof(DateInRangeActionYaml))]
+        [DataRow(typeof(BuildDynamicValueActionYaml))]
+        [DataRow(typeof(SetDynamicValuePropertyActionYaml))]
         [DataRow(typeof(WhileActionYaml))]
         [DataRow(typeof(IfActionYaml))]
         public void BuildDispatch_RegistersRepresentativeSupportedActions(Type actionModelType)
@@ -111,6 +138,157 @@ namespace SPNet.Workflow.WfSerializer.Tests
             Assert.IsTrue(workflow.Stages[0].Actions.TrueForAll(a => a is AssignActionYaml));
         }
 
+        [TestMethod]
+        public void Load_AllowsDevOnlyMicrosoftActivitiesExpressionsInAssignments()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: DevOnlyExpressions
+variables:
+  - name: textValue
+    type: String
+  - name: lengthValue
+    type: Int32
+  - name: stringBoolValue
+    type: Boolean
+  - name: dateValue
+    type: DateTime
+  - name: guidValue
+    type: Guid
+  - name: boolValue
+    type: Boolean
+  - name: payload
+    type: DynamicValue
+stages:
+  - name: Stage 1
+    actions:
+      - type: assign
+        to: textValue
+        value:
+          type: concatString
+          values:
+            - value A
+            -
+              type: toUpperCase
+              value: value b
+      - type: assign
+        to: lengthValue
+        value:
+          type: stringLength
+          value:
+            type: toLowerCase
+            value: ABC
+      - type: assign
+        to: textValue
+        value:
+          type: replaceString
+          value:
+            variable: textValue
+          oldValue: A
+          newValue: B
+      - type: assign
+        to: textValue
+        value:
+          type: substring
+          value:
+            variable: textValue
+          startIndex: 0
+          length: 2
+      - type: assign
+        to: textValue
+        value:
+          type: trimString
+          value: '  spaced  '
+      - type: assign
+        to: lengthValue
+        value:
+          type: indexOfString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: isEmptyString
+          value:
+            variable: textValue
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: containsString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: startsWithString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: endsWithString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: parseBoolean
+          value: true
+      - type: assign
+        to: dateValue
+        value:
+          type: currentDate
+      - type: assign
+        to: guidValue
+        value:
+          type: parseGuid
+          value: 00000000-0000-0000-0000-000000000001
+      - type: assign
+        to: guidValue
+        value:
+          type: newGuid
+      - type: assign
+        to: boolValue
+        value:
+          type: containsDynamicValueProperty
+          source:
+            variable: payload
+          propertyName: Title
+      - type: assign
+        to: boolValue
+        value:
+          type: isEmptyDynamicValue
+          source:
+            variable: payload
+");
+
+            var assignments = workflow.Stages.Single().Actions.OfType<AssignActionYaml>().ToList();
+            Assert.AreEqual(16, assignments.Count);
+            Assert.AreEqual("concatString", assignments[0].Value.Type);
+            Assert.AreEqual("toUpperCase", assignments[0].Value.Values[1].Type);
+            Assert.AreEqual("stringLength", assignments[1].Value.Type);
+            Assert.AreEqual("toLowerCase", assignments[1].Value.Value!.Type);
+            Assert.AreEqual("replaceString", assignments[2].Value.Type);
+            Assert.AreEqual("A", assignments[2].Value.OldValue!.Literal);
+            Assert.AreEqual("substring", assignments[3].Value.Type);
+            Assert.AreEqual("trimString", assignments[4].Value.Type);
+            Assert.AreEqual("indexOfString", assignments[5].Value.Type);
+            Assert.AreEqual("isEmptyString", assignments[6].Value.Type);
+            Assert.AreEqual("containsString", assignments[7].Value.Type);
+            Assert.AreEqual("startsWithString", assignments[8].Value.Type);
+            Assert.AreEqual("endsWithString", assignments[9].Value.Type);
+            Assert.AreEqual("parseBoolean", assignments[10].Value.Type);
+            Assert.AreEqual("currentDate", assignments[11].Value.Type);
+            Assert.AreEqual("parseGuid", assignments[12].Value.Type);
+            Assert.AreEqual("newGuid", assignments[13].Value.Type);
+            Assert.AreEqual("containsDynamicValueProperty", assignments[14].Value.Type);
+            Assert.AreEqual("payload", assignments[14].Value.Source!.Variable);
+            Assert.AreEqual("isEmptyDynamicValue", assignments[15].Value.Type);
+        }
+
         [DataTestMethod]
         [DataRow("assign", "assign action requires 'to'.")]
         [DataRow("calc", "calc action requires 'to'.")]
@@ -119,10 +297,17 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("sendEmail", "sendEmail action requires 'to'.")]
         [DataRow("singleTask", "singleTask action requires 'assignedTo'.")]
         [DataRow("getDynamicValueProperty", "getDynamicValueProperty action requires 'source'.")]
+        [DataRow("setDynamicValueProperty", "setDynamicValueProperty action requires 'source'.")]
+        [DataRow("buildDynamicValue", "buildDynamicValue action requires 'to'.")]
         [DataRow("lookupRestPropertyName", "lookupRestPropertyName action requires 'to'.")]
         [DataRow("replaceString", "replaceString action requires 'to'.")]
         [DataRow("substring", "substring action requires 'to'.")]
         [DataRow("trimString", "trimString action requires 'to'.")]
+        [DataRow("buildUri", "buildUri action requires 'to'.")]
+        [DataRow("getConfigurationValue", "getConfigurationValue action requires 'name'.")]
+        [DataRow("getInstanceAddress", "getInstanceAddress action requires 'to'.")]
+        [DataRow("createTimeSpan", "createTimeSpan action requires 'to'.")]
+        [DataRow("dateInRange", "dateInRange action requires 'to'.")]
         public void Load_ValidatesRequiredActionFields(string actionType, string expectedMessage)
         {
             var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(CreateWorkflowYaml("      - type: " + actionType)));
@@ -148,6 +333,123 @@ namespace SPNet.Workflow.WfSerializer.Tests
         responseStatusCodeTo: statusCode")));
 
             StringAssert.Contains(ex.Message, "requestType must be GET");
+        }
+
+        [TestMethod]
+        public void Load_AllowsDynamicValueVariablesAndBuildDynamicValueEntries()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: DynamicArrayShape
+variables:
+  - name: requestPayload
+    type: DynamicValue
+  - name: title
+    type: String
+stages:
+  - name: Stage 1
+    actions:
+      - type: buildDynamicValue
+        to: requestPayload
+        entries:
+          - key: Title
+            value:
+              variable: title
+          - key: Count
+            value: 2
+            valueType: Int32
+");
+
+            var action = workflow.Stages.Single().Actions.OfType<BuildDynamicValueActionYaml>().Single();
+            Assert.AreEqual("requestPayload", action.To);
+            Assert.AreEqual(2, action.Entries.Count);
+            Assert.AreEqual("Count", action.Entries[1].Key);
+            Assert.AreEqual("Int32", action.Entries[1].ValueType);
+        }
+
+        [TestMethod]
+        public void Load_AllowsDevOnlyBatch1AndTimeSpanActions()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: DevOnlyBatch1AndTimeSpan
+variables:
+  - name: uriResult
+    type: String
+  - name: configValue
+    type: String
+  - name: instanceAddress
+    type: String
+  - name: duration
+    type: TimeSpan
+  - name: dateValue
+    type: DateTime
+  - name: boolValue
+    type: Boolean
+  - name: days
+    type: Int32
+stages:
+  - name: Stage 1
+    actions:
+      - type: buildUri
+        scheme: https
+        host: example.invalid
+        path: /api/test
+        to: uriResult
+      - type: getConfigurationValue
+        name: Microsoft.SharePoint.ActivationProperties.CultureName
+        defaultValue: en-US
+        to: configValue
+      - type: getInstanceAddress
+        to: instanceAddress
+      - type: setUserStatus
+        description: Dev-only status
+      - type: createTimeSpan
+        days: 1
+        hours: 2
+        to: duration
+      - type: getTimeSpanFields
+        input:
+          variable: duration
+        daysTo: days
+      - type: addToDate
+        input: 2026-05-10T00:00:00Z
+        timeSpan:
+          variable: duration
+        to: dateValue
+      - type: subtractFromDate
+        input:
+          variable: dateValue
+        days: 1
+        to: dateValue
+      - type: dateInRange
+        input:
+          variable: dateValue
+        start: 2026-05-01T00:00:00Z
+        end: 2026-05-31T00:00:00Z
+        to: boolValue
+");
+
+            var actions = workflow.Stages.Single().Actions;
+            Assert.IsTrue(actions.OfType<BuildUriActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<GetConfigurationValueActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<GetInstanceAddressActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<SetUserStatusActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<CreateTimeSpanActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<GetTimeSpanFieldsActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<AddToDateActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<SubtractFromDateActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<DateInRangeActionYaml>().Any());
+        }
+
+        [TestMethod]
+        public void Load_ValidatesBuildDynamicValueEntries()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(CreateWorkflowYaml(@"
+      - type: buildDynamicValue
+        to: responseContent
+        entries:
+          - value: missing key")));
+
+            StringAssert.Contains(ex.Message, "entries require non-empty keys");
         }
 
         [TestMethod]
@@ -226,6 +528,89 @@ namespace SPNet.Workflow.WfSerializer.Tests
             {
                 if (File.Exists(outputPath)) File.Delete(outputPath);
             }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_SupportsDownloadedDynamicArrayWorkflowShape()
+        {
+            var inputPath = FindRepoFile("artifacts", "DynamicArrayWFEx.downloaded.xaml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Downloaded DynamicArrayWFEx XAML artifact is not available in this checkout.");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+                var actions = workflow.Stages.SelectMany(s => s.Actions).ToList();
+
+                Assert.AreEqual("DynamicArrayWFEx", workflow.Name);
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "varRequestHeaders" && v.Type == "DynamicValue"), "Expected DynamicValue request-headers variable.");
+                Assert.AreEqual(0, workflow.Parameters.Count, "Downloaded DynamicArrayWFEx has no FormField metadata, so x:Members should not be promoted to parameters.");
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "dictionary" && v.Type == "DynamicValue"), "Expected DynamicValue dictionary runtime variable.");
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "varResults" && v.Type == "DynamicValue"), "Expected DynamicValue response array variable.");
+                Assert.IsTrue(actions.OfType<CallHttpWebServiceActionYaml>().Any(), "Expected exported HTTP action.");
+                Assert.IsTrue(actions.OfType<GetDynamicValuePropertyActionYaml>().Any(a => string.Equals(a.To, "varResults", StringComparison.OrdinalIgnoreCase) && string.Equals(a.ValueType, "DynamicValue", StringComparison.OrdinalIgnoreCase)), "Expected exported DynamicValue array extraction.");
+                Assert.IsTrue(actions.OfType<CountDynamicValueItemsActionYaml>().Any(a => string.Equals(a.Source, "varResults", StringComparison.OrdinalIgnoreCase) && string.Equals(a.To, "count", StringComparison.OrdinalIgnoreCase)), "Expected exported DynamicValue array item count.");
+                var loop = actions.OfType<WhileActionYaml>().Single(w => string.Equals(w.Condition.Type, "isLessThan", StringComparison.OrdinalIgnoreCase));
+                Assert.AreEqual(4, loop.Actions.Count, "Expected exported array loop body actions.");
+                CollectionAssert.AreEquivalent(new[] { "varNumericProp", "varBoolprop", "varIntProp", "varDateProp" }, loop.Actions.OfType<GetDynamicValuePropertyActionYaml>().Select(a => a.To).ToArray(), "Expected DynamicArrayWFEx loop body dynamic property reads.");
+                Assert.IsFalse(workflow.ExportWarnings.Any(w => w.IndexOf("unsupported", StringComparison.OrdinalIgnoreCase) >= 0), "DynamicArrayWFEx export should not report unsupported constructs.");
+            }
+            finally
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_ReexportsDynamicArrayRoundtripLoopBodyActions()
+        {
+            var inputPath = FindRepoFile("artifacts", "DynamicArrayWFEx.roundtrip.xaml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Roundtrip DynamicArrayWFEx XAML artifact is not available in this checkout.");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-dynamic-array-reexport-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+                var loop = workflow.Stages.SelectMany(s => s.Actions).OfType<WhileActionYaml>().Single();
+
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "varNumericProp" && v.Type == "Double"), "Expected numeric property to remain a workflow variable.");
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "varBoolprop" && v.Type == "Boolean"), "Expected boolean property to remain a workflow variable.");
+                Assert.IsFalse(workflow.Parameters.Any(p => p.Name == "varNumericProp" || p.Name == "varBoolprop" || p.Name == "varDateProp"), "Loop body result variables must not be exported as initiation parameters.");
+                Assert.AreEqual(4, loop.Actions.Count, "Expected roundtrip re-export to preserve loop body actions.");
+                CollectionAssert.AreEquivalent(new[] { "varNumericProp", "varBoolprop", "varIntProp", "varDateProp" }, loop.Actions.OfType<GetDynamicValuePropertyActionYaml>().Select(a => a.To).ToArray(), "Expected DynamicArrayWFEx loop body dynamic property reads to survive re-export.");
+            }
+            finally
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void PrepareXamlForDeserialization_MapsGenericMicrosoftExpressionComparisons()
+        {
+            var prepared = WfActivityBuilderSerializer.PrepareXamlForDeserializationForTest(@"<Activity x:Class=""ComparisonWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""><While><While.Condition><p:IsLessThan x:TypeArguments=""x:Double""><p:IsLessThan.Left><InArgument x:TypeArguments=""x:Double"">1</InArgument></p:IsLessThan.Left><p:IsLessThan.Right><InArgument x:TypeArguments=""x:Double""><p:Convert x:TypeArguments=""x:Int32, x:Double""><p:Convert.Input><InArgument x:TypeArguments=""x:Int32"">2</InArgument></p:Convert.Input></p:Convert></InArgument></p:IsLessThan.Right></p:IsLessThan></While.Condition></While></Activity>");
+            var document = XDocument.Parse(prepared);
+            XNamespace expressionProxy = "clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy";
+
+            Assert.IsTrue(document.Descendants(expressionProxy + "IsLessThan").Any(), "Expected IsLessThan to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "Convert").Any(), "Expected nested Convert to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "IsLessThan").Any(e => ((string?)e.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "x:Double"), "Expected x:Double type arguments to be preserved for WF generic closure.");
+        }
+
+        [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
+        public void InspectWorkflowXaml_DeserializesDownloadedDynamicArrayWorkflow()
+        {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
+            var inputPath = FindRepoFile("artifacts", "DynamicArrayWFEx.downloaded.xaml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Downloaded DynamicArrayWFEx XAML artifact is not available in this checkout.");
+
+            var report = WfActivityBuilderSerializer.InspectWorkflowXaml(inputPath, cacheFolder);
+
+            StringAssert.Contains(report, "LoadedType: System.Activities.ActivityBuilder");
+            StringAssert.Contains(report, "Property: varIndex Type=System.Activities.InArgument`1[System.Double]");
+            StringAssert.Contains(report, "Microsoft.Activities.GetDynamicValueProperty`1[[Microsoft.Activities.DynamicValue");
+            Assert.IsFalse(report.Contains("WF deserialization failed"), report);
         }
 
         private static string FindRepoFile(params string[] relativeParts)
@@ -759,7 +1144,7 @@ stages:
         }
 
         [TestMethod]
-        public void ExportWorkflowYaml_ExportsXamlOnlyInArgumentParametersConservatively()
+        public void ExportWorkflowYaml_ExportsXamlOnlyInArgumentsAsVariablesWithoutFormFieldMetadata()
         {
             var inputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-export-" + Guid.NewGuid().ToString("N") + ".xaml");
             var outputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-export-" + Guid.NewGuid().ToString("N") + ".yml");
@@ -769,12 +1154,12 @@ stages:
                 WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
                 var workflow = WorkflowYaml.Load(outputPath);
 
-                Assert.AreEqual(4, workflow.Parameters.Count);
-                Assert.AreEqual("Text", workflow.Parameters.Single(p => p.Name == "titleParam").Type);
-                Assert.AreEqual("Boolean", workflow.Parameters.Single(p => p.Name == "approved").Type);
-                Assert.AreEqual("Number", workflow.Parameters.Single(p => p.Name == "amount").Type);
-                Assert.AreEqual("DateTime", workflow.Parameters.Single(p => p.Name == "dueDate").Type);
-                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("XAML-only parameter export")));
+                Assert.AreEqual(0, workflow.Parameters.Count);
+                Assert.AreEqual("String", workflow.Variables.Single(v => v.Name == "titleParam").Type);
+                Assert.AreEqual("Boolean", workflow.Variables.Single(v => v.Name == "approved").Type);
+                Assert.AreEqual("Double", workflow.Variables.Single(v => v.Name == "amount").Type);
+                Assert.AreEqual("DateTime", workflow.Variables.Single(v => v.Name == "dueDate").Type);
+                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("XAML-only variable export")));
             }
             finally
             {
@@ -819,7 +1204,7 @@ stages:
                 Assert.AreEqual("FALSE", note.Sortable);
                 Assert.AreEqual("Compatible", note.RichTextMode);
                 Assert.AreEqual("Image", workflow.Parameters.Single(p => p.Name == "urlParam").Format);
-                Assert.AreEqual("Text", workflow.Parameters.Single(p => p.Name == "legacyOnly").Type, "XAML-only parameters not present in FormField should remain available.");
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "legacyOnly" && v.Type == "String"), "XAML-only members not present in FormField should remain variables.");
                 Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("FormField metadata export")), "Expected FormField metadata warning.");
                 Assert.IsFalse(workflow.ExportWarnings.Any(w => w.Contains("XAML-only parameter export")), "FormField export should not emit the conservative XAML-only parameter warning.");
             }
@@ -1030,6 +1415,169 @@ stages:
             }
         }
 
+        [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
+        public void SerializeYamlWorkflow_EmitsDevOnlyMicrosoftActivitiesExpressions()
+        {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
+            var directory = Path.Combine(Path.GetTempPath(), "spnet-devonly-expressions-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var workflowPath = Path.Combine(directory, "workflow.yml");
+            var xamlPath = Path.Combine(directory, "workflow.xaml");
+            File.WriteAllText(workflowPath, @"schemaVersion: spnet.workflow/v1
+name: DevOnlyExpressionsBuild
+variables:
+  - name: textValue
+    type: String
+  - name: lengthValue
+    type: Int32
+  - name: stringBoolValue
+    type: Boolean
+  - name: dateValue
+    type: DateTime
+  - name: guidValue
+    type: Guid
+  - name: boolValue
+    type: Boolean
+  - name: payload
+    type: DynamicValue
+stages:
+  - name: Stage 1
+    actions:
+      - type: buildDynamicValue
+        to: payload
+        entries:
+          - key: Title
+            value: Example
+      - type: assign
+        to: textValue
+        value:
+          type: concatString
+          values:
+            -
+              type: toLowerCase
+              value: ABC
+            -
+              type: toUpperCase
+              value: xyz
+      - type: assign
+        to: lengthValue
+        value:
+          type: stringLength
+          value:
+            variable: textValue
+      - type: assign
+        to: textValue
+        value:
+          type: replaceString
+          value:
+            variable: textValue
+          oldValue: A
+          newValue: B
+      - type: assign
+        to: textValue
+        value:
+          type: substring
+          value:
+            variable: textValue
+          startIndex: 0
+          length: 2
+      - type: assign
+        to: textValue
+        value:
+          type: trimString
+          value: '  spaced  '
+      - type: assign
+        to: lengthValue
+        value:
+          type: indexOfString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: isEmptyString
+          value:
+            variable: textValue
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: containsString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: startsWithString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: endsWithString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: parseBoolean
+          value: true
+      - type: assign
+        to: dateValue
+        value:
+          type: currentDate
+      - type: assign
+        to: guidValue
+        value:
+          type: newGuid
+      - type: assign
+        to: boolValue
+        value:
+          type: containsDynamicValueProperty
+          source:
+            variable: payload
+          propertyName: Title
+      - type: assign
+        to: boolValue
+        value:
+          type: isEmptyDynamicValue
+          source:
+            variable: payload
+");
+
+            try
+            {
+                WfActivityBuilderSerializer.SerializeYamlWorkflow(workflowPath, xamlPath, cacheFolder, new SpNetToolConfig());
+
+                var xaml = File.ReadAllText(xamlPath);
+                StringAssert.Contains(xaml, "ToLowerCase");
+                StringAssert.Contains(xaml, "ToUpperCase");
+                StringAssert.Contains(xaml, "StringLength");
+                StringAssert.Contains(xaml, "ReplaceString");
+                StringAssert.Contains(xaml, "Substring");
+                StringAssert.Contains(xaml, "Trim");
+                StringAssert.Contains(xaml, "IndexOfString");
+                StringAssert.Contains(xaml, "IsEmptyString");
+                StringAssert.Contains(xaml, "ContainsString");
+                StringAssert.Contains(xaml, "StartsWithString");
+                StringAssert.Contains(xaml, "EndsWithString");
+                StringAssert.Contains(xaml, "ParseBoolean");
+                StringAssert.Contains(xaml, "ConcatString");
+                StringAssert.Contains(xaml, "CurrentDate");
+                StringAssert.Contains(xaml, "NewGuid");
+                StringAssert.Contains(xaml, "ContainsDynamicValueProperty");
+                StringAssert.Contains(xaml, "IsEmptyDynamicValue");
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
         private static string GetConfiguredWebsiteCacheOrInconclusive()
         {
             var cacheFolder = Environment.GetEnvironmentVariable("SPNET_SPD_CACHE");
@@ -1092,6 +1640,12 @@ variables:
     type: String
   - name: outcome
     type: Int32
+  - name: duration
+    type: TimeSpan
+  - name: dueDate
+    type: DateTime
+  - name: approvedFlag
+    type: Boolean
 stages:
   - name: Stage 1
     actions:
@@ -1151,6 +1705,25 @@ stages:
         source: responseContent
         propertyName: Title
         to: readBackTitle";
+                case "setDynamicValueProperty":
+                case "setDictionaryItem":
+                case "setDictionaryValue":
+                case "setResponseProperty":
+                    return "      - type: " + actionType + @"
+        source: responseContent
+        propertyName: Title
+        value: Experimental title";
+                case "buildDynamicValue":
+                case "buildDictionary":
+                case "createDictionary":
+                    return "      - type: " + actionType + @"
+        to: responseContent
+        entries:
+          - key: Title
+            value: Test
+          - key: Count
+            value: 2
+            valueType: Int32";
                 case "createListItem":
                     return @"      - type: createListItem
         listId:
@@ -1191,6 +1764,49 @@ stages:
         text:
           variable: currentWebUrl
         to: readBackTitle";
+                case "buildUri":
+                    return @"      - type: buildUri
+        scheme: https
+        host: example.invalid
+        path: /api/test
+        to: readBackTitle";
+                case "getConfigurationValue":
+                    return @"      - type: getConfigurationValue
+        name: Microsoft.SharePoint.ActivationProperties.CultureName
+        defaultValue: en-US
+        to: readBackTitle";
+                case "getInstanceAddress":
+                    return @"      - type: getInstanceAddress
+        to: readBackTitle";
+                case "setUserStatus":
+                    return @"      - type: setUserStatus
+        description: Test status";
+                case "createTimeSpan":
+                    return @"      - type: createTimeSpan
+        days: 1
+        hours: 2
+        to: duration";
+                case "getTimeSpanFields":
+                    return @"      - type: getTimeSpanFields
+        input:
+          variable: duration
+        daysTo: outcome";
+                case "addToDate":
+                    return @"      - type: addToDate
+        input: 2026-05-10T00:00:00Z
+        days: 1
+        to: dueDate";
+                case "subtractFromDate":
+                    return @"      - type: subtractFromDate
+        input: 2026-05-10T00:00:00Z
+        days: 1
+        to: dueDate";
+                case "dateInRange":
+                    return @"      - type: dateInRange
+        input: 2026-05-10T00:00:00Z
+        start: 2026-05-01T00:00:00Z
+        end: 2026-05-31T00:00:00Z
+        to: approvedFlag";
                 case "lookupWorkflowContext":
                 case "lookupContextProperty":
                     return "      - type: " + actionType + @"

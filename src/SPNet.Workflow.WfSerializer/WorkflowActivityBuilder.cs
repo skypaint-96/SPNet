@@ -123,6 +123,9 @@ namespace SPNet.Workflow.WfSerializer
             if (valueType == typeof(bool)) return new InArgument<bool>(Convert.ToBoolean(defaultValue, CultureInfo.InvariantCulture));
             if (valueType == typeof(double)) return new InArgument<double>(Convert.ToDouble(defaultValue, CultureInfo.InvariantCulture));
             if (valueType == typeof(DateTime)) return new InArgument<DateTime>(Convert.ToDateTime(defaultValue, CultureInfo.InvariantCulture));
+            if (valueType == typeof(Guid)) return new InArgument<Guid>(defaultValue is Guid guid ? guid : Guid.Parse(Convert.ToString(defaultValue, CultureInfo.InvariantCulture) ?? string.Empty));
+            if (valueType == typeof(int)) return new InArgument<int>(Convert.ToInt32(defaultValue, CultureInfo.InvariantCulture));
+            if (valueType == typeof(object)) return new InArgument<object>(defaultValue);
             throw new InvalidOperationException("Unsupported parameter default type: " + valueType.FullName);
         }
     }
