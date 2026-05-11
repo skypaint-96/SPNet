@@ -46,6 +46,24 @@ namespace SPNet.Workflow.WfSerializer
             return new InArgument<string>(stringActivity);
         }
 
+        public static InArgument<bool> CreateBooleanInArgumentFromActivity(object expressionActivity)
+        {
+            if (!(expressionActivity is Activity<bool> boolActivity)) throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<Boolean>.");
+            return new InArgument<bool>(boolActivity);
+        }
+
+        public static InArgument<DateTime> CreateDateTimeInArgumentFromActivity(object expressionActivity)
+        {
+            if (!(expressionActivity is Activity<DateTime> dateTimeActivity)) throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<DateTime>.");
+            return new InArgument<DateTime>(dateTimeActivity);
+        }
+
+        public static InArgument<TimeSpan> CreateTimeSpanInArgumentFromActivity(object expressionActivity)
+        {
+            if (!(expressionActivity is Activity<TimeSpan> timeSpanActivity)) throw new InvalidOperationException(expressionActivity.GetType().FullName + " is not an Activity<TimeSpan>.");
+            return new InArgument<TimeSpan>(timeSpanActivity);
+        }
+
         public static object CreateOutArgument(Type resultType, string variableName)
         {
             var argumentReferenceType = typeof(ArgumentReference<>).MakeGenericType(resultType);

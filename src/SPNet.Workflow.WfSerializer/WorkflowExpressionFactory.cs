@@ -158,11 +158,15 @@ namespace SPNet.Workflow.WfSerializer
             if (type == "containsstring" || type == "contains") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.ContainsString");
             if (type == "startswithstring" || type == "startswith") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.StartsWithString");
             if (type == "endswithstring" || type == "endswith") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.EndsWithString");
-            if (type == "parseboolean" || type == "parsebool") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(bool), FindOptionalExpressionType("Microsoft.Activities.Expressions.ParseBoolean"), "Value");
+            if (type == "parseboolean" || type == "parsebool") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(bool), FindOptionalExpressionType("Microsoft.Activities.Expressions.ParseBoolean"), "Input");
             if (type == "concatstring" || type == "concat") return CreateConcatStringExpression(expression, resultType);
             if (type == "currentdate") return CreateParameterlessExpression(expression, resultType, typeof(DateTime), valueExpressionTypes.CurrentDateExpression);
             if (type == "newguid") return CreateParameterlessExpression(expression, resultType, typeof(Guid), valueExpressionTypes.NewGuidExpression);
             if (type == "parseguid") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(Guid), valueExpressionTypes.ParseGuidExpression, "Value");
+            if (type == "createtimespan") return CreateCreateTimeSpanExpression(expression, resultType);
+            if (type == "addtodate") return CreateDateOffsetExpression(expression, resultType, valueExpressionTypes.AddToDate);
+            if (type == "subtractfromdate") return CreateDateOffsetExpression(expression, resultType, valueExpressionTypes.SubtractFromDate);
+            if (type == "dateinrange") return CreateDateInRangeExpression(expression, resultType);
             if (type == "containsdynamicvalueproperty" || type == "containsdictionaryproperty") return CreateContainsDynamicValuePropertyExpression(expression, resultType);
             if (type == "isemptydynamicvalue" || type == "isemptydictionary") return CreateIsEmptyDynamicValueExpression(expression, resultType);
             if (type == "parsedate" || type == "parseutcdate" || type == "parseSpDate".ToLowerInvariant()) return CreateParseDateExpression(expression, resultType);
@@ -291,6 +295,51 @@ namespace SPNet.Workflow.WfSerializer
             ActivityReflectionWriter.SetProperty(contains, "Source", CreateDynamicValueObjectArgument(expression.Source ?? expression.Value ?? new ExpressionYaml()));
             ActivityReflectionWriter.SetProperty(contains, "PropertyName", ToInArgument<string>(string.IsNullOrWhiteSpace(expression.PropertyName) ? new ExpressionYaml { Literal = Convert.ToString(expression.Literal ?? string.Empty) ?? string.Empty } : new ExpressionYaml { Literal = expression.PropertyName }));
             return contains;
+        }
+
+        private object CreateCreateTimeSpanExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.CreateTimeSpan == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(TimeSpan));
+            var timeSpan = ActivityReflectionWriter.Create(valueExpressionTypes.CreateTimeSpan);
+            ActivityReflectionWriter.SetProperty(timeSpan, "Days", ToInArgument<double>(expression.Days ?? new ExpressionYaml { Literal = 0 }));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Hours", ToInArgument<double>(expression.Hours ?? new ExpressionYaml { Literal = 0 }));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Minutes", ToInArgument<double>(expression.Minutes ?? new ExpressionYaml { Literal = 0 }));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Seconds", ToInArgument<double>(expression.Seconds ?? new ExpressionYaml { Literal = 0 }));
+            return timeSpan;
+        }
+
+        private object CreateDateOffsetExpression(ExpressionYaml expression, Type resultType, Type? expressionType)
+        {
+            if (expressionType == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(DateTime));
+            var offset = ActivityReflectionWriter.Create(expressionType);
+            ActivityReflectionWriter.SetProperty(offset, "Input", ToInArgument<DateTime>(expression.Input ?? expression.Value ?? new ExpressionYaml()));
+            if (HasExpression(expression.TimeSpan)) ActivityReflectionWriter.SetProperty(offset, "TimeSpan", ToInArgument<TimeSpan>(expression.TimeSpan ?? new ExpressionYaml()));
+            SetNumericInArgumentIfWritable(offset, "Days", expression.Days ?? new ExpressionYaml { Literal = 0 });
+            SetNumericInArgumentIfWritable(offset, "Hours", expression.Hours ?? new ExpressionYaml { Literal = 0 });
+            SetNumericInArgumentIfWritable(offset, "Minutes", expression.Minutes ?? new ExpressionYaml { Literal = 0 });
+            SetNumericInArgumentIfWritable(offset, "Seconds", expression.Seconds ?? new ExpressionYaml { Literal = 0 });
+            return offset;
+        }
+
+        private void SetNumericInArgumentIfWritable(object activity, string propertyName, ExpressionYaml expression)
+        {
+            var property = activity.GetType().GetProperty(propertyName);
+            if (property == null || !property.CanWrite) return;
+            if (property.PropertyType == typeof(InArgument<int>)) ActivityReflectionWriter.SetProperty(activity, propertyName, ToInArgument<int>(expression));
+            else ActivityReflectionWriter.SetProperty(activity, propertyName, ToInArgument<double>(expression));
+        }
+
+        private object CreateDateInRangeExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.DateInRange == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(bool));
+            var range = ActivityReflectionWriter.Create(valueExpressionTypes.DateInRange);
+            ActivityReflectionWriter.SetProperty(range, "Input", ToInArgument<DateTime>(expression.Input ?? expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(range, "Start", ToInArgument<DateTime>(expression.Start ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(range, "End", ToInArgument<DateTime>(expression.End ?? new ExpressionYaml()));
+            return range;
         }
 
         private object CreateIsEmptyDynamicValueExpression(ExpressionYaml expression, Type resultType)

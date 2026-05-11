@@ -17,7 +17,7 @@ namespace SPNet.Workflow.WfSerializer
         {
             // These are structured Microsoft.Activities proxy expression activities that SharePoint Workflow Manager accepts.
             // Do not replace them with raw VisualBasicValue/VisualBasicReference/CSharpValue/CSharpReference nodes; those require compilation and fail publish validation.
-            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type? toLowerCase, Type? toUpperCase, Type? stringLength, Type? concatString, Type? currentDate, Type? newGuid, Type? parseGuid, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type? lookupListItemIntProperty, Type? lookupListItemGuid, Type buildDictionary, Type dynamicValue, Type? parseDate, Type? convertTimeZoneFromSpLocalToUtc, Type? parseDynamicValue, Type? containsDynamicValueProperty, Type? isEmptyDynamicValue)
+            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type? toLowerCase, Type? toUpperCase, Type? stringLength, Type? concatString, Type? currentDate, Type? newGuid, Type? parseGuid, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type? lookupListItemIntProperty, Type? lookupListItemGuid, Type buildDictionary, Type dynamicValue, Type? parseDate, Type? convertTimeZoneFromSpLocalToUtc, Type? parseDynamicValue, Type? containsDynamicValueProperty, Type? isEmptyDynamicValue, Type? createTimeSpan, Type? addToDate, Type? subtractFromDate, Type? dateInRange)
             {
                 ToStringExpression = toString;
                 ReplaceStringExpression = replaceString;
@@ -43,6 +43,10 @@ namespace SPNet.Workflow.WfSerializer
                 ParseDynamicValue = parseDynamicValue;
                 ContainsDynamicValueProperty = containsDynamicValueProperty;
                 IsEmptyDynamicValue = isEmptyDynamicValue;
+                CreateTimeSpan = createTimeSpan;
+                AddToDate = addToDate;
+                SubtractFromDate = subtractFromDate;
+                DateInRange = dateInRange;
             }
 
             public Type ToStringExpression { get; }
@@ -69,6 +73,10 @@ namespace SPNet.Workflow.WfSerializer
             public Type? ParseDynamicValue { get; }
             public Type? ContainsDynamicValueProperty { get; }
             public Type? IsEmptyDynamicValue { get; }
+            public Type? CreateTimeSpan { get; }
+            public Type? AddToDate { get; }
+            public Type? SubtractFromDate { get; }
+            public Type? DateInRange { get; }
         }
 
         internal sealed class ComparisonExpressionTypes

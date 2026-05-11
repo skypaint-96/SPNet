@@ -145,6 +145,15 @@ namespace SPNet.Workflow.WfSerializer
             Register<StringReplaceActionYaml>(builders, (action, context) => BuildStringReplace(action, context.ValueExpressionTypes, context.VariableTypes));
             Register<StringSubstringActionYaml>(builders, (action, context) => BuildStringSubstring(action, context.ValueExpressionTypes, context.VariableTypes));
             Register<StringTrimActionYaml>(builders, (action, context) => BuildStringTrim(action, context.ValueExpressionTypes, context.VariableTypes));
+            Register<BuildUriActionYaml>(builders, (action, context) => BuildBuildUri(action, context.GetProxyActivityType("BuildUri"), context.ValueExpressionTypes, context.VariableTypes));
+            Register<GetConfigurationValueActionYaml>(builders, (action, context) => BuildGetConfigurationValue(action, context.GetProxyActivityType("GetConfigurationValue"), context.ValueExpressionTypes, context.VariableTypes));
+            Register<GetInstanceAddressActionYaml>(builders, (action, context) => BuildGetInstanceAddress(action, context.GetProxyActivityType("GetInstanceAddress"), context.VariableTypes));
+            Register<SetUserStatusActionYaml>(builders, (action, context) => BuildSetUserStatus(action, context.GetProxyActivityType("SetUserStatus"), context.ValueExpressionTypes));
+            Register<CreateTimeSpanActionYaml>(builders, (action, context) => BuildCreateTimeSpan(action, context.GetProxyActivityType("CreateTimeSpan"), context.ValueExpressionTypes, context.VariableTypes));
+            Register<GetTimeSpanFieldsActionYaml>(builders, (action, context) => BuildGetTimeSpanFields(action, context.GetProxyActivityType("GetTimeSpanFields"), context.ValueExpressionTypes));
+            Register<AddToDateActionYaml>(builders, (action, context) => BuildDateOffset(action, context.GetProxyActivityType("AddToDate"), context.ValueExpressionTypes, context.VariableTypes));
+            Register<SubtractFromDateActionYaml>(builders, (action, context) => BuildDateOffset(action, context.GetProxyActivityType("SubtractFromDate"), context.ValueExpressionTypes, context.VariableTypes));
+            Register<DateInRangeActionYaml>(builders, (action, context) => BuildDateInRange(action, context.GetProxyActivityType("DateInRange"), context.ValueExpressionTypes, context.VariableTypes));
             Register<LookupWorkflowContextActionYaml>(builders, (action, context) => BuildLookupWorkflowContext(action, context.GetProxyActivityType("LookupWorkflowContextProperty")));
             Register<GetCurrentListIdActionYaml>(builders, (action, context) => BuildGetCurrentListId(action, context.GetProxyActivityType("GetCurrentListId")));
             Register<GetCurrentItemGuidActionYaml>(builders, (action, context) => BuildGetCurrentItemGuid(action, context.GetProxyActivityType("GetCurrentItemGuid")));

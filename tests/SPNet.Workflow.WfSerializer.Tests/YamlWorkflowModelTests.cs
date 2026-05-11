@@ -45,6 +45,15 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("substringString", typeof(StringSubstringActionYaml))]
         [DataRow("trimString", typeof(StringTrimActionYaml))]
         [DataRow("stringTrim", typeof(StringTrimActionYaml))]
+        [DataRow("buildUri", typeof(BuildUriActionYaml))]
+        [DataRow("getConfigurationValue", typeof(GetConfigurationValueActionYaml))]
+        [DataRow("getInstanceAddress", typeof(GetInstanceAddressActionYaml))]
+        [DataRow("setUserStatus", typeof(SetUserStatusActionYaml))]
+        [DataRow("createTimeSpan", typeof(CreateTimeSpanActionYaml))]
+        [DataRow("getTimeSpanFields", typeof(GetTimeSpanFieldsActionYaml))]
+        [DataRow("addToDate", typeof(AddToDateActionYaml))]
+        [DataRow("subtractFromDate", typeof(SubtractFromDateActionYaml))]
+        [DataRow("dateInRange", typeof(DateInRangeActionYaml))]
         public void Load_RecognizesSupportedActionAliases(string actionType, Type expectedModelType)
         {
             var workflow = LoadYaml(CreateWorkflowYaml(CreateActionYaml(actionType)));
@@ -64,6 +73,15 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow(typeof(StringReplaceActionYaml))]
         [DataRow(typeof(StringSubstringActionYaml))]
         [DataRow(typeof(StringTrimActionYaml))]
+        [DataRow(typeof(BuildUriActionYaml))]
+        [DataRow(typeof(GetConfigurationValueActionYaml))]
+        [DataRow(typeof(GetInstanceAddressActionYaml))]
+        [DataRow(typeof(SetUserStatusActionYaml))]
+        [DataRow(typeof(CreateTimeSpanActionYaml))]
+        [DataRow(typeof(GetTimeSpanFieldsActionYaml))]
+        [DataRow(typeof(AddToDateActionYaml))]
+        [DataRow(typeof(SubtractFromDateActionYaml))]
+        [DataRow(typeof(DateInRangeActionYaml))]
         [DataRow(typeof(BuildDynamicValueActionYaml))]
         [DataRow(typeof(SetDynamicValuePropertyActionYaml))]
         [DataRow(typeof(WhileActionYaml))]
@@ -285,6 +303,11 @@ stages:
         [DataRow("replaceString", "replaceString action requires 'to'.")]
         [DataRow("substring", "substring action requires 'to'.")]
         [DataRow("trimString", "trimString action requires 'to'.")]
+        [DataRow("buildUri", "buildUri action requires 'to'.")]
+        [DataRow("getConfigurationValue", "getConfigurationValue action requires 'name'.")]
+        [DataRow("getInstanceAddress", "getInstanceAddress action requires 'to'.")]
+        [DataRow("createTimeSpan", "createTimeSpan action requires 'to'.")]
+        [DataRow("dateInRange", "dateInRange action requires 'to'.")]
         public void Load_ValidatesRequiredActionFields(string actionType, string expectedMessage)
         {
             var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(CreateWorkflowYaml("      - type: " + actionType)));
@@ -341,6 +364,80 @@ stages:
             Assert.AreEqual(2, action.Entries.Count);
             Assert.AreEqual("Count", action.Entries[1].Key);
             Assert.AreEqual("Int32", action.Entries[1].ValueType);
+        }
+
+        [TestMethod]
+        public void Load_AllowsDevOnlyBatch1AndTimeSpanActions()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: DevOnlyBatch1AndTimeSpan
+variables:
+  - name: uriResult
+    type: String
+  - name: configValue
+    type: String
+  - name: instanceAddress
+    type: String
+  - name: duration
+    type: TimeSpan
+  - name: dateValue
+    type: DateTime
+  - name: boolValue
+    type: Boolean
+  - name: days
+    type: Int32
+stages:
+  - name: Stage 1
+    actions:
+      - type: buildUri
+        scheme: https
+        host: example.invalid
+        path: /api/test
+        to: uriResult
+      - type: getConfigurationValue
+        name: Microsoft.SharePoint.ActivationProperties.CultureName
+        defaultValue: en-US
+        to: configValue
+      - type: getInstanceAddress
+        to: instanceAddress
+      - type: setUserStatus
+        description: Dev-only status
+      - type: createTimeSpan
+        days: 1
+        hours: 2
+        to: duration
+      - type: getTimeSpanFields
+        input:
+          variable: duration
+        daysTo: days
+      - type: addToDate
+        input: 2026-05-10T00:00:00Z
+        timeSpan:
+          variable: duration
+        to: dateValue
+      - type: subtractFromDate
+        input:
+          variable: dateValue
+        days: 1
+        to: dateValue
+      - type: dateInRange
+        input:
+          variable: dateValue
+        start: 2026-05-01T00:00:00Z
+        end: 2026-05-31T00:00:00Z
+        to: boolValue
+");
+
+            var actions = workflow.Stages.Single().Actions;
+            Assert.IsTrue(actions.OfType<BuildUriActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<GetConfigurationValueActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<GetInstanceAddressActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<SetUserStatusActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<CreateTimeSpanActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<GetTimeSpanFieldsActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<AddToDateActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<SubtractFromDateActionYaml>().Any());
+            Assert.IsTrue(actions.OfType<DateInRangeActionYaml>().Any());
         }
 
         [TestMethod]
@@ -1543,6 +1640,12 @@ variables:
     type: String
   - name: outcome
     type: Int32
+  - name: duration
+    type: TimeSpan
+  - name: dueDate
+    type: DateTime
+  - name: approvedFlag
+    type: Boolean
 stages:
   - name: Stage 1
     actions:
@@ -1661,6 +1764,49 @@ stages:
         text:
           variable: currentWebUrl
         to: readBackTitle";
+                case "buildUri":
+                    return @"      - type: buildUri
+        scheme: https
+        host: example.invalid
+        path: /api/test
+        to: readBackTitle";
+                case "getConfigurationValue":
+                    return @"      - type: getConfigurationValue
+        name: Microsoft.SharePoint.ActivationProperties.CultureName
+        defaultValue: en-US
+        to: readBackTitle";
+                case "getInstanceAddress":
+                    return @"      - type: getInstanceAddress
+        to: readBackTitle";
+                case "setUserStatus":
+                    return @"      - type: setUserStatus
+        description: Test status";
+                case "createTimeSpan":
+                    return @"      - type: createTimeSpan
+        days: 1
+        hours: 2
+        to: duration";
+                case "getTimeSpanFields":
+                    return @"      - type: getTimeSpanFields
+        input:
+          variable: duration
+        daysTo: outcome";
+                case "addToDate":
+                    return @"      - type: addToDate
+        input: 2026-05-10T00:00:00Z
+        days: 1
+        to: dueDate";
+                case "subtractFromDate":
+                    return @"      - type: subtractFromDate
+        input: 2026-05-10T00:00:00Z
+        days: 1
+        to: dueDate";
+                case "dateInRange":
+                    return @"      - type: dateInRange
+        input: 2026-05-10T00:00:00Z
+        start: 2026-05-01T00:00:00Z
+        end: 2026-05-31T00:00:00Z
+        to: approvedFlag";
                 case "lookupWorkflowContext":
                 case "lookupContextProperty":
                     return "      - type: " + actionType + @"

@@ -16,6 +16,17 @@ namespace SPNet.Workflow.WfSerializer
             foreach (var target in actions.OfType<StringReplaceActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<StringSubstringActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<StringTrimActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<BuildUriActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<GetConfigurationValueActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<GetInstanceAddressActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<CreateTimeSpanActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(TimeSpan));
+            foreach (var action in actions.OfType<GetTimeSpanFieldsActionYaml>())
+            {
+                foreach (var target in new[] { action.DaysTo, action.HoursTo, action.MinutesTo, action.SecondsTo }) AddIfMissing(variableTypes, target, typeof(int));
+                foreach (var target in new[] { action.TotalDaysTo, action.TotalHoursTo, action.TotalMinutesTo, action.TotalSecondsTo }) AddIfMissing(variableTypes, target, typeof(double));
+            }
+            foreach (var target in actions.OfType<DateOffsetActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(DateTime));
+            foreach (var target in actions.OfType<DateInRangeActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(bool));
             foreach (var target in actions.OfType<LookupListItemStringPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<LookupListItemIntPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(int));
             foreach (var target in actions.OfType<CallHttpWebServiceActionYaml>().SelectMany(a => new[] { a.ResponseContentTo, a.ResponseHeadersTo })) AddIfMissing(variableTypes, target, dynamicValueType);

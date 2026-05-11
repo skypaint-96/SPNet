@@ -49,6 +49,15 @@ namespace SPNet.Workflow.WfSerializer
             IsEmptyDynamicValueExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.IsEmptyDynamicValue");
             CountDynamicValueItems = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.CountDynamicValueItems");
             BuildDynamicValue = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildDynamicValue");
+            BuildUri = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildUri");
+            GetConfigurationValue = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.GetConfigurationValue");
+            GetInstanceAddress = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.GetInstanceAddress");
+            SetUserStatus = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.SetUserStatus");
+            CreateTimeSpanExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.CreateTimeSpan");
+            GetTimeSpanFieldsExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.GetTimeSpanFields");
+            AddToDateExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.AddToDate");
+            SubtractFromDateExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.SubtractFromDate");
+            DateInRangeExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.DateInRange");
             ConvertTimeZoneFromSPLocalToUtc = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.ConvertTimeZoneFromSPLocalToUtc");
             DynamicValue = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.DynamicValue");
             BuildDictionary = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildDictionary`2").MakeGenericType(typeof(string), typeof(object));
@@ -96,13 +105,22 @@ namespace SPNet.Workflow.WfSerializer
         public Type? IsEmptyDynamicValueExpression { get; }
         public Type? CountDynamicValueItems { get; }
         public Type? BuildDynamicValue { get; }
+        public Type? BuildUri { get; }
+        public Type? GetConfigurationValue { get; }
+        public Type? GetInstanceAddress { get; }
+        public Type? SetUserStatus { get; }
+        public Type? CreateTimeSpanExpression { get; }
+        public Type? GetTimeSpanFieldsExpression { get; }
+        public Type? AddToDateExpression { get; }
+        public Type? SubtractFromDateExpression { get; }
+        public Type? DateInRangeExpression { get; }
         public Type? ConvertTimeZoneFromSPLocalToUtc { get; }
         public Type DynamicValue { get; }
         public Type BuildDictionary { get; }
         public WfActivityBuilderSerializer.ComparisonExpressionTypes ComparisonExpressionTypes { get; }
 
         public WfActivityBuilderSerializer.ValueExpressionTypes CreateValueExpressionTypes() =>
-            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, ToLowerCaseExpression, ToUpperCaseExpression, StringLengthExpression, ConcatStringExpression, CurrentDateExpression, NewGuidExpression, ParseGuidExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemGuid, BuildDictionary, DynamicValue, ParseDateExpression, ConvertTimeZoneFromSPLocalToUtc, ParseDynamicValueExpression, ContainsDynamicValuePropertyExpression, IsEmptyDynamicValueExpression);
+            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, ToLowerCaseExpression, ToUpperCaseExpression, StringLengthExpression, ConcatStringExpression, CurrentDateExpression, NewGuidExpression, ParseGuidExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemGuid, BuildDictionary, DynamicValue, ParseDateExpression, ConvertTimeZoneFromSPLocalToUtc, ParseDynamicValueExpression, ContainsDynamicValuePropertyExpression, IsEmptyDynamicValueExpression, CreateTimeSpanExpression, AddToDateExpression, SubtractFromDateExpression, DateInRangeExpression);
 
         public Dictionary<string, Type> CreateBuildContextTypes()
         {
@@ -135,6 +153,15 @@ namespace SPNet.Workflow.WfSerializer
             if (CountDynamicValueItems != null) types["CountDynamicValueItems"] = CountDynamicValueItems;
             if (BuildDynamicValue != null) types["BuildDynamicValue"] = BuildDynamicValue;
             if (SetDynamicValueProperty != null) types["SetDynamicValueProperty"] = SetDynamicValueProperty;
+            if (BuildUri != null) types["BuildUri"] = BuildUri;
+            if (GetConfigurationValue != null) types["GetConfigurationValue"] = GetConfigurationValue;
+            if (GetInstanceAddress != null) types["GetInstanceAddress"] = GetInstanceAddress;
+            if (SetUserStatus != null) types["SetUserStatus"] = SetUserStatus;
+            if (CreateTimeSpanExpression != null) types["CreateTimeSpan"] = CreateTimeSpanExpression;
+            if (GetTimeSpanFieldsExpression != null) types["GetTimeSpanFields"] = GetTimeSpanFieldsExpression;
+            if (AddToDateExpression != null) types["AddToDate"] = AddToDateExpression;
+            if (SubtractFromDateExpression != null) types["SubtractFromDate"] = SubtractFromDateExpression;
+            if (DateInRangeExpression != null) types["DateInRange"] = DateInRangeExpression;
             return types;
         }
 

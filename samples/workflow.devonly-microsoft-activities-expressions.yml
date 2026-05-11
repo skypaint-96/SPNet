@@ -48,6 +48,20 @@ variables:
     type: Boolean
   - name: payloadIsEmpty
     type: Boolean
+  - name: builtUri
+    type: String
+  - name: cultureName
+    type: String
+  - name: instanceAddress
+    type: String
+  - name: duration
+    type: TimeSpan
+  - name: durationDays
+    type: Int32
+  - name: futureDate
+    type: DateTime
+  - name: dateInRangeResult
+    type: Boolean
 stages:
   - name: Stage 1
     actions:
@@ -180,10 +194,56 @@ stages:
           type: isEmptyDynamicValue
           source:
             variable: payload
+      - type: buildUri
+        scheme: https
+        host: example.invalid
+        path: /_api/web
+        query: $select=Title
+        to: builtUri
+      - type: getConfigurationValue
+        name: Microsoft.SharePoint.ActivationProperties.CultureName
+        defaultValue: en-US
+        to: cultureName
+      - type: getInstanceAddress
+        to: instanceAddress
+      - type: setUserStatus
+        description:
+          type: formatString
+          literal: '{}DEV-ONLY hidden Microsoft.Activities status; culture={0}'
+          values:
+            -
+              variable: cultureName
+      - type: createTimeSpan
+        days: 1
+        hours: 2
+        minutes: 30
+        seconds: 0
+        to: duration
+      - type: getTimeSpanFields
+        input:
+          variable: duration
+        daysTo: durationDays
+      - type: addToDate
+        input:
+          variable: nowValue
+        timeSpan:
+          variable: duration
+        to: futureDate
+      - type: subtractFromDate
+        input:
+          variable: futureDate
+        days: 1
+        to: futureDate
+      - type: dateInRange
+        input:
+          variable: futureDate
+        start: 2000-01-01T00:00:00Z
+        end: 2099-12-31T23:59:59Z
+        to: dateInRangeResult
       - type: writeHistory
         message:
           type: formatString
-          literal: '{}DEV-ONLY Microsoft.Activities expressions: {0}; replaced={1}; substring={2}; index={3}; parsedBool={4}; hasTitle={5}; empty={6}'
+          literal: '{}DEV-ONLY Microsoft.Activities expressions: {0}; replaced={1}; substring={2}; index={3}; parsedBool={4}; hasTitle={5}; empty={6}; uri={7}; durationDays={8}; inRange={9}'
           values:
             -
               variable: concatText
@@ -203,3 +263,11 @@ stages:
             -
               toString:
                 variable: payloadIsEmpty
+            -
+              variable: builtUri
+            -
+              toString:
+                variable: durationDays
+            -
+              toString:
+                variable: dateInRangeResult
