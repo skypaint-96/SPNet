@@ -346,9 +346,16 @@ namespace SPNet.Workflow.WfSerializer
             if (activity.Name.LocalName.Equals("ToString", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { ToString = ReadActivityPropertyExpression(activity, "Object") };
             if (activity.Name.LocalName.Equals("Cast", StringComparison.OrdinalIgnoreCase)) return ReadCastOperandExpression(activity);
             if (activity.Name.LocalName.Equals("ConvertTimeZoneFromSPLocalToUtc", StringComparison.OrdinalIgnoreCase)) return ReadActivityPropertyExpression(activity, "Input");
-            if (activity.Name.LocalName.Equals("ParseDate", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "parseDate", Value = ReadActivityPropertyExpression(activity, "Value"), ValueType = "DateTime" };
-            if (activity.Name.LocalName.Equals("ParseDynamicValue", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "parseDynamicValue", Value = ReadActivityPropertyExpression(activity, "Json"), ValueType = "DynamicValue" };
+            if (activity.Name.LocalName.Equals("ParseDate", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "parseDate", Value = ReadActivityPropertyExpression(activity, "Value"), ValueType = "DateTime", DesignerId = ReadDesignerId(activity) };
+            if (activity.Name.LocalName.Equals("ParseDynamicValue", StringComparison.OrdinalIgnoreCase)) return new ExpressionYaml { Type = "parseDynamicValue", Value = ReadActivityPropertyExpression(activity, "Json"), ValueType = "DynamicValue", DesignerId = ReadDesignerId(activity) };
             return new ExpressionYaml { Literal = "<exported expression>" };
+        }
+
+        private static string ReadDesignerId(XElement activity)
+        {
+            return activity.Elements().FirstOrDefault(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes")
+                ?.Descendants().FirstOrDefault(e => e.Name.LocalName == "String" && string.Equals((string?)e.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")), "Id", StringComparison.OrdinalIgnoreCase))
+                ?.Value ?? string.Empty;
         }
 
         private static ExpressionYaml ReadCastOperandExpression(XElement activity)

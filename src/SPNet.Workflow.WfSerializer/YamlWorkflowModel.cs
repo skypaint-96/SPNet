@@ -1000,6 +1000,8 @@ namespace SPNet.Workflow.WfSerializer
         public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
         /// <summary>Gets or sets optional CLR/XAML type metadata used when an object-valued field expression must preserve a non-string type.</summary>
         public string ValueType { get; set; } = string.Empty;
+        /// <summary>Gets or sets the optional SharePoint Designer custom attribute Id for expression activities.</summary>
+        public string DesignerId { get; set; } = string.Empty;
         /// <summary>Gets or sets a nested expression to convert to string.</summary>
         public new ExpressionYaml? ToString { get; set; }
     }
@@ -1017,7 +1019,7 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             return rootDeserializer(typeof(ExpressionYamlSurrogate)) is ExpressionYamlSurrogate s
-                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), ValueType = s.ValueType ?? string.Empty, ToString = s.ToString }
+                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), ValueType = s.ValueType ?? string.Empty, DesignerId = s.DesignerId ?? string.Empty, ToString = s.ToString }
                 : new ExpressionYaml();
         }
 
@@ -1042,6 +1044,7 @@ namespace SPNet.Workflow.WfSerializer
             if (expression.Value != null) WriteObject(emitter, serializer, "value", expression.Value);
             if (expression.Values != null && expression.Values.Count > 0) WriteObject(emitter, serializer, "values", expression.Values);
             if (!string.IsNullOrWhiteSpace(expression.ValueType)) WriteScalar(emitter, "valueType", expression.ValueType);
+            if (!string.IsNullOrWhiteSpace(expression.DesignerId)) WriteScalar(emitter, "designerId", expression.DesignerId);
             if (expression.ToString != null) WriteObject(emitter, serializer, "toString", expression.ToString);
             emitter.Emit(new MappingEnd());
         }
@@ -1058,6 +1061,7 @@ namespace SPNet.Workflow.WfSerializer
             expression.Value == null &&
             (expression.Values == null || expression.Values.Count == 0) &&
             string.IsNullOrWhiteSpace(expression.ValueType) &&
+            string.IsNullOrWhiteSpace(expression.DesignerId) &&
             expression.ToString == null;
 
         private static void WriteScalar(IEmitter emitter, string name, string value)
@@ -1085,6 +1089,7 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml? Value { get; set; }
             public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
             public string ValueType { get; set; } = string.Empty;
+            public string DesignerId { get; set; } = string.Empty;
             public new ExpressionYaml? ToString { get; set; }
         }
     }

@@ -75,7 +75,7 @@ namespace SPNet.Workflow.WfSerializer
         public static void SerializeYamlWorkflow(string workflowYamlPath, string outputXamlPath, string cacheFolder, SpNetToolConfig config)
         {
             var workflow = WorkflowYaml.Load(workflowYamlPath);
-            SerializeWorkflow(BuildWorkflowFromYaml(workflow, cacheFolder), outputXamlPath, cacheFolder);
+            SerializeWorkflow(BuildWorkflowFromYaml(workflow, cacheFolder), outputXamlPath, cacheFolder, workflow);
             WriteParameterFormFieldSidecar(workflow, outputXamlPath);
         }
 
@@ -249,6 +249,11 @@ namespace SPNet.Workflow.WfSerializer
         /// <param name="cacheFolder">SharePoint Designer WebsiteCache folder containing required proxy assemblies.</param>
         public static void SerializeWorkflow(ActivityBuilder builder, string outputXamlPath, string cacheFolder)
         {
+            SerializeWorkflow(builder, outputXamlPath, cacheFolder, null);
+        }
+
+        private static void SerializeWorkflow(ActivityBuilder builder, string outputXamlPath, string cacheFolder, WorkflowYaml? sourceWorkflow)
+        {
             if (builder == null) throw new ArgumentNullException(nameof(builder));
             if (string.IsNullOrWhiteSpace(outputXamlPath)) throw new ArgumentException("Output XAML path is required.", nameof(outputXamlPath));
             if (string.IsNullOrWhiteSpace(cacheFolder)) throw new ArgumentException("SharePoint Designer cache folder is required.", nameof(cacheFolder));
@@ -262,7 +267,7 @@ namespace SPNet.Workflow.WfSerializer
             {
                 LoadManagedDlls(resolvedCacheFolder);
                 LoadRequiredAssembly(resolvedCacheFolder, MicrosoftActivitiesProxyAssemblyName);
-                File.WriteAllText(outputPath, AddSharePointDesignerMetadata(SerializeBuilder(builder), builder.Name));
+                File.WriteAllText(outputPath, AddSharePointDesignerMetadata(SerializeBuilder(builder), builder.Name, sourceWorkflow));
             }
         }
 
@@ -273,6 +278,11 @@ namespace SPNet.Workflow.WfSerializer
         /// <param name="workflowName">Friendly workflow name used for default stage metadata.</param>
         /// <returns>XAML with SharePoint Designer metadata applied.</returns>
         public static string AddSharePointDesignerMetadata(string xaml, string workflowName)
+        {
+            return AddSharePointDesignerMetadata(xaml, workflowName, null);
+        }
+
+        private static string AddSharePointDesignerMetadata(string xaml, string workflowName, WorkflowYaml? sourceWorkflow)
         {
             if (string.IsNullOrWhiteSpace(xaml)) throw new ArgumentException("Workflow XAML is required.", nameof(xaml));
 
@@ -293,8 +303,10 @@ namespace SPNet.Workflow.WfSerializer
             RemoveTopLevelSequenceDisplayName(root);
             EnsureLifecycleListItemPropertiesElements(document);
             EnsureInitBlock(document, root);
-            EnsureExpressionIds(document);
+            EnsureExpressionIds(document, sourceWorkflow == null ? null : CreateDesignerExpressionIdMap(sourceWorkflow));
             EnsureConditionExpressionResultPlaceholders(document);
+            EnsureOperandExpressionResultPlaceholders(document);
+            EnsureConditionOperandDesignerArgumentShape(document);
 
             var firstStageContainer = document.Descendants(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes")
                 .Any(e => e.Descendants(XamlNamespace + "String").Any(s => ((string?)s.Attribute(XamlNamespace + "Key")) == "StageAttribute" && ((string?)s ?? string.Empty).StartsWith("StageContainer-", StringComparison.OrdinalIgnoreCase)));
@@ -431,26 +443,132 @@ namespace SPNet.Workflow.WfSerializer
             else lastPropertyElement.AddAfterSelf(initBlock);
         }
 
-        private static void EnsureExpressionIds(XDocument document)
+        public static string AddSharePointDesignerMetadataForTest(string xaml, string workflowName, WorkflowYaml sourceWorkflow)
+        {
+            return AddSharePointDesignerMetadata(xaml, workflowName, sourceWorkflow);
+        }
+
+        private static void EnsureExpressionIds(XDocument document, IReadOnlyDictionary<string, Queue<string>>? preservedIds)
         {
             foreach (var expression in document.Descendants().Where(IsExpressionActivityElement).ToList())
             {
                 var existing = expression.Elements(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes")
                     .Any(e => e.Descendants(XamlNamespace + "String").Any(s => string.Equals((string?)s.Attribute(XamlNamespace + "Key"), "Id", StringComparison.OrdinalIgnoreCase)));
                 if (existing) continue;
-                expression.AddFirst(CreateCustomDictionaryAttribute("Id", SpdExpressionIdAttribute));
+                var id = TryDequeueDesignerId(preservedIds, expression.Name.LocalName) ?? SpdExpressionIdAttribute;
+                expression.AddFirst(CreateCustomDictionaryAttribute("Id", id));
             }
         }
 
-        private static bool IsExpressionActivityElement(XElement element) =>
-            element.Name.NamespaceName == "http://schemas.microsoft.com/workflow/2012/07/xaml/activities" &&
-            element.Name.LocalName == "ToString";
+        private static string? TryDequeueDesignerId(IReadOnlyDictionary<string, Queue<string>>? preservedIds, string activityName)
+        {
+            if (preservedIds == null || !preservedIds.TryGetValue(activityName, out var ids) || ids.Count == 0) return null;
+            return ids.Dequeue();
+        }
+
+        private static IReadOnlyDictionary<string, Queue<string>> CreateDesignerExpressionIdMap(WorkflowYaml workflow)
+        {
+            var ids = new Dictionary<string, Queue<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var expression in EnumerateExpressions(workflow.Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>())))
+            {
+                var activityName = GetDesignerExpressionActivityName(expression);
+                if (activityName == null || string.IsNullOrWhiteSpace(expression.DesignerId)) continue;
+                if (!ids.TryGetValue(activityName, out var queue)) ids[activityName] = queue = new Queue<string>();
+                queue.Enqueue(expression.DesignerId);
+            }
+
+            return ids;
+        }
+
+        private static IEnumerable<ExpressionYaml> EnumerateExpressions(IEnumerable<WorkflowActionYaml> actions)
+        {
+            foreach (var action in actions)
+            {
+                foreach (var expression in EnumerateExpressions(action)) yield return expression;
+                if (action is IfActionYaml ifAction)
+                {
+                    foreach (var expression in EnumerateExpressions(ifAction.Then ?? new List<WorkflowActionYaml>())) yield return expression;
+                    foreach (var expression in EnumerateExpressions(ifAction.Else ?? new List<WorkflowActionYaml>())) yield return expression;
+                }
+                else if (action is WhileActionYaml whileAction)
+                {
+                    foreach (var expression in EnumerateExpressions(whileAction.Actions ?? new List<WorkflowActionYaml>())) yield return expression;
+                }
+            }
+        }
+
+        private static IEnumerable<ExpressionYaml> EnumerateExpressions(WorkflowActionYaml action)
+        {
+            if (action is IfActionYaml ifAction) foreach (var expression in EnumerateExpressions(ifAction.Condition)) yield return expression;
+            if (action is WhileActionYaml whileAction) foreach (var expression in EnumerateExpressions(whileAction.Condition)) yield return expression;
+        }
+
+        private static IEnumerable<ExpressionYaml> EnumerateExpressions(ComparisonExpressionYaml condition)
+        {
+            foreach (var expression in EnumerateExpressions(condition.Left)) yield return expression;
+            foreach (var expression in EnumerateExpressions(condition.Right)) yield return expression;
+            if (condition.LeftCondition != null) foreach (var expression in EnumerateExpressions(condition.LeftCondition)) yield return expression;
+            if (condition.RightCondition != null) foreach (var expression in EnumerateExpressions(condition.RightCondition)) yield return expression;
+            if (condition.Operand != null) foreach (var expression in EnumerateExpressions(condition.Operand)) yield return expression;
+        }
+
+        private static IEnumerable<ExpressionYaml> EnumerateExpressions(ExpressionYaml? expression)
+        {
+            if (expression == null) yield break;
+            yield return expression;
+            foreach (var child in EnumerateExpressions(expression.ListId)) yield return child;
+            foreach (var child in EnumerateExpressions(expression.ItemId)) yield return child;
+            foreach (var child in EnumerateExpressions(expression.ItemGuid)) yield return child;
+            foreach (var child in EnumerateExpressions(expression.Value)) yield return child;
+            foreach (var value in expression.Values ?? new List<ExpressionYaml>()) foreach (var child in EnumerateExpressions(value)) yield return child;
+            foreach (var child in EnumerateExpressions(expression.ToString)) yield return child;
+        }
+
+        private static string? GetDesignerExpressionActivityName(ExpressionYaml expression)
+        {
+            var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+            if (type == "parsedate") return "ParseDate";
+            if (type == "parsedynamicvalue") return "ParseDynamicValue";
+            if (expression.ToString != null) return "ToString";
+            return null;
+        }
+
+        private static bool IsExpressionActivityElement(XElement element)
+        {
+            if (element.Name.NamespaceName == "http://schemas.microsoft.com/workflow/2012/07/xaml/activities")
+            {
+                switch (element.Name.LocalName)
+                {
+                    case "ToString":
+                    case "ParseDate":
+                    case "ParseDynamicValue":
+                        return true;
+                }
+            }
+
+            // SPD-authored date-equals-ignoring-time conditions do not attach SPDesignerXamlWriter.CustomAttributes
+            // directly to the ConvertTimeZoneFromSPLocalToUtc wrapper. The designer-visible expression identity belongs
+            // to the nested ParseDate operand only; adding an Id sibling on the timezone wrapper makes the subtree differ
+            // from Designer output and can hide the RHS token in SharePoint Designer.
+            return false;
+        }
 
         private static void EnsureConditionExpressionResultPlaceholders(XDocument document)
         {
             foreach (var condition in document.Descendants().Where(e => e.Name.LocalName == "If.Condition" || e.Name.LocalName == "While.Condition"))
             {
                 foreach (var expression in condition.Descendants().Where(IsBooleanConditionExpressionElement))
+                {
+                    if (expression.Attribute("Result") == null) expression.SetAttributeValue("Result", "{x:Null}");
+                }
+            }
+        }
+
+        private static void EnsureOperandExpressionResultPlaceholders(XDocument document)
+        {
+            foreach (var condition in document.Descendants().Where(e => e.Name.LocalName == "If.Condition" || e.Name.LocalName == "While.Condition"))
+            {
+                foreach (var expression in condition.Descendants().Where(IsOperandExpressionElement))
                 {
                     if (expression.Attribute("Result") == null) expression.SetAttributeValue("Result", "{x:Null}");
                 }
@@ -476,6 +594,7 @@ namespace SPNet.Workflow.WfSerializer
                     case "IsGreaterThan":
                     case "IsLessThanOrEqual":
                     case "IsGreaterThanOrEqual":
+                    case "ParseDynamicValue":
                         return true;
                 }
             }
@@ -489,11 +608,76 @@ namespace SPNet.Workflow.WfSerializer
                     case "IsGreaterThanOrEqualDateTime":
                     case "IsLessThanDateTime":
                     case "IsLessThanOrEqualDateTime":
+                    case "IsEqualDynamicValue":
                         return true;
                 }
             }
 
             return false;
+        }
+
+        private static bool IsOperandExpressionElement(XElement element)
+        {
+            if (element.Name.Namespace == Workflow2012ActivitiesNamespace)
+            {
+                switch (element.Name.LocalName)
+                {
+                    case "ParseDate":
+                    case "ParseDynamicValue":
+                        return true;
+                }
+            }
+
+            return element.Name.Namespace.NamespaceName.StartsWith("clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities", StringComparison.Ordinal) &&
+                element.Name.LocalName == "ConvertTimeZoneFromSPLocalToUtc";
+        }
+
+        private static void EnsureConditionOperandDesignerArgumentShape(XDocument document)
+        {
+            foreach (var condition in document.Descendants().Where(e => e.Name.LocalName == "If.Condition" || e.Name.LocalName == "While.Condition"))
+            {
+                foreach (var argumentValue in condition.Descendants().Where(e => e.Name.LocalName == "ArgumentValue").ToList())
+                {
+                    EnsureArgumentValueResult(argumentValue);
+                }
+
+                foreach (var parseDate in condition.Descendants(Workflow2012ActivitiesNamespace + "ParseDate").ToList())
+                {
+                    EnsureParseDateDesignerCultureName(parseDate);
+                }
+            }
+        }
+
+        private static void EnsureArgumentValueResult(XElement argumentValue)
+        {
+            var typeArguments = ((string?)argumentValue.Attribute(XamlNamespace + "TypeArguments")) ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(typeArguments)) return;
+            var resultElementName = argumentValue.Name.Namespace + (argumentValue.Name.LocalName + ".Result");
+            if (argumentValue.Elements().Any(e => e.Name.LocalName == "ArgumentValue.Result")) return;
+            argumentValue.Add(new XElement(resultElementName,
+                new XElement(ActivitiesNamespace + "OutArgument",
+                    new XAttribute(XamlNamespace + "TypeArguments", typeArguments))));
+        }
+
+        private static void EnsureParseDateDesignerCultureName(XElement parseDate)
+        {
+            if (parseDate.Elements().Any(e => e.Name.LocalName == "ParseDate.CultureName")) return;
+            var cultureAttribute = parseDate.Attribute("CultureName");
+            if (cultureAttribute == null) return;
+            cultureAttribute.Remove();
+            var customAttributes = parseDate.Elements(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes").ToList();
+            foreach (var customAttribute in customAttributes) customAttribute.Remove();
+            parseDate.AddFirst(new XElement(Workflow2012ActivitiesNamespace + "ParseDate.CultureName",
+                new XElement(ActivitiesNamespace + "InArgument",
+                    new XAttribute(XamlNamespace + "TypeArguments", "x:String"),
+                    new XElement(Workflow2012ActivitiesNamespace + "GetConfigurationValue",
+                        new XAttribute("DefaultValue", "{x:Null}"),
+                        new XAttribute("Name", "Microsoft.SharePoint.ActivationProperties.CultureName"),
+                        new XAttribute("Result", "{x:Null}")))));
+            foreach (var customAttribute in customAttributes)
+            {
+                parseDate.Elements().First(e => e.Name.LocalName == "ParseDate.CultureName").AddAfterSelf(customAttribute);
+            }
         }
 
         private static XElement CreateCustomDictionaryAttribute(string key, string value) =>

@@ -241,6 +241,13 @@ namespace SPNet.Workflow.WfSerializer.Tests
             return Path.Combine(relativeParts);
         }
 
+        private static string ReadDesignerId(XElement element)
+        {
+            return element.Elements().FirstOrDefault(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes")
+                ?.Descendants().FirstOrDefault(e => e.Name.LocalName == "String" && string.Equals((string?)e.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")), "Id", StringComparison.OrdinalIgnoreCase))
+                ?.Value ?? string.Empty;
+        }
+
         [TestMethod]
         public void ExportWorkflowYaml_RecognizesSingleTaskAction()
         {
@@ -506,6 +513,135 @@ namespace SPNet.Workflow.WfSerializer.Tests
 
             Assert.AreEqual(3, conditionExpressions.Count);
             Assert.IsTrue(conditionExpressions.All(e => (string)e.Attribute("Result") == "{x:Null}"), "SPD-authored condition expressions include explicit null Result placeholders so Designer can render the condition text.");
+        }
+
+        [TestMethod]
+        public void AddSharePointDesignerMetadata_AddsResultPlaceholdersAndIdsToOperandConversionExpressions()
+        {
+            var xaml = @"<Activity x:Class=""OperandExpressionWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:s=""clr-namespace:System;assembly=mscorlib"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy"" xmlns:local1=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy""><Flowchart><FlowStep><Sequence DisplayName=""Stage 1""><If><If.Condition><InArgument x:TypeArguments=""x:Boolean""><p:And><p:And.Left><InArgument x:TypeArguments=""x:Boolean""><local1:IsEqualDate><local1:IsEqualDate.Left><InArgument x:TypeArguments=""s:DateTime""><ArgumentValue x:TypeArguments=""s:DateTime"" ArgumentName=""vardateex"" /></InArgument></local1:IsEqualDate.Left><local1:IsEqualDate.Right><InArgument x:TypeArguments=""s:DateTime""><local:ConvertTimeZoneFromSPLocalToUtc><local:ConvertTimeZoneFromSPLocalToUtc.Input><InArgument x:TypeArguments=""s:DateTime""><p:ParseDate CultureName=""en-US"" DateTimeStyles=""{x:Null}""><p:ParseDate.Value><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:ParseDate.Value></p:ParseDate></InArgument></local:ConvertTimeZoneFromSPLocalToUtc.Input></local:ConvertTimeZoneFromSPLocalToUtc></InArgument></local1:IsEqualDate.Right></local1:IsEqualDate></InArgument></p:And.Left><p:And.Right><InArgument x:TypeArguments=""x:Boolean""><local1:IsEqualDynamicValue><local1:IsEqualDynamicValue.Left><InArgument x:TypeArguments=""p:DynamicValue""><ArgumentValue x:TypeArguments=""p:DynamicValue"" ArgumentName=""vardictex"" /></InArgument></local1:IsEqualDynamicValue.Left><local1:IsEqualDynamicValue.Right><InArgument x:TypeArguments=""p:DynamicValue""><p:ParseDynamicValue><p:ParseDynamicValue.Json><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:ParseDynamicValue.Json></p:ParseDynamicValue></InArgument></local1:IsEqualDynamicValue.Right></local1:IsEqualDynamicValue></InArgument></p:And.Right></p:And></InArgument></If.Condition><If.Then><Sequence /></If.Then></If></Sequence></FlowStep></Flowchart></Activity>";
+
+            var normalized = WfActivityBuilderSerializer.AddSharePointDesignerMetadata(xaml, "OperandExpressionWorkflow");
+            var document = XDocument.Parse(normalized);
+            var expressionNames = new[] { "IsEqualDate", "ConvertTimeZoneFromSPLocalToUtc", "ParseDate", "IsEqualDynamicValue", "ParseDynamicValue" };
+            var expressions = document.Descendants().Where(e => expressionNames.Contains(e.Name.LocalName)).ToList();
+
+            Assert.AreEqual(5, expressions.Count);
+            Assert.IsTrue(expressions.All(e => (string)e.Attribute("Result") == "{x:Null}"), "SPD-authored date and DynamicValue operand expression subtrees include explicit null Result placeholders.");
+            Assert.IsTrue(document.Descendants().Where(e => e.Name.LocalName == "ParseDate" || e.Name.LocalName == "ParseDynamicValue" || e.Name.LocalName == "ConvertTimeZoneFromSPLocalToUtc").All(e => e.Descendants().Any(d => d.Name.LocalName == "String" && (string)d.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")) == "Id")), "SPD operand conversion expressions require Designer Id custom attributes for operand text rendering.");
+        }
+
+        [TestMethod]
+        public void AddSharePointDesignerMetadata_NormalizesConditionRhsOperandSubtreeShapeForDesigner()
+        {
+            var xaml = @"<Activity x:Class=""OperandShapeWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:s=""clr-namespace:System;assembly=mscorlib"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy"" xmlns:local1=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy""><Flowchart><FlowStep><Sequence DisplayName=""Stage 1""><If><If.Condition><InArgument x:TypeArguments=""x:Boolean""><p:And><p:And.Left><InArgument x:TypeArguments=""x:Boolean""><local1:IsEqualDate><local1:IsEqualDate.Left><InArgument x:TypeArguments=""s:DateTime""><ArgumentValue x:TypeArguments=""s:DateTime"" ArgumentName=""vardateex"" /></InArgument></local1:IsEqualDate.Left><local1:IsEqualDate.Right><InArgument x:TypeArguments=""s:DateTime""><local:ConvertTimeZoneFromSPLocalToUtc><local:ConvertTimeZoneFromSPLocalToUtc.Input><InArgument x:TypeArguments=""s:DateTime""><p:ParseDate CultureName=""en-US"" DateTimeStyles=""{x:Null}""><p:ParseDate.Value><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:ParseDate.Value></p:ParseDate></InArgument></local:ConvertTimeZoneFromSPLocalToUtc.Input></local:ConvertTimeZoneFromSPLocalToUtc></InArgument></local1:IsEqualDate.Right></local1:IsEqualDate></InArgument></p:And.Left><p:And.Right><InArgument x:TypeArguments=""x:Boolean""><local1:IsEqualDynamicValue><local1:IsEqualDynamicValue.Left><InArgument x:TypeArguments=""p:DynamicValue""><ArgumentValue x:TypeArguments=""p:DynamicValue"" ArgumentName=""vardictex"" /></InArgument></local1:IsEqualDynamicValue.Left><local1:IsEqualDynamicValue.Right><InArgument x:TypeArguments=""p:DynamicValue""><p:ParseDynamicValue><p:ParseDynamicValue.Json><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:ParseDynamicValue.Json></p:ParseDynamicValue></InArgument></local1:IsEqualDynamicValue.Right></local1:IsEqualDynamicValue></InArgument></p:And.Right></p:And></InArgument></If.Condition><If.Then><Sequence /></If.Then></If></Sequence></FlowStep></Flowchart></Activity>";
+
+            var normalized = WfActivityBuilderSerializer.AddSharePointDesignerMetadata(xaml, "OperandShapeWorkflow");
+            var document = XDocument.Parse(normalized);
+            var parseDate = document.Descendants().Single(e => e.Name.LocalName == "ParseDate");
+            var cultureName = parseDate.Elements().Single(e => e.Name.LocalName == "ParseDate.CultureName");
+            var rhsArgumentValues = document.Descendants()
+                .Where(e => e.Name.LocalName == "IsEqualDate.Right" || e.Name.LocalName == "IsEqualDynamicValue.Right")
+                .SelectMany(e => e.Descendants().Where(d => d.Name.LocalName == "ArgumentValue"))
+                .ToList();
+
+            Assert.IsNull(parseDate.Attribute("CultureName"), "SPD-authored date RHS uses ParseDate.CultureName property-element form instead of a flattened CultureName attribute.");
+            Assert.IsTrue(cultureName.Descendants().Any(e => e.Name.LocalName == "GetConfigurationValue" && (string)e.Attribute("Name") == "Microsoft.SharePoint.ActivationProperties.CultureName"), "SPD-authored date RHS resolves CultureName through GetConfigurationValue so Designer can render the operand token.");
+            Assert.AreEqual(2, rhsArgumentValues.Count, "Expected RHS date ParseDate.Value and DynamicValue ParseDynamicValue.Json variable references.");
+            Assert.IsTrue(rhsArgumentValues.All(e => e.Elements().Any(child => child.Name.LocalName == "ArgumentValue.Result" && child.Elements().Any(outArg => outArg.Name.LocalName == "OutArgument" && (string)outArg.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml")) == (string)e.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))))), "SPD-authored RHS ArgumentValue nodes include explicit ArgumentValue.Result/OutArgument wrappers rather than self-closing variable references.");
+        }
+
+        [TestMethod]
+        public void AddSharePointDesignerMetadata_MatchesOriginalConditionRhsCustomAttributePlacement()
+        {
+            var xaml = @"<Activity x:Class=""OperandExactWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:s=""clr-namespace:System;assembly=mscorlib"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy"" xmlns:local1=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy""><Flowchart><FlowStep><Sequence DisplayName=""Stage 1""><If><If.Condition><InArgument x:TypeArguments=""x:Boolean""><p:And><p:And.Left><InArgument x:TypeArguments=""x:Boolean""><local1:IsEqualDate><local1:IsEqualDate.Left><InArgument x:TypeArguments=""s:DateTime""><ArgumentValue x:TypeArguments=""s:DateTime"" ArgumentName=""vardateex"" /></InArgument></local1:IsEqualDate.Left><local1:IsEqualDate.Right><InArgument x:TypeArguments=""s:DateTime""><local:ConvertTimeZoneFromSPLocalToUtc><local:ConvertTimeZoneFromSPLocalToUtc.Input><InArgument x:TypeArguments=""s:DateTime""><p:ParseDate CultureName=""en-US"" DateTimeStyles=""{x:Null}""><p:ParseDate.Value><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:ParseDate.Value></p:ParseDate></InArgument></local:ConvertTimeZoneFromSPLocalToUtc.Input></local:ConvertTimeZoneFromSPLocalToUtc></InArgument></local1:IsEqualDate.Right></local1:IsEqualDate></InArgument></p:And.Left><p:And.Right><InArgument x:TypeArguments=""x:Boolean""><local1:IsEqualDynamicValue><local1:IsEqualDynamicValue.Left><InArgument x:TypeArguments=""p:DynamicValue""><ArgumentValue x:TypeArguments=""p:DynamicValue"" ArgumentName=""vardictex"" /></InArgument></local1:IsEqualDynamicValue.Left><local1:IsEqualDynamicValue.Right><InArgument x:TypeArguments=""p:DynamicValue""><p:ParseDynamicValue><p:ParseDynamicValue.Json><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:ParseDynamicValue.Json></p:ParseDynamicValue></InArgument></local1:IsEqualDynamicValue.Right></local1:IsEqualDynamicValue></InArgument></p:And.Right></p:And></InArgument></If.Condition><If.Then><Sequence /></If.Then></If></Sequence></FlowStep></Flowchart></Activity>";
+
+            var normalized = WfActivityBuilderSerializer.AddSharePointDesignerMetadata(xaml, "OperandExactWorkflow");
+            var document = XDocument.Parse(normalized);
+            var convert = document.Descendants().Single(e => e.Name.LocalName == "ConvertTimeZoneFromSPLocalToUtc");
+            var parseDate = document.Descendants().Single(e => e.Name.LocalName == "ParseDate");
+            var parseDynamicValue = document.Descendants().Single(e => e.Name.LocalName == "ParseDynamicValue");
+
+            Assert.AreEqual("{x:Null}", (string)convert.Attribute("Result"));
+            Assert.IsFalse(convert.Elements().Any(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes"), "Original SPD-authored ExampleConditionals keeps ConvertTimeZoneFromSPLocalToUtc as a plain wrapper with only Result and Input.");
+            Assert.AreEqual("ConvertTimeZoneFromSPLocalToUtc.Input", convert.Elements().First().Name.LocalName, "The first ConvertTimeZoneFromSPLocalToUtc child must be the Input property element, matching original SPD serialization order.");
+            Assert.IsTrue(parseDate.Elements().Any(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes"), "Original SPD-authored ParseDate contains the expression Id custom attribute.");
+            Assert.IsTrue(parseDynamicValue.Elements().Any(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes"), "Original SPD-authored ParseDynamicValue contains the expression Id custom attribute.");
+        }
+
+        [TestMethod]
+        public void AddSharePointDesignerMetadata_PreservesConditionRhsDesignerIdsByExpressionType()
+        {
+            var xaml = @"<Activity x:Class=""OperandPreserveIdsWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:s=""clr-namespace:System;assembly=mscorlib"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy"" xmlns:local1=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy""><Flowchart><FlowStep><Sequence DisplayName=""Stage 1""><If><If.Condition><InArgument x:TypeArguments=""x:Boolean""><p:And><p:And.Left><InArgument x:TypeArguments=""x:Boolean""><local1:IsEqualDate><local1:IsEqualDate.Left><InArgument x:TypeArguments=""s:DateTime""><ArgumentValue x:TypeArguments=""s:DateTime"" ArgumentName=""vardateex"" /></InArgument></local1:IsEqualDate.Left><local1:IsEqualDate.Right><InArgument x:TypeArguments=""s:DateTime""><local:ConvertTimeZoneFromSPLocalToUtc><local:ConvertTimeZoneFromSPLocalToUtc.Input><InArgument x:TypeArguments=""s:DateTime""><p:ParseDate CultureName=""en-US"" DateTimeStyles=""{x:Null}""><p:ParseDate.Value><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:ParseDate.Value></p:ParseDate></InArgument></local:ConvertTimeZoneFromSPLocalToUtc.Input></local:ConvertTimeZoneFromSPLocalToUtc></InArgument></local1:IsEqualDate.Right></local1:IsEqualDate></InArgument></p:And.Left><p:And.Right><InArgument x:TypeArguments=""x:Boolean""><local1:IsEqualDynamicValue><local1:IsEqualDynamicValue.Left><InArgument x:TypeArguments=""p:DynamicValue""><ArgumentValue x:TypeArguments=""p:DynamicValue"" ArgumentName=""vardictex"" /></InArgument></local1:IsEqualDynamicValue.Left><local1:IsEqualDynamicValue.Right><InArgument x:TypeArguments=""p:DynamicValue""><p:ParseDynamicValue><p:ParseDynamicValue.Json><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""varstrex"" /></InArgument></p:ParseDynamicValue.Json></p:ParseDynamicValue></InArgument></local1:IsEqualDynamicValue.Right></local1:IsEqualDynamicValue></InArgument></p:And.Right></p:And></InArgument></If.Condition></If></Sequence></FlowStep></Flowchart></Activity>";
+            var workflow = new WorkflowYaml
+            {
+                Name = "OperandPreserveIdsWorkflow",
+                Stages =
+                {
+                    new StageYaml
+                    {
+                        Name = "Stage 1",
+                        Actions =
+                        {
+                            new IfActionYaml
+                            {
+                                Condition = new ComparisonExpressionYaml
+                                {
+                                    Type = "and",
+                                    LeftCondition = new ComparisonExpressionYaml { Type = "isEqual", ValueType = "DateTime", Left = new ExpressionYaml { Variable = "vardateex" }, Right = new ExpressionYaml { Type = "parseDate", ValueType = "DateTime", Value = new ExpressionYaml { Variable = "varstrex" }, DesignerId = "092C790F-34E1-4779-A8F0-76273B83670B" } },
+                                    RightCondition = new ComparisonExpressionYaml { Type = "isEqual", ValueType = "DynamicValue", Left = new ExpressionYaml { Variable = "vardictex" }, Right = new ExpressionYaml { Type = "parseDynamicValue", ValueType = "DynamicValue", Value = new ExpressionYaml { Variable = "varstrex" }, DesignerId = "53016204-D02E-4555-81C1-843464410038" } }
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            var normalized = WfActivityBuilderSerializer.AddSharePointDesignerMetadataForTest(xaml, "OperandPreserveIdsWorkflow", workflow);
+            var document = XDocument.Parse(normalized);
+
+            Assert.AreEqual("092C790F-34E1-4779-A8F0-76273B83670B", ReadDesignerId(document.Descendants().Single(e => e.Name.LocalName == "ParseDate")));
+            Assert.AreEqual("53016204-D02E-4555-81C1-843464410038", ReadDesignerId(document.Descendants().Single(e => e.Name.LocalName == "ParseDynamicValue")));
+        }
+
+        [TestMethod]
+        public void Load_PreservesNestedExpressionDesignerIdsFromYaml()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: PreserveIds
+stages:
+- name: Stage 1
+  actions:
+  - type: if
+    condition:
+      type: and
+      leftCondition:
+        type: isEqual
+        valueType: DateTime
+        left:
+          variable: vardateex
+        right:
+          type: parseDate
+          value:
+            variable: varstrex
+          valueType: DateTime
+          designerId: 092C790F-34E1-4779-A8F0-76273B83670B
+      rightCondition:
+        type: isEqual
+        valueType: DynamicValue
+        left:
+          variable: vardictex
+        right:
+          type: parseDynamicValue
+          value:
+            variable: varstrex
+          valueType: DynamicValue
+          designerId: 53016204-D02E-4555-81C1-843464410038
+    then: []
+");
+            var condition = workflow.Stages.Single().Actions.OfType<IfActionYaml>().Single().Condition;
+
+            Assert.AreEqual("092C790F-34E1-4779-A8F0-76273B83670B", condition.LeftCondition.Right.DesignerId);
+            Assert.AreEqual("53016204-D02E-4555-81C1-843464410038", condition.RightCondition.Right.DesignerId);
         }
 
         [TestMethod]
@@ -1082,3 +1218,4 @@ stages:
         }
     }
 }
+
