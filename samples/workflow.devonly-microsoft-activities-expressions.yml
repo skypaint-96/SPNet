@@ -1,0 +1,119 @@
+# DEV-ONLY SAMPLE: additional Microsoft.Activities / Microsoft.Activities.Expressions support.
+# These activities may be hidden or awkward in SharePoint Designer and may cause SPD UX issues.
+# Prior hidden Microsoft.Activities testing suggests SharePoint workflow runtime can execute them,
+# but use this sample only for development validation and inspect generated XAML before publishing.
+schemaVersion: spnet.workflow/v1
+name: DevOnlyMicrosoftActivitiesExpressions
+metadata:
+  displayName: Dev-only Microsoft.Activities expressions
+  description: Dev-only sample for hidden Microsoft.Activities expression activities; may cause SharePoint Designer UX issues but is expected to be acceptable to workflow runtime.
+variables:
+  - name: sourceText
+    type: String
+  - name: lowerText
+    type: String
+  - name: upperText
+    type: String
+  - name: concatText
+    type: String
+  - name: textLength
+    type: Int32
+  - name: nowValue
+    type: DateTime
+  - name: generatedGuid
+    type: Guid
+  - name: parsedGuid
+    type: Guid
+  - name: payload
+    type: DynamicValue
+  - name: hasTitle
+    type: Boolean
+  - name: payloadIsEmpty
+    type: Boolean
+stages:
+  - name: Stage 1
+    actions:
+      - type: assign
+        to: sourceText
+        value: DevOnly Mixed Case
+      - type: assign
+        to: lowerText
+        value:
+          type: toLowerCase
+          value:
+            variable: sourceText
+      - type: assign
+        to: upperText
+        value:
+          type: toUpperCase
+          value:
+            variable: sourceText
+      - type: assign
+        to: concatText
+        value:
+          type: concatString
+          values:
+            - 'lower='
+            -
+              variable: lowerText
+            - '; upper='
+            -
+              variable: upperText
+      - type: assign
+        to: textLength
+        value:
+          type: stringLength
+          value:
+            variable: concatText
+      - type: assign
+        to: nowValue
+        value:
+          type: currentDate
+      - type: assign
+        to: generatedGuid
+        value:
+          type: newGuid
+      - type: assign
+        to: parsedGuid
+        value:
+          type: parseGuid
+          value: 00000000-0000-0000-0000-000000000001
+      - type: buildDynamicValue
+        to: payload
+        entries:
+          - key: Title
+            value:
+              variable: concatText
+          - key: Length
+            value:
+              variable: textLength
+            valueType: Int32
+      - type: assign
+        to: hasTitle
+        value:
+          type: containsDynamicValueProperty
+          source:
+            variable: payload
+          propertyName: Title
+      - type: assign
+        to: payloadIsEmpty
+        value:
+          type: isEmptyDynamicValue
+          source:
+            variable: payload
+      - type: writeHistory
+        message:
+          type: formatString
+          literal: '{}DEV-ONLY Microsoft.Activities expressions: {0}; length={1}; hasTitle={2}; empty={3}'
+          values:
+            -
+              variable: concatText
+            -
+              toString:
+                variable: textLength
+            -
+              toString:
+                variable: hasTitle
+            -
+              toString:
+                variable: payloadIsEmpty

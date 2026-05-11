@@ -120,6 +120,85 @@ namespace SPNet.Workflow.WfSerializer.Tests
             Assert.IsTrue(workflow.Stages[0].Actions.TrueForAll(a => a is AssignActionYaml));
         }
 
+        [TestMethod]
+        public void Load_AllowsDevOnlyMicrosoftActivitiesExpressionsInAssignments()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: DevOnlyExpressions
+variables:
+  - name: textValue
+    type: String
+  - name: lengthValue
+    type: Int32
+  - name: dateValue
+    type: DateTime
+  - name: guidValue
+    type: Guid
+  - name: boolValue
+    type: Boolean
+  - name: payload
+    type: DynamicValue
+stages:
+  - name: Stage 1
+    actions:
+      - type: assign
+        to: textValue
+        value:
+          type: concatString
+          values:
+            - value A
+            -
+              type: toUpperCase
+              value: value b
+      - type: assign
+        to: lengthValue
+        value:
+          type: stringLength
+          value:
+            type: toLowerCase
+            value: ABC
+      - type: assign
+        to: dateValue
+        value:
+          type: currentDate
+      - type: assign
+        to: guidValue
+        value:
+          type: parseGuid
+          value: 00000000-0000-0000-0000-000000000001
+      - type: assign
+        to: guidValue
+        value:
+          type: newGuid
+      - type: assign
+        to: boolValue
+        value:
+          type: containsDynamicValueProperty
+          source:
+            variable: payload
+          propertyName: Title
+      - type: assign
+        to: boolValue
+        value:
+          type: isEmptyDynamicValue
+          source:
+            variable: payload
+");
+
+            var assignments = workflow.Stages.Single().Actions.OfType<AssignActionYaml>().ToList();
+            Assert.AreEqual(7, assignments.Count);
+            Assert.AreEqual("concatString", assignments[0].Value.Type);
+            Assert.AreEqual("toUpperCase", assignments[0].Value.Values[1].Type);
+            Assert.AreEqual("stringLength", assignments[1].Value.Type);
+            Assert.AreEqual("toLowerCase", assignments[1].Value.Value!.Type);
+            Assert.AreEqual("currentDate", assignments[2].Value.Type);
+            Assert.AreEqual("parseGuid", assignments[3].Value.Type);
+            Assert.AreEqual("newGuid", assignments[4].Value.Type);
+            Assert.AreEqual("containsDynamicValueProperty", assignments[5].Value.Type);
+            Assert.AreEqual("payload", assignments[5].Value.Source!.Variable);
+            Assert.AreEqual("isEmptyDynamicValue", assignments[6].Value.Type);
+        }
+
         [DataTestMethod]
         [DataRow("assign", "assign action requires 'to'.")]
         [DataRow("calc", "calc action requires 'to'.")]
@@ -1160,6 +1239,98 @@ stages:
                 Assert.AreEqual("MetadataSidecarWorkflow", metadata.DisplayName);
                 Assert.IsTrue(metadata.Initiation.RequiresForm.Value);
                 Assert.AreEqual("requestTitle", metadata.Initiation.FormFields.Single().Name);
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
+        public void SerializeYamlWorkflow_EmitsDevOnlyMicrosoftActivitiesExpressions()
+        {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
+            var directory = Path.Combine(Path.GetTempPath(), "spnet-devonly-expressions-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var workflowPath = Path.Combine(directory, "workflow.yml");
+            var xamlPath = Path.Combine(directory, "workflow.xaml");
+            File.WriteAllText(workflowPath, @"schemaVersion: spnet.workflow/v1
+name: DevOnlyExpressionsBuild
+variables:
+  - name: textValue
+    type: String
+  - name: lengthValue
+    type: Int32
+  - name: dateValue
+    type: DateTime
+  - name: guidValue
+    type: Guid
+  - name: boolValue
+    type: Boolean
+  - name: payload
+    type: DynamicValue
+stages:
+  - name: Stage 1
+    actions:
+      - type: buildDynamicValue
+        to: payload
+        entries:
+          - key: Title
+            value: Example
+      - type: assign
+        to: textValue
+        value:
+          type: concatString
+          values:
+            -
+              type: toLowerCase
+              value: ABC
+            -
+              type: toUpperCase
+              value: xyz
+      - type: assign
+        to: lengthValue
+        value:
+          type: stringLength
+          value:
+            variable: textValue
+      - type: assign
+        to: dateValue
+        value:
+          type: currentDate
+      - type: assign
+        to: guidValue
+        value:
+          type: newGuid
+      - type: assign
+        to: boolValue
+        value:
+          type: containsDynamicValueProperty
+          source:
+            variable: payload
+          propertyName: Title
+      - type: assign
+        to: boolValue
+        value:
+          type: isEmptyDynamicValue
+          source:
+            variable: payload
+");
+
+            try
+            {
+                WfActivityBuilderSerializer.SerializeYamlWorkflow(workflowPath, xamlPath, cacheFolder, new SpNetToolConfig());
+
+                var xaml = File.ReadAllText(xamlPath);
+                StringAssert.Contains(xaml, "ToLowerCase");
+                StringAssert.Contains(xaml, "ToUpperCase");
+                StringAssert.Contains(xaml, "StringLength");
+                StringAssert.Contains(xaml, "ConcatString");
+                StringAssert.Contains(xaml, "CurrentDate");
+                StringAssert.Contains(xaml, "NewGuid");
+                StringAssert.Contains(xaml, "ContainsDynamicValueProperty");
+                StringAssert.Contains(xaml, "IsEmptyDynamicValue");
             }
             finally
             {

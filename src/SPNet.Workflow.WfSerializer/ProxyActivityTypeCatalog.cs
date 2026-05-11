@@ -36,8 +36,17 @@ namespace SPNet.Workflow.WfSerializer
             ReplaceStringExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ReplaceString");
             SubstringExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.Substring");
             TrimExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.Trim");
+            ToLowerCaseExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToLowerCase");
+            ToUpperCaseExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToUpperCase");
+            StringLengthExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.StringLength");
+            ConcatStringExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ConcatString");
+            CurrentDateExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.CurrentDate");
+            NewGuidExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.NewGuid");
+            ParseGuidExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ParseGuid");
             ParseDateExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ParseDate");
             ParseDynamicValueExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.ParseDynamicValue");
+            ContainsDynamicValuePropertyExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.ContainsDynamicValueProperty");
+            IsEmptyDynamicValueExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.IsEmptyDynamicValue");
             CountDynamicValueItems = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.CountDynamicValueItems");
             BuildDynamicValue = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildDynamicValue");
             ConvertTimeZoneFromSPLocalToUtc = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.ConvertTimeZoneFromSPLocalToUtc");
@@ -74,8 +83,17 @@ namespace SPNet.Workflow.WfSerializer
         public Type ReplaceStringExpression { get; }
         public Type SubstringExpression { get; }
         public Type TrimExpression { get; }
+        public Type? ToLowerCaseExpression { get; }
+        public Type? ToUpperCaseExpression { get; }
+        public Type? StringLengthExpression { get; }
+        public Type? ConcatStringExpression { get; }
+        public Type? CurrentDateExpression { get; }
+        public Type? NewGuidExpression { get; }
+        public Type? ParseGuidExpression { get; }
         public Type? ParseDateExpression { get; }
         public Type? ParseDynamicValueExpression { get; }
+        public Type? ContainsDynamicValuePropertyExpression { get; }
+        public Type? IsEmptyDynamicValueExpression { get; }
         public Type? CountDynamicValueItems { get; }
         public Type? BuildDynamicValue { get; }
         public Type? ConvertTimeZoneFromSPLocalToUtc { get; }
@@ -84,7 +102,7 @@ namespace SPNet.Workflow.WfSerializer
         public WfActivityBuilderSerializer.ComparisonExpressionTypes ComparisonExpressionTypes { get; }
 
         public WfActivityBuilderSerializer.ValueExpressionTypes CreateValueExpressionTypes() =>
-            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemGuid, BuildDictionary, DynamicValue, ParseDateExpression, ConvertTimeZoneFromSPLocalToUtc, ParseDynamicValueExpression);
+            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, ToLowerCaseExpression, ToUpperCaseExpression, StringLengthExpression, ConcatStringExpression, CurrentDateExpression, NewGuidExpression, ParseGuidExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemGuid, BuildDictionary, DynamicValue, ParseDateExpression, ConvertTimeZoneFromSPLocalToUtc, ParseDynamicValueExpression, ContainsDynamicValuePropertyExpression, IsEmptyDynamicValueExpression);
 
         public Dictionary<string, Type> CreateBuildContextTypes()
         {

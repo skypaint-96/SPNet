@@ -147,6 +147,15 @@ namespace SPNet.Workflow.WfSerializer
         {
             var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
             if (type == "formatstring") return CreateFormatStringExpression(expression, resultType);
+            if (type == "tolowercase" || type == "lowercase" || type == "tolower") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(string), valueExpressionTypes.ToLowerCaseExpression, "Input");
+            if (type == "touppercase" || type == "uppercase" || type == "toupper") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(string), valueExpressionTypes.ToUpperCaseExpression, "Input");
+            if (type == "stringlength" || type == "lengthstring") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(int), valueExpressionTypes.StringLengthExpression, "Input");
+            if (type == "concatstring" || type == "concat") return CreateConcatStringExpression(expression, resultType);
+            if (type == "currentdate") return CreateParameterlessExpression(expression, resultType, typeof(DateTime), valueExpressionTypes.CurrentDateExpression);
+            if (type == "newguid") return CreateParameterlessExpression(expression, resultType, typeof(Guid), valueExpressionTypes.NewGuidExpression);
+            if (type == "parseguid") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(Guid), valueExpressionTypes.ParseGuidExpression, "Value");
+            if (type == "containsdynamicvalueproperty" || type == "containsdictionaryproperty") return CreateContainsDynamicValuePropertyExpression(expression, resultType);
+            if (type == "isemptydynamicvalue" || type == "isemptydictionary") return CreateIsEmptyDynamicValueExpression(expression, resultType);
             if (type == "parsedate" || type == "parseutcdate" || type == "parseSpDate".ToLowerInvariant()) return CreateParseDateExpression(expression, resultType);
             if (type == "parsedynamicvalue") return CreateParseDynamicValueExpression(expression, resultType);
             if (type == "lookupworkflowcontext" || type == "lookupcontextproperty")
@@ -201,6 +210,64 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             return null;
+        }
+
+        private object CreateUnaryExpression(ExpressionYaml expression, Type requestedResultType, Type inputType, Type expressionResultType, Type? expressionType, string inputPropertyName)
+        {
+            if (expressionType == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, requestedResultType, expressionResultType);
+            var activity = ActivityReflectionWriter.Create(expressionType);
+            ActivityReflectionWriter.SetProperty(activity, inputPropertyName, ToInArgument(expression.Value ?? new ExpressionYaml(), inputType));
+            return activity;
+        }
+
+        private object CreateParameterlessExpression(ExpressionYaml expression, Type requestedResultType, Type expressionResultType, Type? expressionType)
+        {
+            if (expressionType == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, requestedResultType, expressionResultType);
+            return ActivityReflectionWriter.Create(expressionType);
+        }
+
+        private object CreateConcatStringExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.ConcatStringExpression == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(string));
+            var concat = ActivityReflectionWriter.Create(valueExpressionTypes.ConcatStringExpression);
+            var inputs = ActivityReflectionWriter.GetProperty(concat, "Inputs", "ConcatString does not expose Inputs.");
+            var addMethod = inputs.GetType().GetMethods().First(m => m.Name == "Add" && m.GetParameters().Length == 1);
+            var values = expression.Values != null && expression.Values.Count > 0 ? expression.Values : expression.Value != null ? new System.Collections.Generic.List<ExpressionYaml> { expression.Value } : new System.Collections.Generic.List<ExpressionYaml>();
+            if (values.Count == 0) throw new InvalidOperationException(expression.Type + " expression requires 'value' or 'values'.");
+            foreach (var value in values) addMethod.Invoke(inputs, new object[] { ToInArgument<string>(value) });
+            return concat;
+        }
+
+        private object CreateContainsDynamicValuePropertyExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.ContainsDynamicValueProperty == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(bool));
+            var contains = ActivityReflectionWriter.Create(valueExpressionTypes.ContainsDynamicValueProperty);
+            ActivityReflectionWriter.SetProperty(contains, "Source", CreateDynamicValueObjectArgument(expression.Source ?? expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(contains, "PropertyName", ToInArgument<string>(string.IsNullOrWhiteSpace(expression.PropertyName) ? new ExpressionYaml { Literal = Convert.ToString(expression.Literal ?? string.Empty) ?? string.Empty } : new ExpressionYaml { Literal = expression.PropertyName }));
+            return contains;
+        }
+
+        private object CreateIsEmptyDynamicValueExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.IsEmptyDynamicValue == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(bool));
+            var isEmpty = ActivityReflectionWriter.Create(valueExpressionTypes.IsEmptyDynamicValue);
+            ActivityReflectionWriter.SetProperty(isEmpty, "Input", CreateDynamicValueObjectArgument(expression.Source ?? expression.Value ?? new ExpressionYaml()));
+            return isEmpty;
+        }
+
+        private object CreateDynamicValueObjectArgument(ExpressionYaml expression)
+        {
+            return ToInArgument(expression, valueExpressionTypes.DynamicValue);
+        }
+
+        private static void EnsureAssignableExpressionResult(string expressionType, Type requestedResultType, Type expressionResultType)
+        {
+            if (requestedResultType != expressionResultType && requestedResultType != typeof(object)) throw new InvalidOperationException(expressionType + " expressions can only be assigned to " + expressionResultType.Name + "/Object arguments.");
         }
 
         private object CreateParseDynamicValueExpression(ExpressionYaml expression, Type resultType)
