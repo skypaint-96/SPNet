@@ -265,6 +265,7 @@ namespace SPNet.Workflow.WfSerializer
             var xamlType = parameter.XamlType ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(xamlType))
             {
+                if (xamlType.Equals("Object", StringComparison.OrdinalIgnoreCase) && string.Equals(parameter.Type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) return Type.GetType("Microsoft.Activities.DynamicValue, Microsoft.Activities.Proxy", throwOnError: false) ?? typeof(object);
                 if (xamlType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(bool);
                 if (xamlType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(double);
                 if (xamlType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(DateTime);
@@ -642,12 +643,43 @@ namespace SPNet.Workflow.WfSerializer
         public string Source { get; set; } = string.Empty;
         public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
         public string To { get; set; } = string.Empty;
+        public string ValueType { get; set; } = string.Empty;
 
         public override void Validate()
         {
             base.Validate();
             if (string.IsNullOrWhiteSpace(Source)) throw new InvalidOperationException(Type + " action requires 'source'.");
             RequireTo();
+        }
+    }
+
+    public sealed class CountDynamicValueItemsActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public CountDynamicValueItemsActionYaml() { Type = "countDynamicValueItems"; }
+        public string Source { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (string.IsNullOrWhiteSpace(Source)) throw new InvalidOperationException(Type + " action requires 'source'.");
+            RequireTo();
+        }
+    }
+
+    public sealed class SetDynamicValuePropertyActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public SetDynamicValuePropertyActionYaml() { Type = "setDynamicValueProperty"; }
+        public string Source { get; set; } = string.Empty;
+        public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
+        public ExpressionYaml Value { get; set; } = new ExpressionYaml();
+        public string ValueType { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            if (string.IsNullOrWhiteSpace(Source)) throw new InvalidOperationException(Type + " action requires 'source'.");
         }
     }
 
@@ -763,7 +795,9 @@ namespace SPNet.Workflow.WfSerializer
             Register(factories, y => new CallHttpWebServiceActionYaml { Type = y.Type ?? string.Empty, Address = y.Address ?? new ExpressionYaml(), RequestType = y.RequestType ?? new ExpressionYaml { Literal = "GET" }, ResponseStatusCodeTo = y.ResponseStatusCodeTo ?? y.StatusCodeTo ?? string.Empty, ResponseContentTo = y.ResponseContentTo ?? y.ContentTo ?? string.Empty, ResponseHeadersTo = y.ResponseHeadersTo ?? y.HeadersTo ?? string.Empty }, "callHttpWebService", "callHttp", "http");
             Register(factories, y => new SendEmailActionYaml { Type = y.Type ?? string.Empty, To = y.To ?? new ExpressionYaml(), Cc = y.Cc ?? new ExpressionYaml { Literal = string.Empty }, Subject = y.Subject ?? new ExpressionYaml { Literal = string.Empty }, Body = y.Body ?? y.BodyExpression ?? new ExpressionYaml { Literal = string.Empty } }, "sendEmail", "email");
             Register(factories, y => new SingleTaskActionYaml { Type = y.Type ?? string.Empty, AssignedTo = y.AssignedTo ?? new ExpressionYaml(), Title = y.Title ?? new ExpressionYaml(), Body = y.TaskBody ?? y.BodyExpression ?? y.Body ?? new ExpressionYaml { Literal = string.Empty }, DueDate = y.DueDate ?? new ExpressionYaml(), AssignmentEmailSubject = y.AssignmentEmailSubject ?? new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" }, AssignmentEmailBody = y.AssignmentEmailBody ?? new ExpressionYaml(), WaitForTaskCompletion = y.WaitForTaskCompletion, WaiveAssignmentEmail = y.WaiveAssignmentEmail, WaiveCancelationEmail = y.WaiveCancelationEmail, ContentTypeId = y.ContentTypeId ?? string.Empty, OutcomeFieldName = y.OutcomeFieldName ?? string.Empty, CompletedStatus = y.CompletedStatus ?? string.Empty, TaskIdTo = y.TaskIdTo ?? string.Empty, OutcomeTo = y.OutcomeTo ?? string.Empty }, "singleTask", "task");
-            Register(factories, y => new GetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), To = ReadString(y.To) }, "getDynamicValueProperty", "getDictionaryItem", "getDictionaryValue", "getResponseProperty");
+            Register(factories, y => new GetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), To = ReadString(y.To), ValueType = y.ValueType ?? string.Empty }, "getDynamicValueProperty", "getDictionaryItem", "getDictionaryValue", "getResponseProperty");
+            Register(factories, y => new SetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), Value = y.Value ?? new ExpressionYaml(), ValueType = y.ValueType ?? string.Empty, To = ReadString(y.To) }, "setDynamicValueProperty", "setDictionaryItem", "setDictionaryValue", "setResponseProperty");
+            Register(factories, y => new CountDynamicValueItemsActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, To = ReadString(y.To) }, "countDynamicValueItems", "countDictionaryItems");
             Register(factories, y => new BuildDynamicValueActionYaml { Type = y.Type ?? string.Empty, Entries = y.Entries ?? new List<DynamicValueEntryYaml>(), To = ReadString(y.To) }, "buildDynamicValue", "buildDictionary", "createDictionary");
             Register(factories, y => new LookupRestPropertyNameActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml(), PropertyName = y.PropertyName ?? new ExpressionYaml(), To = ReadString(y.To) }, "lookupRestPropertyName", "lookupSPGetItemPropertyNameInREST", "lookupSPListItemPropertyNameInREST");
             Register(factories, y => new WhileActionYaml { Type = y.Type ?? string.Empty, Condition = y.Condition ?? new ComparisonExpressionYaml(), Actions = y.Actions ?? new List<WorkflowActionYaml>() }, "while", "loop");
@@ -866,7 +900,15 @@ namespace SPNet.Workflow.WfSerializer
             }
             else if (value is GetDynamicValuePropertyActionYaml dynamicProperty)
             {
-                WriteScalar(emitter, "type", dynamicProperty.Type); WriteScalar(emitter, "source", dynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", dynamicProperty.PropertyName); WriteScalar(emitter, "to", dynamicProperty.To);
+                WriteScalar(emitter, "type", dynamicProperty.Type); WriteScalar(emitter, "source", dynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", dynamicProperty.PropertyName); WriteScalar(emitter, "to", dynamicProperty.To); WriteScalar(emitter, "valueType", dynamicProperty.ValueType);
+            }
+            else if (value is CountDynamicValueItemsActionYaml countDynamicValueItems)
+            {
+                WriteScalar(emitter, "type", countDynamicValueItems.Type); WriteScalar(emitter, "source", countDynamicValueItems.Source); WriteScalar(emitter, "to", countDynamicValueItems.To);
+            }
+            else if (value is SetDynamicValuePropertyActionYaml setDynamicProperty)
+            {
+                WriteScalar(emitter, "type", setDynamicProperty.Type); WriteScalar(emitter, "source", setDynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", setDynamicProperty.PropertyName); WriteObject(emitter, serializer, "value", setDynamicProperty.Value); WriteScalar(emitter, "valueType", setDynamicProperty.ValueType); WriteScalar(emitter, "to", setDynamicProperty.To);
             }
             else if (value is BuildDynamicValueActionYaml buildDynamicValue)
             {
@@ -929,6 +971,7 @@ namespace SPNet.Workflow.WfSerializer
             public string OutcomeTo { get; set; } = string.Empty;
             public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
             public ExpressionYaml Key { get; set; } = new ExpressionYaml();
+            public string ValueType { get; set; } = string.Empty;
             public List<DynamicValueEntryYaml> Entries { get; set; } = new List<DynamicValueEntryYaml>();
             public string FieldName { get; set; } = string.Empty;
             public string Source { get; set; } = string.Empty;

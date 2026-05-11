@@ -19,7 +19,9 @@ namespace SPNet.Workflow.WfSerializer
             foreach (var target in actions.OfType<LookupListItemStringPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<LookupListItemIntPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(int));
             foreach (var target in actions.OfType<CallHttpWebServiceActionYaml>().SelectMany(a => new[] { a.ResponseContentTo, a.ResponseHeadersTo })) AddIfMissing(variableTypes, target, dynamicValueType);
-            foreach (var target in actions.OfType<GetDynamicValuePropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var action in actions.OfType<GetDynamicValuePropertyActionYaml>()) AddIfMissing(variableTypes, action.To, MapDynamicValuePropertyType(action.ValueType, dynamicValueType));
+            foreach (var action in actions.OfType<SetDynamicValuePropertyActionYaml>()) AddIfMissing(variableTypes, string.IsNullOrWhiteSpace(action.To) ? action.Source : action.To, dynamicValueType);
+            foreach (var target in actions.OfType<CountDynamicValueItemsActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(int));
             foreach (var target in actions.OfType<BuildDynamicValueActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, dynamicValueType);
             foreach (var target in actions.OfType<SingleTaskActionYaml>().Select(a => a.TaskIdTo)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<SingleTaskActionYaml>().Select(a => a.OutcomeTo)) AddIfMissing(variableTypes, target, typeof(int));
@@ -58,6 +60,18 @@ namespace SPNet.Workflow.WfSerializer
             var name = variableName;
             if (string.IsNullOrWhiteSpace(name)) return;
             if (!variableTypes.ContainsKey(name!)) variableTypes[name!] = variableType;
+        }
+
+        internal static Type MapDynamicValuePropertyType(string? valueType, Type dynamicValueType)
+        {
+            var normalized = (valueType ?? string.Empty).Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+            if (normalized == "dynamicvalue" || normalized == "dictionary") return dynamicValueType;
+            if (normalized == "boolean" || normalized == "bool") return typeof(bool);
+            if (normalized == "int32" || normalized == "int" || normalized == "integer") return typeof(int);
+            if (normalized == "double" || normalized == "number") return typeof(double);
+            if (normalized == "datetime" || normalized == "date") return typeof(DateTime);
+            if (normalized == "guid") return typeof(Guid);
+            return typeof(string);
         }
     }
 }

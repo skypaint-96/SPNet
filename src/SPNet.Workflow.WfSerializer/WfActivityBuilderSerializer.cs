@@ -39,6 +39,8 @@ namespace SPNet.Workflow.WfSerializer
         private static readonly XNamespace SharePointExpressionNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions";
         private static readonly XNamespace SharePointProxyNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy";
         private static readonly XNamespace SharePointExpressionProxyNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities.Expressions;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy";
+        private static readonly XNamespace MicrosoftActivitiesProxyNamespace = "clr-namespace:Microsoft.Activities;assembly=Microsoft.Activities.Proxy";
+        private static readonly XNamespace MicrosoftActivitiesExpressionProxyNamespace = "clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy";
         private static readonly XNamespace AuthoringNamespace = "clr-namespace:Microsoft.Web.Authoring.Workflow;assembly=Microsoft.Web.Authoring";
 
         /// <summary>
@@ -157,7 +159,9 @@ namespace SPNet.Workflow.WfSerializer
             Register<SingleTaskActionYaml>(builders, (action, context) => BuildSingleTask(action, context.GetProxyActivityType("SingleTask"), context.ValueExpressionTypes));
             Register<LookupRestPropertyNameActionYaml>(builders, (action, context) => BuildLookupRestPropertyName(action, context.GetProxyActivityType("LookupSPListItemPropertyNameInREST"), context.ValueExpressionTypes));
             Register<GetDynamicValuePropertyActionYaml>(builders, (action, context) => BuildGetDynamicValueProperty(action, context.GetProxyActivityType("GetDynamicValueProperty"), context.DynamicValueType, context.ValueExpressionTypes, context.VariableTypes));
-            Register<BuildDynamicValueActionYaml>(builders, (action, context) => BuildDynamicValue(action, context.ValueExpressionTypes, context.DynamicValueType, context.VariableTypes));
+            Register<SetDynamicValuePropertyActionYaml>(builders, (action, context) => BuildSetDynamicValueProperty(action, context.GetProxyActivityType("SetDynamicValueProperty"), context.DynamicValueType, context.ValueExpressionTypes, context.VariableTypes));
+            Register<CountDynamicValueItemsActionYaml>(builders, (action, context) => BuildCountDynamicValueItems(action, context.GetProxyActivityType("CountDynamicValueItems"), context.DynamicValueType, context.VariableTypes));
+            Register<BuildDynamicValueActionYaml>(builders, (action, context) => BuildDynamicValue(action, context.GetProxyActivityType("BuildDynamicValue"), context.ValueExpressionTypes, context.DynamicValueType, context.VariableTypes));
             Register<WhileActionYaml>(builders, BuildWhile);
             Register<IfActionYaml>(builders, BuildIf);
             return builders;
@@ -724,9 +728,47 @@ namespace SPNet.Workflow.WfSerializer
         {
             var document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace);
             var root = document.Root ?? throw new InvalidOperationException("Workflow XAML has no root element.");
-            root.SetAttributeValue(XNamespace.Xmlns + "local", "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities;assembly=Microsoft.SharePoint.WorkflowServices.Activities.Proxy");
-            root.SetAttributeValue(XNamespace.Xmlns + "p", "clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy");
+            foreach (var element in document.Descendants().Where(e => e.Name.Namespace == SharePointNamespace).ToList()) element.Name = SharePointProxyNamespace + element.Name.LocalName;
+            foreach (var element in document.Descendants().Where(e => e.Name.Namespace == SharePointExpressionNamespace).ToList()) element.Name = SharePointExpressionProxyNamespace + element.Name.LocalName;
+            foreach (var element in document.Descendants().Where(e => e.Name.Namespace == Workflow2012ActivitiesNamespace).ToList())
+            {
+                element.Name = IsMicrosoftActivitiesExpression(element.Name.LocalName) ? MicrosoftActivitiesExpressionProxyNamespace + element.Name.LocalName : MicrosoftActivitiesProxyNamespace + element.Name.LocalName;
+            }
+            root.SetAttributeValue(XNamespace.Xmlns + "local", SharePointProxyNamespace.NamespaceName);
+            var microsoftActivitiesPrefix = root.GetPrefixOfNamespace(Workflow2012ActivitiesNamespace);
+            var microsoftActivitiesExpressionPrefix = root.GetPrefixOfNamespace(MicrosoftActivitiesExpressionProxyNamespace);
+            if (string.IsNullOrWhiteSpace(microsoftActivitiesPrefix)) microsoftActivitiesPrefix = "ma";
+            if (string.IsNullOrWhiteSpace(microsoftActivitiesExpressionPrefix)) microsoftActivitiesExpressionPrefix = "mae";
+            root.SetAttributeValue(XNamespace.Xmlns + microsoftActivitiesPrefix, MicrosoftActivitiesProxyNamespace.NamespaceName);
+            root.SetAttributeValue(XNamespace.Xmlns + microsoftActivitiesExpressionPrefix, MicrosoftActivitiesExpressionProxyNamespace.NamespaceName);
             return document.ToString(SaveOptions.DisableFormatting);
+        }
+
+        public static string PrepareXamlForDeserializationForTest(string xaml) => PrepareXamlForDeserialization(xaml);
+
+        private static bool IsMicrosoftActivitiesExpression(string localName)
+        {
+            var typeName = localName.Split('.')[0];
+            return typeName.Equals("ToString", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("FormatString", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("ParseDate", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("ReplaceString", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("Substring", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("Trim", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("Convert", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("And", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("Or", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("Not", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("IsEqualBoolean", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("IsEqualString", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("IsEqualNumber", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("ContainsString", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("StartsWithString", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("EndsWithString", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("IsLessThan", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("IsGreaterThan", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("IsLessThanOrEqual", StringComparison.OrdinalIgnoreCase)
+                || typeName.Equals("IsGreaterThanOrEqual", StringComparison.OrdinalIgnoreCase);
         }
 
         internal static string GetDottedWorkflowClassName(string workflowName)

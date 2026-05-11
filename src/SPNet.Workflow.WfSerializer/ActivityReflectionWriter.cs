@@ -12,7 +12,10 @@ namespace SPNet.Workflow.WfSerializer
 
         public static void SetProperty(object target, string propertyName, object value)
         {
-            var property = target.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).FirstOrDefault(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal) && p.CanWrite);
+            var property = target.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .Where(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal) && p.CanWrite)
+                .OrderByDescending(p => value == null || p.PropertyType.IsInstanceOfType(value))
+                .FirstOrDefault();
             if (property == null || !property.CanWrite) throw new InvalidOperationException("Type " + target.GetType().FullName + " does not expose writable property " + propertyName + ".");
             property.SetValue(target, value, null);
         }
@@ -49,6 +52,14 @@ namespace SPNet.Workflow.WfSerializer
             var argumentReference = Activator.CreateInstance(argumentReferenceType, variableName)!;
             var outArgumentType = typeof(OutArgument<>).MakeGenericType(resultType);
             return Activator.CreateInstance(outArgumentType, argumentReference)!;
+        }
+
+        public static object CreateInOutArgument(Type resultType, string variableName)
+        {
+            var argumentReferenceType = typeof(ArgumentReference<>).MakeGenericType(resultType);
+            var argumentReference = Activator.CreateInstance(argumentReferenceType, variableName)!;
+            var inOutArgumentType = typeof(InOutArgument<>).MakeGenericType(resultType);
+            return Activator.CreateInstance(inOutArgumentType, argumentReference)!;
         }
 
         public static object CreateInArgumentReference(Type resultType, string variableName)

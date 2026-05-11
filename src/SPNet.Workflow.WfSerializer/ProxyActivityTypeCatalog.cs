@@ -30,13 +30,16 @@ namespace SPNet.Workflow.WfSerializer
             ExpandInitFormUsers = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.ExpandInitFormUsers");
             SingleTask = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.SingleTask");
             LookupSPListItemPropertyNameInREST = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemPropertyNameInREST");
-            GetDynamicValueProperty = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.GetDynamicValueProperty`1").MakeGenericType(typeof(string));
+            GetDynamicValueProperty = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.GetDynamicValueProperty`1");
+            SetDynamicValueProperty = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.SetDynamicValueProperty");
             ToStringExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ToString");
             ReplaceStringExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ReplaceString");
             SubstringExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.Substring");
             TrimExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.Trim");
             ParseDateExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ParseDate");
             ParseDynamicValueExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.ParseDynamicValue");
+            CountDynamicValueItems = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.CountDynamicValueItems");
+            BuildDynamicValue = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildDynamicValue");
             ConvertTimeZoneFromSPLocalToUtc = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.ConvertTimeZoneFromSPLocalToUtc");
             DynamicValue = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.DynamicValue");
             BuildDictionary = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildDictionary`2").MakeGenericType(typeof(string), typeof(object));
@@ -66,12 +69,15 @@ namespace SPNet.Workflow.WfSerializer
         public Type SingleTask { get; }
         public Type LookupSPListItemPropertyNameInREST { get; }
         public Type GetDynamicValueProperty { get; }
+        public Type? SetDynamicValueProperty { get; }
         public Type ToStringExpression { get; }
         public Type ReplaceStringExpression { get; }
         public Type SubstringExpression { get; }
         public Type TrimExpression { get; }
         public Type? ParseDateExpression { get; }
         public Type? ParseDynamicValueExpression { get; }
+        public Type? CountDynamicValueItems { get; }
+        public Type? BuildDynamicValue { get; }
         public Type? ConvertTimeZoneFromSPLocalToUtc { get; }
         public Type DynamicValue { get; }
         public Type BuildDictionary { get; }
@@ -108,6 +114,9 @@ namespace SPNet.Workflow.WfSerializer
             if (LookupSPListItemIntProperty != null) types["LookupSPListItemIntProperty"] = LookupSPListItemIntProperty;
             if (LookupSPListItemInt32Property != null) types["LookupSPListItemInt32Property"] = LookupSPListItemInt32Property;
             if (LookupSPListItemGuid != null) types["LookupSPListItemGuid"] = LookupSPListItemGuid;
+            if (CountDynamicValueItems != null) types["CountDynamicValueItems"] = CountDynamicValueItems;
+            if (BuildDynamicValue != null) types["BuildDynamicValue"] = BuildDynamicValue;
+            if (SetDynamicValueProperty != null) types["SetDynamicValueProperty"] = SetDynamicValueProperty;
             return types;
         }
 

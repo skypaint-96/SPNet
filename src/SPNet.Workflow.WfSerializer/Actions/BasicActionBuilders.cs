@@ -120,6 +120,7 @@ namespace SPNet.Workflow.WfSerializer
             if (targetType == typeof(DateTime)) return new Assign<DateTime> { To = new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)), Value = ToInArgument<DateTime>(value, valueExpressionTypes) };
             if (targetType == typeof(Guid)) return new Assign<Guid> { To = new OutArgument<Guid>(new ArgumentReference<Guid>(action.To)), Value = ToInArgument<Guid>(value, valueExpressionTypes) };
             if (targetType == typeof(int)) return new Assign<int> { To = new OutArgument<int>(new ArgumentReference<int>(action.To)), Value = ToInArgument<int>(value, valueExpressionTypes) };
+            if (targetType.FullName == "Microsoft.Activities.DynamicValue") return new Assign<object> { To = new OutArgument<object>(new ArgumentReference<object>(action.To)), Value = ToInArgument<object>(value, valueExpressionTypes) };
             return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, valueExpressionTypes) };
         }
 

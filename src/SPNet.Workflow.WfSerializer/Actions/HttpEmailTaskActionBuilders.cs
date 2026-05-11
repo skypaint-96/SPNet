@@ -19,35 +19,64 @@ namespace SPNet.Workflow.WfSerializer
             if (!variableTypes.TryGetValue(action.Source ?? string.Empty, out var sourceType)) throw new InvalidOperationException(action.Type + " action source variable is not declared: " + action.Source);
             if (sourceType != dynamicValueType) throw new InvalidOperationException(action.Type + " action source must be a DynamicValue response variable: " + action.Source);
             if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + action.To);
-            if (targetType != typeof(string)) throw new InvalidOperationException(action.Type + " currently supports String targets only: " + action.To);
 
-            var lookup = ActivityReflectionWriter.Create(getDynamicValuePropertyType);
+            var lookupType = getDynamicValuePropertyType.IsGenericTypeDefinition ? getDynamicValuePropertyType.MakeGenericType(targetType) : getDynamicValuePropertyType;
+            var lookup = ActivityReflectionWriter.Create(lookupType);
             ((Activity)lookup).DisplayName = "Get DynamicValue property";
             ActivityReflectionWriter.SetProperty(lookup, "Source", Activator.CreateInstance(typeof(InArgument<>).MakeGenericType(dynamicValueType), Activator.CreateInstance(typeof(ArgumentValue<>).MakeGenericType(dynamicValueType), action.Source)!)!);
             ActivityReflectionWriter.SetProperty(lookup, "PropertyName", ToInArgument<string>(action.PropertyName, valueExpressionTypes));
-            ActivityReflectionWriter.SetProperty(lookup, "Result", new OutArgument<string>(new ArgumentReference<string>(action.To)));
+            ActivityReflectionWriter.SetProperty(lookup, "Result", ActivityReflectionWriter.CreateOutArgument(targetType, action.To));
             return (Activity)lookup;
         }
 
-        private static Activity BuildDynamicValue(BuildDynamicValueActionYaml action, ValueExpressionTypes valueExpressionTypes, Type dynamicValueType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        private static Activity BuildSetDynamicValueProperty(SetDynamicValuePropertyActionYaml action, Type setDynamicValuePropertyType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            if (!variableTypes.TryGetValue(action.Source ?? string.Empty, out var sourceType)) throw new InvalidOperationException(action.Type + " action source variable is not declared: " + action.Source);
+            if (sourceType != dynamicValueType) throw new InvalidOperationException(action.Type + " action source must be a DynamicValue variable: " + action.Source);
+
+            var resultName = string.IsNullOrWhiteSpace(action.To) ? action.Source : action.To;
+            if (!variableTypes.TryGetValue(resultName ?? string.Empty, out var targetType)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + resultName);
+            if (targetType != dynamicValueType) throw new InvalidOperationException(action.Type + " action target must be a DynamicValue variable: " + resultName);
+
+            var set = ActivityReflectionWriter.Create(setDynamicValuePropertyType);
+            ((Activity)set).DisplayName = "Set DynamicValue property";
+            ActivityReflectionWriter.SetProperty(set, "Source", ActivityReflectionWriter.CreateInArgumentReference(dynamicValueType, action.Source));
+            ActivityReflectionWriter.SetProperty(set, "PropertyName", ToInArgument<string>(action.PropertyName, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(set, "PropertyValue", ToDynamicValuePropertyArgument(action.Value ?? new ExpressionYaml(), action.ValueType, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(set, "Result", ActivityReflectionWriter.CreateOutArgument(dynamicValueType, resultName));
+            return (Activity)set;
+        }
+
+        private static Activity BuildDynamicValue(BuildDynamicValueActionYaml action, Type buildDynamicValueType, ValueExpressionTypes valueExpressionTypes, Type dynamicValueType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
         {
             if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + action.To);
             if (targetType != dynamicValueType) throw new InvalidOperationException(action.Type + " action target must be a DynamicValue variable: " + action.To);
 
-            var buildDictionary = ActivityReflectionWriter.Create(valueExpressionTypes.BuildDictionary);
-            ((Activity)buildDictionary).DisplayName = "Build DynamicValue";
-            var values = ActivityReflectionWriter.GetProperty(buildDictionary, "Values", "BuildDictionary does not expose Values.");
-            var addMethod = values.GetType().GetMethods().First(m => m.Name == "Add" && m.GetParameters().Length == 2);
+            var build = ActivityReflectionWriter.Create(buildDynamicValueType);
+            ((Activity)build).DisplayName = "Build DynamicValue";
+            var values = ActivityReflectionWriter.GetProperty(build, "Properties", "BuildDynamicValue does not expose Properties.");
+            var addMethod = values.GetType().GetMethods().First(m => m.Name == "Add" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(string));
             foreach (var entry in action.Entries ?? new List<DynamicValueEntryYaml>())
             {
-                addMethod.Invoke(values, new[] { entry.Key, ToDictionaryObjectArgument(entry, valueExpressionTypes) });
+                addMethod.Invoke(values, new object[] { entry.Key, ToDynamicValuePropertyArgument(entry.Value ?? new ExpressionYaml(), entry.ValueType, valueExpressionTypes) });
             }
 
-            var assignType = typeof(Assign<>).MakeGenericType(dynamicValueType);
-            var assign = (Activity)Activator.CreateInstance(assignType)!;
-            ActivityReflectionWriter.SetProperty(assign, "To", ActivityReflectionWriter.CreateOutArgument(dynamicValueType, action.To));
-            ActivityReflectionWriter.SetProperty(assign, "Value", ActivityReflectionWriter.CreateInArgument(dynamicValueType, buildDictionary));
-            return assign;
+            ActivityReflectionWriter.SetProperty(build, "Result", ActivityReflectionWriter.CreateInOutArgument(dynamicValueType, action.To));
+            return (Activity)build;
+        }
+
+        private static Activity BuildCountDynamicValueItems(CountDynamicValueItemsActionYaml action, Type countDynamicValueItemsType, Type dynamicValueType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            if (!variableTypes.TryGetValue(action.Source ?? string.Empty, out var sourceType)) throw new InvalidOperationException(action.Type + " action source variable is not declared: " + action.Source);
+            if (sourceType != dynamicValueType) throw new InvalidOperationException(action.Type + " action source must be a DynamicValue variable: " + action.Source);
+            if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException(action.Type + " action target variable is not declared: " + action.To);
+            if (targetType != typeof(int)) throw new InvalidOperationException(action.Type + " action target must be an Int32 variable: " + action.To);
+
+            var count = ActivityReflectionWriter.Create(countDynamicValueItemsType);
+            ((Activity)count).DisplayName = "Count DynamicValue items";
+            ActivityReflectionWriter.SetProperty(count, "Source", Activator.CreateInstance(typeof(InArgument<>).MakeGenericType(dynamicValueType), Activator.CreateInstance(typeof(ArgumentValue<>).MakeGenericType(dynamicValueType), action.Source)!)!);
+            ActivityReflectionWriter.SetProperty(count, "Result", new OutArgument<int>(new ArgumentReference<int>(action.To)));
+            return (Activity)count;
         }
 
         private static InArgument<object> ToDictionaryObjectArgument(DynamicValueEntryYaml entry, ValueExpressionTypes valueExpressionTypes)
@@ -60,6 +89,17 @@ namespace SPNet.Workflow.WfSerializer
             if (valueType == "guid" || expression.Literal is Guid) return new InArgument<object>((Activity<object>)new Cast<Guid, object> { Operand = ToInArgument<Guid>(expression, valueExpressionTypes) });
             if (valueType == "double" || valueType == "number") return new InArgument<object>((Activity<object>)new Cast<double, object> { Operand = ToInArgument<double>(expression, valueExpressionTypes) });
             return new InArgument<object>((Activity<object>)new Cast<string, object> { Operand = ToInArgument<string>(expression, valueExpressionTypes) });
+        }
+
+        private static Argument ToDynamicValuePropertyArgument(ExpressionYaml expression, string valueType, ValueExpressionTypes valueExpressionTypes)
+        {
+            var normalized = (valueType ?? expression.ValueType ?? string.Empty).Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+            if (normalized == "boolean" || normalized == "bool" || expression.Literal is bool) return ToInArgument<bool>(expression, valueExpressionTypes);
+            if (normalized == "int32" || normalized == "int" || normalized == "integer" || expression.Literal is int) return ToInArgument<int>(expression, valueExpressionTypes);
+            if (normalized == "datetime" || normalized == "date" || expression.Literal is DateTime) return ToInArgument<DateTime>(expression, valueExpressionTypes);
+            if (normalized == "guid" || expression.Literal is Guid) return ToInArgument<Guid>(expression, valueExpressionTypes);
+            if (normalized == "double" || normalized == "number") return ToInArgument<double>(expression, valueExpressionTypes);
+            return ToInArgument<string>(expression, valueExpressionTypes);
         }
 
         private static Activity BuildCallHttpWebService(CallHttpWebServiceActionYaml action, Type callHttpWebServiceType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes)

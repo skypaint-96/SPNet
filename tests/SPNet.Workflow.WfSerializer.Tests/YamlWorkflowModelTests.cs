@@ -29,6 +29,10 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("getDictionaryItem", typeof(GetDynamicValuePropertyActionYaml))]
         [DataRow("getDictionaryValue", typeof(GetDynamicValuePropertyActionYaml))]
         [DataRow("getResponseProperty", typeof(GetDynamicValuePropertyActionYaml))]
+        [DataRow("setDynamicValueProperty", typeof(SetDynamicValuePropertyActionYaml))]
+        [DataRow("setDictionaryItem", typeof(SetDynamicValuePropertyActionYaml))]
+        [DataRow("setDictionaryValue", typeof(SetDynamicValuePropertyActionYaml))]
+        [DataRow("setResponseProperty", typeof(SetDynamicValuePropertyActionYaml))]
         [DataRow("buildDynamicValue", typeof(BuildDynamicValueActionYaml))]
         [DataRow("buildDictionary", typeof(BuildDynamicValueActionYaml))]
         [DataRow("createDictionary", typeof(BuildDynamicValueActionYaml))]
@@ -61,6 +65,7 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow(typeof(StringSubstringActionYaml))]
         [DataRow(typeof(StringTrimActionYaml))]
         [DataRow(typeof(BuildDynamicValueActionYaml))]
+        [DataRow(typeof(SetDynamicValuePropertyActionYaml))]
         [DataRow(typeof(WhileActionYaml))]
         [DataRow(typeof(IfActionYaml))]
         public void BuildDispatch_RegistersRepresentativeSupportedActions(Type actionModelType)
@@ -123,6 +128,7 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("sendEmail", "sendEmail action requires 'to'.")]
         [DataRow("singleTask", "singleTask action requires 'assignedTo'.")]
         [DataRow("getDynamicValueProperty", "getDynamicValueProperty action requires 'source'.")]
+        [DataRow("setDynamicValueProperty", "setDynamicValueProperty action requires 'source'.")]
         [DataRow("buildDynamicValue", "buildDynamicValue action requires 'to'.")]
         [DataRow("lookupRestPropertyName", "lookupRestPropertyName action requires 'to'.")]
         [DataRow("replaceString", "replaceString action requires 'to'.")]
@@ -274,6 +280,89 @@ stages:
             {
                 if (File.Exists(outputPath)) File.Delete(outputPath);
             }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_SupportsDownloadedDynamicArrayWorkflowShape()
+        {
+            var inputPath = FindRepoFile("artifacts", "DynamicArrayWFEx.downloaded.xaml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Downloaded DynamicArrayWFEx XAML artifact is not available in this checkout.");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+                var actions = workflow.Stages.SelectMany(s => s.Actions).ToList();
+
+                Assert.AreEqual("DynamicArrayWFEx", workflow.Name);
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "varRequestHeaders" && v.Type == "DynamicValue"), "Expected DynamicValue request-headers variable.");
+                Assert.AreEqual(0, workflow.Parameters.Count, "Downloaded DynamicArrayWFEx has no FormField metadata, so x:Members should not be promoted to parameters.");
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "dictionary" && v.Type == "DynamicValue"), "Expected DynamicValue dictionary runtime variable.");
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "varResults" && v.Type == "DynamicValue"), "Expected DynamicValue response array variable.");
+                Assert.IsTrue(actions.OfType<CallHttpWebServiceActionYaml>().Any(), "Expected exported HTTP action.");
+                Assert.IsTrue(actions.OfType<GetDynamicValuePropertyActionYaml>().Any(a => string.Equals(a.To, "varResults", StringComparison.OrdinalIgnoreCase) && string.Equals(a.ValueType, "DynamicValue", StringComparison.OrdinalIgnoreCase)), "Expected exported DynamicValue array extraction.");
+                Assert.IsTrue(actions.OfType<CountDynamicValueItemsActionYaml>().Any(a => string.Equals(a.Source, "varResults", StringComparison.OrdinalIgnoreCase) && string.Equals(a.To, "count", StringComparison.OrdinalIgnoreCase)), "Expected exported DynamicValue array item count.");
+                var loop = actions.OfType<WhileActionYaml>().Single(w => string.Equals(w.Condition.Type, "isLessThan", StringComparison.OrdinalIgnoreCase));
+                Assert.AreEqual(4, loop.Actions.Count, "Expected exported array loop body actions.");
+                CollectionAssert.AreEquivalent(new[] { "varNumericProp", "varBoolprop", "varIntProp", "varDateProp" }, loop.Actions.OfType<GetDynamicValuePropertyActionYaml>().Select(a => a.To).ToArray(), "Expected DynamicArrayWFEx loop body dynamic property reads.");
+                Assert.IsFalse(workflow.ExportWarnings.Any(w => w.IndexOf("unsupported", StringComparison.OrdinalIgnoreCase) >= 0), "DynamicArrayWFEx export should not report unsupported constructs.");
+            }
+            finally
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_ReexportsDynamicArrayRoundtripLoopBodyActions()
+        {
+            var inputPath = FindRepoFile("artifacts", "DynamicArrayWFEx.roundtrip.xaml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Roundtrip DynamicArrayWFEx XAML artifact is not available in this checkout.");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-dynamic-array-reexport-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+                var loop = workflow.Stages.SelectMany(s => s.Actions).OfType<WhileActionYaml>().Single();
+
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "varNumericProp" && v.Type == "Double"), "Expected numeric property to remain a workflow variable.");
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "varBoolprop" && v.Type == "Boolean"), "Expected boolean property to remain a workflow variable.");
+                Assert.IsFalse(workflow.Parameters.Any(p => p.Name == "varNumericProp" || p.Name == "varBoolprop" || p.Name == "varDateProp"), "Loop body result variables must not be exported as initiation parameters.");
+                Assert.AreEqual(4, loop.Actions.Count, "Expected roundtrip re-export to preserve loop body actions.");
+                CollectionAssert.AreEquivalent(new[] { "varNumericProp", "varBoolprop", "varIntProp", "varDateProp" }, loop.Actions.OfType<GetDynamicValuePropertyActionYaml>().Select(a => a.To).ToArray(), "Expected DynamicArrayWFEx loop body dynamic property reads to survive re-export.");
+            }
+            finally
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void PrepareXamlForDeserialization_MapsGenericMicrosoftExpressionComparisons()
+        {
+            var prepared = WfActivityBuilderSerializer.PrepareXamlForDeserializationForTest(@"<Activity x:Class=""ComparisonWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""><While><While.Condition><p:IsLessThan x:TypeArguments=""x:Double""><p:IsLessThan.Left><InArgument x:TypeArguments=""x:Double"">1</InArgument></p:IsLessThan.Left><p:IsLessThan.Right><InArgument x:TypeArguments=""x:Double""><p:Convert x:TypeArguments=""x:Int32, x:Double""><p:Convert.Input><InArgument x:TypeArguments=""x:Int32"">2</InArgument></p:Convert.Input></p:Convert></InArgument></p:IsLessThan.Right></p:IsLessThan></While.Condition></While></Activity>");
+            var document = XDocument.Parse(prepared);
+            XNamespace expressionProxy = "clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy";
+
+            Assert.IsTrue(document.Descendants(expressionProxy + "IsLessThan").Any(), "Expected IsLessThan to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "Convert").Any(), "Expected nested Convert to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "IsLessThan").Any(e => ((string?)e.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "x:Double"), "Expected x:Double type arguments to be preserved for WF generic closure.");
+        }
+
+        [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
+        public void InspectWorkflowXaml_DeserializesDownloadedDynamicArrayWorkflow()
+        {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
+            var inputPath = FindRepoFile("artifacts", "DynamicArrayWFEx.downloaded.xaml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Downloaded DynamicArrayWFEx XAML artifact is not available in this checkout.");
+
+            var report = WfActivityBuilderSerializer.InspectWorkflowXaml(inputPath, cacheFolder);
+
+            StringAssert.Contains(report, "LoadedType: System.Activities.ActivityBuilder");
+            StringAssert.Contains(report, "Property: varIndex Type=System.Activities.InArgument`1[System.Double]");
+            StringAssert.Contains(report, "Microsoft.Activities.GetDynamicValueProperty`1[[Microsoft.Activities.DynamicValue");
+            Assert.IsFalse(report.Contains("WF deserialization failed"), report);
         }
 
         private static string FindRepoFile(params string[] relativeParts)
@@ -807,7 +896,7 @@ stages:
         }
 
         [TestMethod]
-        public void ExportWorkflowYaml_ExportsXamlOnlyInArgumentParametersConservatively()
+        public void ExportWorkflowYaml_ExportsXamlOnlyInArgumentsAsVariablesWithoutFormFieldMetadata()
         {
             var inputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-export-" + Guid.NewGuid().ToString("N") + ".xaml");
             var outputPath = Path.Combine(Path.GetTempPath(), "spnet-parameter-export-" + Guid.NewGuid().ToString("N") + ".yml");
@@ -817,12 +906,12 @@ stages:
                 WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
                 var workflow = WorkflowYaml.Load(outputPath);
 
-                Assert.AreEqual(4, workflow.Parameters.Count);
-                Assert.AreEqual("Text", workflow.Parameters.Single(p => p.Name == "titleParam").Type);
-                Assert.AreEqual("Boolean", workflow.Parameters.Single(p => p.Name == "approved").Type);
-                Assert.AreEqual("Number", workflow.Parameters.Single(p => p.Name == "amount").Type);
-                Assert.AreEqual("DateTime", workflow.Parameters.Single(p => p.Name == "dueDate").Type);
-                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("XAML-only parameter export")));
+                Assert.AreEqual(0, workflow.Parameters.Count);
+                Assert.AreEqual("String", workflow.Variables.Single(v => v.Name == "titleParam").Type);
+                Assert.AreEqual("Boolean", workflow.Variables.Single(v => v.Name == "approved").Type);
+                Assert.AreEqual("Double", workflow.Variables.Single(v => v.Name == "amount").Type);
+                Assert.AreEqual("DateTime", workflow.Variables.Single(v => v.Name == "dueDate").Type);
+                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("XAML-only variable export")));
             }
             finally
             {
@@ -867,7 +956,7 @@ stages:
                 Assert.AreEqual("FALSE", note.Sortable);
                 Assert.AreEqual("Compatible", note.RichTextMode);
                 Assert.AreEqual("Image", workflow.Parameters.Single(p => p.Name == "urlParam").Format);
-                Assert.AreEqual("Text", workflow.Parameters.Single(p => p.Name == "legacyOnly").Type, "XAML-only parameters not present in FormField should remain available.");
+                Assert.IsTrue(workflow.Variables.Any(v => v.Name == "legacyOnly" && v.Type == "String"), "XAML-only members not present in FormField should remain variables.");
                 Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("FormField metadata export")), "Expected FormField metadata warning.");
                 Assert.IsFalse(workflow.ExportWarnings.Any(w => w.Contains("XAML-only parameter export")), "FormField export should not emit the conservative XAML-only parameter warning.");
             }
@@ -1199,6 +1288,14 @@ stages:
         source: responseContent
         propertyName: Title
         to: readBackTitle";
+                case "setDynamicValueProperty":
+                case "setDictionaryItem":
+                case "setDictionaryValue":
+                case "setResponseProperty":
+                    return "      - type: " + actionType + @"
+        source: responseContent
+        propertyName: Title
+        value: Experimental title";
                 case "buildDynamicValue":
                 case "buildDictionary":
                 case "createDictionary":

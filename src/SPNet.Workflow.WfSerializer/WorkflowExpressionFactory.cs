@@ -47,6 +47,7 @@ namespace SPNet.Workflow.WfSerializer
             expression = expression ?? new ExpressionYaml();
             if (string.Equals(expression.Type, "toString", StringComparison.OrdinalIgnoreCase) && expression.Value != null) expression = new ExpressionYaml { ToString = expression.Value };
             if (!string.IsNullOrWhiteSpace(expression.Variable)) return new InArgument<T>(new ArgumentValue<T>(expression.Variable));
+            if (expression.Literal is string literal && string.Equals(literal, "<exported expression>", StringComparison.OrdinalIgnoreCase)) return new InArgument<T>((T)Convert.ChangeType(DefaultLiteral(typeof(T)), typeof(T)));
             if (expression.ToString != null)
             {
                 var toString = ActivityReflectionWriter.Create(valueExpressionTypes.ToStringExpression);
