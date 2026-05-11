@@ -157,6 +157,7 @@ namespace SPNet.Workflow.WfSerializer
             Register<SingleTaskActionYaml>(builders, (action, context) => BuildSingleTask(action, context.GetProxyActivityType("SingleTask"), context.ValueExpressionTypes));
             Register<LookupRestPropertyNameActionYaml>(builders, (action, context) => BuildLookupRestPropertyName(action, context.GetProxyActivityType("LookupSPListItemPropertyNameInREST"), context.ValueExpressionTypes));
             Register<GetDynamicValuePropertyActionYaml>(builders, (action, context) => BuildGetDynamicValueProperty(action, context.GetProxyActivityType("GetDynamicValueProperty"), context.DynamicValueType, context.ValueExpressionTypes, context.VariableTypes));
+            Register<BuildDynamicValueActionYaml>(builders, (action, context) => BuildDynamicValue(action, context.ValueExpressionTypes, context.DynamicValueType, context.VariableTypes));
             Register<WhileActionYaml>(builders, BuildWhile);
             Register<IfActionYaml>(builders, BuildIf);
             return builders;

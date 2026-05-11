@@ -254,7 +254,7 @@ namespace SPNet.Workflow.WfSerializer
             if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Bool", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
             if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Date", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
             if (string.Equals(type, "Guid", StringComparison.OrdinalIgnoreCase)) return typeof(Guid);
-            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("DynamicValue variables are only available as HTTP response targets and are emitted using the SharePoint Designer proxy type at build time.");
+            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) return Type.GetType("Microsoft.Activities.DynamicValue, Microsoft.Activities.Proxy", throwOnError: false) ?? typeof(object);
             if (string.Equals(type, "Int32", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Int", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Integer", StringComparison.OrdinalIgnoreCase)) return typeof(int);
             if (string.Equals(type, "String", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Text", StringComparison.OrdinalIgnoreCase)) return typeof(string);
             throw new InvalidOperationException("Unsupported variable type: " + type);
@@ -651,6 +651,28 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    public sealed class BuildDynamicValueActionYaml : WorkflowActionYaml, ITargetedActionYaml
+    {
+        public BuildDynamicValueActionYaml() { Type = "buildDynamicValue"; }
+        public List<DynamicValueEntryYaml> Entries { get; set; } = new List<DynamicValueEntryYaml>();
+        public string To { get; set; } = string.Empty;
+
+        public override void Validate()
+        {
+            base.Validate();
+            RequireTo();
+            if (Entries == null || Entries.Count == 0) throw new InvalidOperationException(Type + " action requires at least one entry.");
+            if (Entries.Any(e => e == null || string.IsNullOrWhiteSpace(e.Key))) throw new InvalidOperationException(Type + " action entries require non-empty keys.");
+        }
+    }
+
+    public sealed class DynamicValueEntryYaml
+    {
+        public string Key { get; set; } = string.Empty;
+        public ExpressionYaml Value { get; set; } = new ExpressionYaml();
+        public string ValueType { get; set; } = string.Empty;
+    }
+
     public sealed class LookupRestPropertyNameActionYaml : WorkflowActionYaml, ITargetedActionYaml
     {
         public LookupRestPropertyNameActionYaml() { Type = "lookupRestPropertyName"; }
@@ -742,6 +764,7 @@ namespace SPNet.Workflow.WfSerializer
             Register(factories, y => new SendEmailActionYaml { Type = y.Type ?? string.Empty, To = y.To ?? new ExpressionYaml(), Cc = y.Cc ?? new ExpressionYaml { Literal = string.Empty }, Subject = y.Subject ?? new ExpressionYaml { Literal = string.Empty }, Body = y.Body ?? y.BodyExpression ?? new ExpressionYaml { Literal = string.Empty } }, "sendEmail", "email");
             Register(factories, y => new SingleTaskActionYaml { Type = y.Type ?? string.Empty, AssignedTo = y.AssignedTo ?? new ExpressionYaml(), Title = y.Title ?? new ExpressionYaml(), Body = y.TaskBody ?? y.BodyExpression ?? y.Body ?? new ExpressionYaml { Literal = string.Empty }, DueDate = y.DueDate ?? new ExpressionYaml(), AssignmentEmailSubject = y.AssignmentEmailSubject ?? new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" }, AssignmentEmailBody = y.AssignmentEmailBody ?? new ExpressionYaml(), WaitForTaskCompletion = y.WaitForTaskCompletion, WaiveAssignmentEmail = y.WaiveAssignmentEmail, WaiveCancelationEmail = y.WaiveCancelationEmail, ContentTypeId = y.ContentTypeId ?? string.Empty, OutcomeFieldName = y.OutcomeFieldName ?? string.Empty, CompletedStatus = y.CompletedStatus ?? string.Empty, TaskIdTo = y.TaskIdTo ?? string.Empty, OutcomeTo = y.OutcomeTo ?? string.Empty }, "singleTask", "task");
             Register(factories, y => new GetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), To = ReadString(y.To) }, "getDynamicValueProperty", "getDictionaryItem", "getDictionaryValue", "getResponseProperty");
+            Register(factories, y => new BuildDynamicValueActionYaml { Type = y.Type ?? string.Empty, Entries = y.Entries ?? new List<DynamicValueEntryYaml>(), To = ReadString(y.To) }, "buildDynamicValue", "buildDictionary", "createDictionary");
             Register(factories, y => new LookupRestPropertyNameActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml(), PropertyName = y.PropertyName ?? new ExpressionYaml(), To = ReadString(y.To) }, "lookupRestPropertyName", "lookupSPGetItemPropertyNameInREST", "lookupSPListItemPropertyNameInREST");
             Register(factories, y => new WhileActionYaml { Type = y.Type ?? string.Empty, Condition = y.Condition ?? new ComparisonExpressionYaml(), Actions = y.Actions ?? new List<WorkflowActionYaml>() }, "while", "loop");
             Register(factories, y => new IfActionYaml { Type = y.Type ?? string.Empty, Condition = y.Condition ?? new ComparisonExpressionYaml(), Then = y.Then ?? new List<WorkflowActionYaml>(), Else = y.Else ?? new List<WorkflowActionYaml>() }, "if");
@@ -845,6 +868,10 @@ namespace SPNet.Workflow.WfSerializer
             {
                 WriteScalar(emitter, "type", dynamicProperty.Type); WriteScalar(emitter, "source", dynamicProperty.Source); WriteObject(emitter, serializer, "propertyName", dynamicProperty.PropertyName); WriteScalar(emitter, "to", dynamicProperty.To);
             }
+            else if (value is BuildDynamicValueActionYaml buildDynamicValue)
+            {
+                WriteScalar(emitter, "type", buildDynamicValue.Type); WriteObject(emitter, serializer, "entries", buildDynamicValue.Entries); WriteScalar(emitter, "to", buildDynamicValue.To);
+            }
             else if (value is LookupRestPropertyNameActionYaml restProperty)
             {
                 WriteScalar(emitter, "type", restProperty.Type); WriteObject(emitter, serializer, "listId", restProperty.ListId); WriteObject(emitter, serializer, "propertyName", restProperty.PropertyName); WriteScalar(emitter, "to", restProperty.To);
@@ -902,6 +929,7 @@ namespace SPNet.Workflow.WfSerializer
             public string OutcomeTo { get; set; } = string.Empty;
             public ExpressionYaml PropertyName { get; set; } = new ExpressionYaml();
             public ExpressionYaml Key { get; set; } = new ExpressionYaml();
+            public List<DynamicValueEntryYaml> Entries { get; set; } = new List<DynamicValueEntryYaml>();
             public string FieldName { get; set; } = string.Empty;
             public string Source { get; set; } = string.Empty;
             public string From { get; set; } = string.Empty;

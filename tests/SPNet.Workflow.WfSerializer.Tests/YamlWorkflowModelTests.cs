@@ -29,6 +29,9 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("getDictionaryItem", typeof(GetDynamicValuePropertyActionYaml))]
         [DataRow("getDictionaryValue", typeof(GetDynamicValuePropertyActionYaml))]
         [DataRow("getResponseProperty", typeof(GetDynamicValuePropertyActionYaml))]
+        [DataRow("buildDynamicValue", typeof(BuildDynamicValueActionYaml))]
+        [DataRow("buildDictionary", typeof(BuildDynamicValueActionYaml))]
+        [DataRow("createDictionary", typeof(BuildDynamicValueActionYaml))]
         [DataRow("createListItem", typeof(CreateListItemActionYaml))]
         [DataRow("updateListItem", typeof(UpdateListItemActionYaml))]
         [DataRow("deleteListItem", typeof(DeleteListItemActionYaml))]
@@ -57,6 +60,7 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow(typeof(StringReplaceActionYaml))]
         [DataRow(typeof(StringSubstringActionYaml))]
         [DataRow(typeof(StringTrimActionYaml))]
+        [DataRow(typeof(BuildDynamicValueActionYaml))]
         [DataRow(typeof(WhileActionYaml))]
         [DataRow(typeof(IfActionYaml))]
         public void BuildDispatch_RegistersRepresentativeSupportedActions(Type actionModelType)
@@ -119,6 +123,7 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("sendEmail", "sendEmail action requires 'to'.")]
         [DataRow("singleTask", "singleTask action requires 'assignedTo'.")]
         [DataRow("getDynamicValueProperty", "getDynamicValueProperty action requires 'source'.")]
+        [DataRow("buildDynamicValue", "buildDynamicValue action requires 'to'.")]
         [DataRow("lookupRestPropertyName", "lookupRestPropertyName action requires 'to'.")]
         [DataRow("replaceString", "replaceString action requires 'to'.")]
         [DataRow("substring", "substring action requires 'to'.")]
@@ -148,6 +153,49 @@ namespace SPNet.Workflow.WfSerializer.Tests
         responseStatusCodeTo: statusCode")));
 
             StringAssert.Contains(ex.Message, "requestType must be GET");
+        }
+
+        [TestMethod]
+        public void Load_AllowsDynamicValueVariablesAndBuildDynamicValueEntries()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: DynamicArrayShape
+variables:
+  - name: requestPayload
+    type: DynamicValue
+  - name: title
+    type: String
+stages:
+  - name: Stage 1
+    actions:
+      - type: buildDynamicValue
+        to: requestPayload
+        entries:
+          - key: Title
+            value:
+              variable: title
+          - key: Count
+            value: 2
+            valueType: Int32
+");
+
+            var action = workflow.Stages.Single().Actions.OfType<BuildDynamicValueActionYaml>().Single();
+            Assert.AreEqual("requestPayload", action.To);
+            Assert.AreEqual(2, action.Entries.Count);
+            Assert.AreEqual("Count", action.Entries[1].Key);
+            Assert.AreEqual("Int32", action.Entries[1].ValueType);
+        }
+
+        [TestMethod]
+        public void Load_ValidatesBuildDynamicValueEntries()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(CreateWorkflowYaml(@"
+      - type: buildDynamicValue
+        to: responseContent
+        entries:
+          - value: missing key")));
+
+            StringAssert.Contains(ex.Message, "entries require non-empty keys");
         }
 
         [TestMethod]
@@ -1151,6 +1199,17 @@ stages:
         source: responseContent
         propertyName: Title
         to: readBackTitle";
+                case "buildDynamicValue":
+                case "buildDictionary":
+                case "createDictionary":
+                    return "      - type: " + actionType + @"
+        to: responseContent
+        entries:
+          - key: Title
+            value: Test
+          - key: Count
+            value: 2
+            valueType: Int32";
                 case "createListItem":
                     return @"      - type: createListItem
         listId:

@@ -9,6 +9,7 @@ namespace SPNet.Workflow.WfSerializer
         public static Dictionary<string, Type> Infer(WorkflowYaml workflow, Type dynamicValueType, string emptyDynamicValueArgumentName, string requestHeadersArgumentName)
         {
             var variableTypes = workflow.Variables?.ToDictionary(v => v.Name, v => WorkflowTypeMapper.MapDeclaredVariableType(v.Type), StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+            foreach (var variable in workflow.Variables ?? Enumerable.Empty<VariableYaml>()) if (string.Equals(variable.Type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) variableTypes[variable.Name] = dynamicValueType;
             var actions = EnumerateActions(workflow).ToList();
 
             foreach (var target in actions.OfType<CalcActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(double));
@@ -19,6 +20,7 @@ namespace SPNet.Workflow.WfSerializer
             foreach (var target in actions.OfType<LookupListItemIntPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(int));
             foreach (var target in actions.OfType<CallHttpWebServiceActionYaml>().SelectMany(a => new[] { a.ResponseContentTo, a.ResponseHeadersTo })) AddIfMissing(variableTypes, target, dynamicValueType);
             foreach (var target in actions.OfType<GetDynamicValuePropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<BuildDynamicValueActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, dynamicValueType);
             foreach (var target in actions.OfType<SingleTaskActionYaml>().Select(a => a.TaskIdTo)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<SingleTaskActionYaml>().Select(a => a.OutcomeTo)) AddIfMissing(variableTypes, target, typeof(int));
 
