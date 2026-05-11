@@ -35,9 +35,12 @@ namespace SPNet.Workflow.WfSerializer
             ReplaceStringExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ReplaceString");
             SubstringExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.Substring");
             TrimExpression = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.Trim");
+            ParseDateExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.Expressions.ParseDate");
+            ParseDynamicValueExpression = GetOptionalType(microsoftActivitiesAssembly, "Microsoft.Activities.ParseDynamicValue");
+            ConvertTimeZoneFromSPLocalToUtc = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.ConvertTimeZoneFromSPLocalToUtc");
             DynamicValue = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.DynamicValue");
             BuildDictionary = GetRequiredType(microsoftActivitiesAssembly, "Microsoft.Activities.BuildDictionary`2").MakeGenericType(typeof(string), typeof(object));
-            ComparisonExpressionTypes = new WfActivityBuilderSerializer.ComparisonExpressionTypes(microsoftActivitiesAssembly);
+            ComparisonExpressionTypes = new WfActivityBuilderSerializer.ComparisonExpressionTypes(microsoftActivitiesAssembly, sharePointAssembly);
         }
 
         public Type Calc { get; }
@@ -67,12 +70,15 @@ namespace SPNet.Workflow.WfSerializer
         public Type ReplaceStringExpression { get; }
         public Type SubstringExpression { get; }
         public Type TrimExpression { get; }
+        public Type? ParseDateExpression { get; }
+        public Type? ParseDynamicValueExpression { get; }
+        public Type? ConvertTimeZoneFromSPLocalToUtc { get; }
         public Type DynamicValue { get; }
         public Type BuildDictionary { get; }
         public WfActivityBuilderSerializer.ComparisonExpressionTypes ComparisonExpressionTypes { get; }
 
         public WfActivityBuilderSerializer.ValueExpressionTypes CreateValueExpressionTypes() =>
-            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemGuid, BuildDictionary);
+            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemGuid, BuildDictionary, DynamicValue, ParseDateExpression, ConvertTimeZoneFromSPLocalToUtc, ParseDynamicValueExpression);
 
         public Dictionary<string, Type> CreateBuildContextTypes()
         {

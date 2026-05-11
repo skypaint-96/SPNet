@@ -268,6 +268,7 @@ namespace SPNet.Workflow.WfSerializer
                 if (xamlType.IndexOf("Boolean", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(bool);
                 if (xamlType.IndexOf("Double", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(double);
                 if (xamlType.IndexOf("DateTime", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(DateTime);
+                if (xamlType.IndexOf("DynamicValue", StringComparison.OrdinalIgnoreCase) >= 0) return Type.GetType("Microsoft.Activities.DynamicValue, Microsoft.Activities.Proxy", throwOnError: false) ?? typeof(object);
                 if (xamlType.IndexOf("String", StringComparison.OrdinalIgnoreCase) >= 0) return typeof(string);
                 throw new InvalidOperationException("Unsupported parameter xamlType for " + parameter.Name + ": " + parameter.XamlType);
             }
@@ -277,6 +278,7 @@ namespace SPNet.Workflow.WfSerializer
             if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
             if (string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
             if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
+            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) return Type.GetType("Microsoft.Activities.DynamicValue, Microsoft.Activities.Proxy", throwOnError: false) ?? typeof(object);
             throw new InvalidOperationException("Unsupported parameter type for " + parameter.Name + ": " + parameter.Type);
         }
     }
@@ -947,10 +949,18 @@ namespace SPNet.Workflow.WfSerializer
         public string Type { get; set; } = "isLessThan";
         /// <summary>Gets or sets an optional operator alias for the comparison.</summary>
         public string Operator { get; set; } = string.Empty;
+        /// <summary>Gets or sets an optional value type hint for selecting typed SharePoint Designer comparison expressions.</summary>
+        public string ValueType { get; set; } = string.Empty;
         /// <summary>Gets or sets the left comparison operand.</summary>
         public ExpressionYaml Left { get; set; } = new ExpressionYaml();
         /// <summary>Gets or sets the right comparison operand.</summary>
         public ExpressionYaml Right { get; set; } = new ExpressionYaml();
+        /// <summary>Gets or sets the left nested boolean condition for logical operators.</summary>
+        public ComparisonExpressionYaml? LeftCondition { get; set; }
+        /// <summary>Gets or sets the right nested boolean condition for logical operators.</summary>
+        public ComparisonExpressionYaml? RightCondition { get; set; }
+        /// <summary>Gets or sets the nested boolean operand for negation.</summary>
+        public ComparisonExpressionYaml? Operand { get; set; }
 
         /// <summary>
         /// Validates that the comparison specifies a supported operator name.
@@ -990,6 +1000,8 @@ namespace SPNet.Workflow.WfSerializer
         public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
         /// <summary>Gets or sets optional CLR/XAML type metadata used when an object-valued field expression must preserve a non-string type.</summary>
         public string ValueType { get; set; } = string.Empty;
+        /// <summary>Gets or sets the optional SharePoint Designer custom attribute Id for expression activities.</summary>
+        public string DesignerId { get; set; } = string.Empty;
         /// <summary>Gets or sets a nested expression to convert to string.</summary>
         public new ExpressionYaml? ToString { get; set; }
     }
@@ -1007,7 +1019,7 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             return rootDeserializer(typeof(ExpressionYamlSurrogate)) is ExpressionYamlSurrogate s
-                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), ValueType = s.ValueType ?? string.Empty, ToString = s.ToString }
+                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), ValueType = s.ValueType ?? string.Empty, DesignerId = s.DesignerId ?? string.Empty, ToString = s.ToString }
                 : new ExpressionYaml();
         }
 
@@ -1032,6 +1044,7 @@ namespace SPNet.Workflow.WfSerializer
             if (expression.Value != null) WriteObject(emitter, serializer, "value", expression.Value);
             if (expression.Values != null && expression.Values.Count > 0) WriteObject(emitter, serializer, "values", expression.Values);
             if (!string.IsNullOrWhiteSpace(expression.ValueType)) WriteScalar(emitter, "valueType", expression.ValueType);
+            if (!string.IsNullOrWhiteSpace(expression.DesignerId)) WriteScalar(emitter, "designerId", expression.DesignerId);
             if (expression.ToString != null) WriteObject(emitter, serializer, "toString", expression.ToString);
             emitter.Emit(new MappingEnd());
         }
@@ -1048,6 +1061,7 @@ namespace SPNet.Workflow.WfSerializer
             expression.Value == null &&
             (expression.Values == null || expression.Values.Count == 0) &&
             string.IsNullOrWhiteSpace(expression.ValueType) &&
+            string.IsNullOrWhiteSpace(expression.DesignerId) &&
             expression.ToString == null;
 
         private static void WriteScalar(IEmitter emitter, string name, string value)
@@ -1075,6 +1089,7 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml? Value { get; set; }
             public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
             public string ValueType { get; set; } = string.Empty;
+            public string DesignerId { get; set; } = string.Empty;
             public new ExpressionYaml? ToString { get; set; }
         }
     }
