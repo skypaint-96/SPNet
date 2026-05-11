@@ -3,6 +3,7 @@ using System.Activities;
 using System.Activities.Expressions;
 using System.Activities.Statements;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace SPNet.Workflow.WfSerializer
 {
@@ -21,18 +22,19 @@ namespace SPNet.Workflow.WfSerializer
             if (context == null) throw new ArgumentNullException(nameof(context));
 
             var flowchart = BuildFlowchart(workflow, context);
-            var outerSequence = new Sequence { DisplayName = workflow.Name };
-            flowchart.DisplayName = workflow.Name;
+            var outerSequence = new Sequence { DisplayName = workflow.EffectiveDisplayName };
+            flowchart.DisplayName = workflow.EffectiveDisplayName;
             outerSequence.Activities.Add(flowchart);
 
             var builder = new ActivityBuilder
             {
-                Name = string.IsNullOrWhiteSpace(workflow.TechnicalName)
-                    ? WfActivityBuilderSerializer.GetDottedWorkflowClassName(workflow.Name)
-                    : workflow.TechnicalName,
+                Name = string.IsNullOrWhiteSpace(workflow.EffectiveTechnicalName)
+                    ? WfActivityBuilderSerializer.GetDottedWorkflowClassName(workflow.EffectiveDisplayName)
+                    : workflow.EffectiveTechnicalName,
                 Implementation = outerSequence
             };
             AddVariableDeclarations(builder, context.VariableTypes);
+            AddParameterDeclarations(builder, workflow.EffectiveFormFields, context.ParameterTypes);
             return builder;
         }
 
@@ -103,5 +105,28 @@ namespace SPNet.Workflow.WfSerializer
 
         private static DynamicActivityProperty CreateVariableDeclaration(string name, Type valueType) =>
             new DynamicActivityProperty { Name = name, Type = typeof(InArgument<>).MakeGenericType(valueType) };
+
+        private static void AddParameterDeclarations(ActivityBuilder builder, IReadOnlyList<ParameterYaml> parameters, IReadOnlyDictionary<string, Type> parameterTypes)
+        {
+            foreach (var parameter in parameters)
+            {
+                if (!parameterTypes.TryGetValue(parameter.Name, out var valueType)) valueType = WorkflowTypeMapper.MapParameterType(parameter);
+                var property = new DynamicActivityProperty { Name = parameter.Name, Type = typeof(InArgument<>).MakeGenericType(valueType) };
+                if (parameter.Default != null) property.Value = CreateInArgument(valueType, parameter.Default);
+                builder.Properties.Add(property);
+            }
+        }
+
+        private static object CreateInArgument(Type valueType, object defaultValue)
+        {
+            if (valueType == typeof(string)) return new InArgument<string>(Convert.ToString(defaultValue, CultureInfo.InvariantCulture) ?? string.Empty);
+            if (valueType == typeof(bool)) return new InArgument<bool>(Convert.ToBoolean(defaultValue, CultureInfo.InvariantCulture));
+            if (valueType == typeof(double)) return new InArgument<double>(Convert.ToDouble(defaultValue, CultureInfo.InvariantCulture));
+            if (valueType == typeof(DateTime)) return new InArgument<DateTime>(Convert.ToDateTime(defaultValue, CultureInfo.InvariantCulture));
+            if (valueType == typeof(Guid)) return new InArgument<Guid>(defaultValue is Guid guid ? guid : Guid.Parse(Convert.ToString(defaultValue, CultureInfo.InvariantCulture) ?? string.Empty));
+            if (valueType == typeof(int)) return new InArgument<int>(Convert.ToInt32(defaultValue, CultureInfo.InvariantCulture));
+            if (valueType == typeof(object)) return new InArgument<object>(defaultValue);
+            throw new InvalidOperationException("Unsupported parameter default type: " + valueType.FullName);
+        }
     }
 }

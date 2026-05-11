@@ -1,0 +1,99 @@
+schemaVersion: spnet.workflow/v1
+name: SPNetYamlConditionalsTest
+technicalName: SPNetYamlConditionalsTest.MTW
+metadata:
+  displayName: SPNetYamlConditionalsTest
+  technicalName: SPNetYamlConditionalsTest.MTW
+  description: Exercises nested boolean condition trees and typed comparisons from YAML.
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: Site
+variables:
+  - name: testText
+    type: String
+  - name: testFlag
+    type: Boolean
+  - name: testDate
+    type: DateTime
+  - name: comparisonText
+    type: String
+stages:
+  - name: Conditional Capability Test
+    actions:
+      - type: assign
+        to: testText
+        value:
+          literal: Alpha Beta Gamma
+      - type: assign
+        to: testFlag
+        value:
+          literal: true
+      - type: assign
+        to: testDate
+        value:
+          literal: 2026-05-10T12:00:00Z
+      - type: assign
+        to: comparisonText
+        value:
+          literal: Delta
+      - type: if
+        condition:
+          type: and
+          leftCondition:
+            type: or
+            leftCondition:
+              type: and
+              leftCondition:
+                type: isEqualString
+                valueType: String
+                left:
+                  variable: testText
+                right:
+                  literal: Alpha Beta Gamma
+              rightCondition:
+                type: isEqual
+                valueType: Boolean
+                left:
+                  variable: testFlag
+                right:
+                  literal: true
+            rightCondition:
+              type: containsString
+              valueType: String
+              left:
+                variable: testText
+              right:
+                literal: Beta
+          rightCondition:
+            type: and
+            leftCondition:
+              type: isGreaterThan
+              valueType: DateTime
+              left:
+                variable: testDate
+              right:
+                literal: 2026-01-01T00:00:00Z
+            rightCondition:
+              type: not
+              operand:
+                type: isEqualString
+                valueType: String
+                left:
+                  variable: comparisonText
+                right:
+                  literal: Alpha Beta Gamma
+        then:
+          - type: writeHistory
+            message:
+              literal: Conditional test passed nested and/or/not with string, boolean, DateTime, and not-equal negation.
+          - type: setStatus
+            status: Conditional test passed
+        else:
+          - type: writeHistory
+            message:
+              literal: Conditional test failed unexpectedly.
+          - type: setStatus
+            status: Conditional test failed

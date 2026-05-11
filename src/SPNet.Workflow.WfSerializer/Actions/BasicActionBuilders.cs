@@ -120,6 +120,7 @@ namespace SPNet.Workflow.WfSerializer
             if (targetType == typeof(DateTime)) return new Assign<DateTime> { To = new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)), Value = ToInArgument<DateTime>(value, valueExpressionTypes) };
             if (targetType == typeof(Guid)) return new Assign<Guid> { To = new OutArgument<Guid>(new ArgumentReference<Guid>(action.To)), Value = ToInArgument<Guid>(value, valueExpressionTypes) };
             if (targetType == typeof(int)) return new Assign<int> { To = new OutArgument<int>(new ArgumentReference<int>(action.To)), Value = ToInArgument<int>(value, valueExpressionTypes) };
+            if (targetType.FullName == "Microsoft.Activities.DynamicValue") return new Assign<object> { To = new OutArgument<object>(new ArgumentReference<object>(action.To)), Value = ToInArgument<object>(value, valueExpressionTypes) };
             return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, valueExpressionTypes) };
         }
 
@@ -163,6 +164,115 @@ namespace SPNet.Workflow.WfSerializer
                 To = new OutArgument<string>(new ArgumentReference<string>(action.To)),
                 Value = ActivityReflectionWriter.CreateStringInArgumentFromActivity(trim)
             };
+        }
+
+        private static Activity BuildBuildUri(BuildUriActionYaml action, Type buildUriType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateStringManipulationTarget(action, variableTypes);
+            var buildUri = ActivityReflectionWriter.Create(buildUriType);
+            if (HasStringExpression(action.Source)) ActivityReflectionWriter.SetProperty(buildUri, "Source", ToInArgument<string>(action.Source, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(buildUri, "Scheme", ToInArgument<string>(action.Scheme, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(buildUri, "Host", ToInArgument<string>(action.Host, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(buildUri, "Port", ToInArgument<int>(action.Port, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(buildUri, "Path", ToInArgument<string>(action.Path, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(buildUri, "Query", ToInArgument<string>(action.Query, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(buildUri, "Fragment", ToInArgument<string>(action.Fragment, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(buildUri, "Result", new OutArgument<string>(new ArgumentReference<string>(action.To)));
+            return (Activity)buildUri;
+        }
+
+        private static Activity BuildGetConfigurationValue(GetConfigurationValueActionYaml action, Type getConfigurationValueType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateStringManipulationTarget(action, variableTypes);
+            var configuration = ActivityReflectionWriter.Create(getConfigurationValueType);
+            ActivityReflectionWriter.SetProperty(configuration, "Name", action.Name ?? string.Empty);
+            ActivityReflectionWriter.SetProperty(configuration, "DefaultValue", ToInArgument<string>(action.DefaultValue, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(configuration, "Result", new OutArgument<string>(new ArgumentReference<string>(action.To)));
+            return (Activity)configuration;
+        }
+
+        private static Activity BuildGetInstanceAddress(GetInstanceAddressActionYaml action, Type getInstanceAddressType, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateStringManipulationTarget(action, variableTypes);
+            var instanceAddress = ActivityReflectionWriter.Create(getInstanceAddressType);
+            ActivityReflectionWriter.SetProperty(instanceAddress, "Result", new OutArgument<string>(new ArgumentReference<string>(action.To)));
+            return (Activity)instanceAddress;
+        }
+
+        private static Activity BuildSetUserStatus(SetUserStatusActionYaml action, Type setUserStatusType, ValueExpressionTypes valueExpressionTypes)
+        {
+            var status = ActivityReflectionWriter.Create(setUserStatusType);
+            ActivityReflectionWriter.SetProperty(status, "Description", ToInArgument<string>(action.Description, valueExpressionTypes));
+            return (Activity)status;
+        }
+
+        private static Activity BuildCreateTimeSpan(CreateTimeSpanActionYaml action, Type createTimeSpanType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateTargetType(action, variableTypes, typeof(TimeSpan));
+            var timeSpan = ActivityReflectionWriter.Create(createTimeSpanType);
+            ActivityReflectionWriter.SetProperty(timeSpan, "Days", ToInArgument<double>(action.Days, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Hours", ToInArgument<double>(action.Hours, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Minutes", ToInArgument<double>(action.Minutes, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(timeSpan, "Seconds", ToInArgument<double>(action.Seconds, valueExpressionTypes));
+            return new Assign<TimeSpan> { To = new OutArgument<TimeSpan>(new ArgumentReference<TimeSpan>(action.To)), Value = ActivityReflectionWriter.CreateTimeSpanInArgumentFromActivity(timeSpan) };
+        }
+
+        private static Activity BuildGetTimeSpanFields(GetTimeSpanFieldsActionYaml action, Type getTimeSpanFieldsType, ValueExpressionTypes valueExpressionTypes)
+        {
+            var fields = ActivityReflectionWriter.Create(getTimeSpanFieldsType);
+            ActivityReflectionWriter.SetProperty(fields, "Input", ToInArgument<TimeSpan>(action.Input, valueExpressionTypes));
+            SetOptionalOutArgument<int>(fields, "Days", action.DaysTo);
+            SetOptionalOutArgument<int>(fields, "Hours", action.HoursTo);
+            SetOptionalOutArgument<int>(fields, "Minutes", action.MinutesTo);
+            SetOptionalOutArgument<int>(fields, "Seconds", action.SecondsTo);
+            SetOptionalOutArgument<double>(fields, "TotalDays", action.TotalDaysTo);
+            SetOptionalOutArgument<double>(fields, "TotalHours", action.TotalHoursTo);
+            SetOptionalOutArgument<double>(fields, "TotalMinutes", action.TotalMinutesTo);
+            SetOptionalOutArgument<double>(fields, "TotalSeconds", action.TotalSecondsTo);
+            return (Activity)fields;
+        }
+
+        private static Activity BuildDateOffset(DateOffsetActionYaml action, Type dateOffsetType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateTargetType(action, variableTypes, typeof(DateTime));
+            var offset = ActivityReflectionWriter.Create(dateOffsetType);
+            ActivityReflectionWriter.SetProperty(offset, "Input", ToInArgument<DateTime>(action.Input, valueExpressionTypes));
+            if (HasStringExpression(action.TimeSpan)) ActivityReflectionWriter.SetProperty(offset, "TimeSpan", ToInArgument<TimeSpan>(action.TimeSpan, valueExpressionTypes));
+            SetNumericInArgumentIfWritable(offset, "Days", action.Days, valueExpressionTypes);
+            SetNumericInArgumentIfWritable(offset, "Hours", action.Hours, valueExpressionTypes);
+            SetNumericInArgumentIfWritable(offset, "Minutes", action.Minutes, valueExpressionTypes);
+            SetNumericInArgumentIfWritable(offset, "Seconds", action.Seconds, valueExpressionTypes);
+            return new Assign<DateTime> { To = new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)), Value = ActivityReflectionWriter.CreateDateTimeInArgumentFromActivity(offset) };
+        }
+
+        private static Activity BuildDateInRange(DateInRangeActionYaml action, Type dateInRangeType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            ValidateTargetType(action, variableTypes, typeof(bool));
+            var range = ActivityReflectionWriter.Create(dateInRangeType);
+            ActivityReflectionWriter.SetProperty(range, "Input", ToInArgument<DateTime>(action.Input, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(range, "Start", ToInArgument<DateTime>(action.Start, valueExpressionTypes));
+            ActivityReflectionWriter.SetProperty(range, "End", ToInArgument<DateTime>(action.End, valueExpressionTypes));
+            return new Assign<bool> { To = new OutArgument<bool>(new ArgumentReference<bool>(action.To)), Value = ActivityReflectionWriter.CreateBooleanInArgumentFromActivity(range) };
+        }
+
+        private static void SetOptionalOutArgument<T>(object activity, string propertyName, string variableName)
+        {
+            if (!string.IsNullOrWhiteSpace(variableName)) ActivityReflectionWriter.SetProperty(activity, propertyName, new OutArgument<T>(new ArgumentReference<T>(variableName)));
+        }
+
+        private static void SetNumericInArgumentIfWritable(object activity, string propertyName, ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
+        {
+            var property = activity.GetType().GetProperty(propertyName);
+            if (property == null || !property.CanWrite) return;
+            var propertyType = property.PropertyType;
+            if (propertyType == typeof(InArgument<int>)) ActivityReflectionWriter.SetProperty(activity, propertyName, ToInArgument<int>(expression, valueExpressionTypes));
+            else ActivityReflectionWriter.SetProperty(activity, propertyName, ToInArgument<double>(expression, valueExpressionTypes));
+        }
+
+        private static void ValidateTargetType(ITargetedActionYaml action, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes, Type expectedType)
+        {
+            if (!variableTypes.TryGetValue(action.To ?? string.Empty, out var targetType)) throw new InvalidOperationException(action.GetType().Name + " target variable is not declared: " + action.To);
+            if (targetType != expectedType) throw new InvalidOperationException(action.GetType().Name + " target variable must be " + expectedType.Name + ": " + action.To);
         }
 
         private static void ValidateStringManipulationTarget(ITargetedActionYaml action, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)

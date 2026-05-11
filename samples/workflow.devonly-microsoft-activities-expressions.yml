@@ -1,0 +1,273 @@
+# DEV-ONLY SAMPLE: additional Microsoft.Activities / Microsoft.Activities.Expressions support.
+# These activities may be hidden or awkward in SharePoint Designer and may cause SPD UX issues.
+# Prior hidden Microsoft.Activities testing suggests SharePoint workflow runtime can execute them,
+# but use this sample only for development validation and inspect generated XAML before publishing.
+schemaVersion: spnet.workflow/v1
+name: DevOnlyMicrosoftActivitiesExpressions
+metadata:
+  displayName: Dev-only Microsoft.Activities expressions
+  description: Dev-only sample for hidden Microsoft.Activities expression activities; may cause SharePoint Designer UX issues but is expected to be acceptable to workflow runtime.
+variables:
+  - name: sourceText
+    type: String
+  - name: lowerText
+    type: String
+  - name: upperText
+    type: String
+  - name: concatText
+    type: String
+  - name: replacedText
+    type: String
+  - name: substringText
+    type: String
+  - name: trimmedText
+    type: String
+  - name: textLength
+    type: Int32
+  - name: textIndex
+    type: Int32
+  - name: textIsEmpty
+    type: Boolean
+  - name: textContains
+    type: Boolean
+  - name: textStarts
+    type: Boolean
+  - name: textEnds
+    type: Boolean
+  - name: parsedBool
+    type: Boolean
+  - name: nowValue
+    type: DateTime
+  - name: generatedGuid
+    type: Guid
+  - name: parsedGuid
+    type: Guid
+  - name: payload
+    type: DynamicValue
+  - name: hasTitle
+    type: Boolean
+  - name: payloadIsEmpty
+    type: Boolean
+  - name: builtUri
+    type: String
+  - name: cultureName
+    type: String
+  - name: instanceAddress
+    type: String
+  - name: duration
+    type: TimeSpan
+  - name: durationDays
+    type: Int32
+  - name: futureDate
+    type: DateTime
+  - name: dateInRangeResult
+    type: Boolean
+stages:
+  - name: Stage 1
+    actions:
+      - type: assign
+        to: sourceText
+        value: DevOnly Mixed Case
+      - type: assign
+        to: lowerText
+        value:
+          type: toLowerCase
+          value:
+            variable: sourceText
+      - type: assign
+        to: upperText
+        value:
+          type: toUpperCase
+          value:
+            variable: sourceText
+      - type: assign
+        to: concatText
+        value:
+          type: concatString
+          values:
+            - 'lower='
+            -
+              variable: lowerText
+            - '; upper='
+            -
+              variable: upperText
+      - type: assign
+        to: replacedText
+        value:
+          type: replaceString
+          value:
+            variable: concatText
+          oldValue: upper
+          newValue: UPPER
+      - type: assign
+        to: substringText
+        value:
+          type: substring
+          value:
+            variable: replacedText
+          startIndex: 0
+          length: 12
+      - type: assign
+        to: trimmedText
+        value:
+          type: trimString
+          value: '  trim me  '
+      - type: assign
+        to: textLength
+        value:
+          type: stringLength
+          value:
+            variable: concatText
+      - type: assign
+        to: textIndex
+        value:
+          type: indexOfString
+          value:
+            variable: concatText
+          searchValue: upper
+      - type: assign
+        to: textIsEmpty
+        value:
+          type: isEmptyString
+          value:
+            variable: trimmedText
+      - type: assign
+        to: textContains
+        value:
+          type: containsString
+          value:
+            variable: concatText
+          searchValue: lower
+      - type: assign
+        to: textStarts
+        value:
+          type: startsWithString
+          value:
+            variable: concatText
+          searchValue: lower=
+      - type: assign
+        to: textEnds
+        value:
+          type: endsWithString
+          value:
+            variable: concatText
+          searchValue:
+            variable: upperText
+      - type: assign
+        to: parsedBool
+        value:
+          type: parseBoolean
+          value: true
+      - type: assign
+        to: nowValue
+        value:
+          type: currentDate
+      - type: assign
+        to: generatedGuid
+        value:
+          type: newGuid
+      - type: assign
+        to: parsedGuid
+        value:
+          type: parseGuid
+          value: 00000000-0000-0000-0000-000000000001
+      - type: buildDynamicValue
+        to: payload
+        entries:
+          - key: Title
+            value:
+              variable: concatText
+          - key: Length
+            value:
+              variable: textLength
+            valueType: Int32
+      - type: assign
+        to: hasTitle
+        value:
+          type: containsDynamicValueProperty
+          source:
+            variable: payload
+          propertyName: Title
+      - type: assign
+        to: payloadIsEmpty
+        value:
+          type: isEmptyDynamicValue
+          source:
+            variable: payload
+      - type: buildUri
+        scheme: https
+        host: example.invalid
+        path: /_api/web
+        query: $select=Title
+        to: builtUri
+      - type: getConfigurationValue
+        name: Microsoft.SharePoint.ActivationProperties.CultureName
+        defaultValue: en-US
+        to: cultureName
+      - type: getInstanceAddress
+        to: instanceAddress
+      - type: setUserStatus
+        description:
+          type: formatString
+          literal: '{}DEV-ONLY hidden Microsoft.Activities status; culture={0}'
+          values:
+            -
+              variable: cultureName
+      - type: createTimeSpan
+        days: 1
+        hours: 2
+        minutes: 30
+        seconds: 0
+        to: duration
+      - type: getTimeSpanFields
+        input:
+          variable: duration
+        daysTo: durationDays
+      - type: addToDate
+        input:
+          variable: nowValue
+        timeSpan:
+          variable: duration
+        to: futureDate
+      - type: subtractFromDate
+        input:
+          variable: futureDate
+        days: 1
+        to: futureDate
+      - type: dateInRange
+        input:
+          variable: futureDate
+        start: 2000-01-01T00:00:00Z
+        end: 2099-12-31T23:59:59Z
+        to: dateInRangeResult
+      - type: writeHistory
+        message:
+          type: formatString
+          literal: '{}DEV-ONLY Microsoft.Activities expressions: {0}; replaced={1}; substring={2}; index={3}; parsedBool={4}; hasTitle={5}; empty={6}; uri={7}; durationDays={8}; inRange={9}'
+          values:
+            -
+              variable: concatText
+            -
+              variable: replacedText
+            -
+              variable: substringText
+            -
+              toString:
+                variable: textIndex
+            -
+              toString:
+                variable: parsedBool
+            -
+              toString:
+                variable: hasTitle
+            -
+              toString:
+                variable: payloadIsEmpty
+            -
+              variable: builtUri
+            -
+              toString:
+                variable: durationDays
+            -
+              toString:
+                variable: dateInRangeResult

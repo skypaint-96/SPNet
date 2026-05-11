@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.SharePointOnline.CSOM" Version="16.1.24810.12000" />
+    <Reference Include="System.Web.Extensions" />
   </ItemGroup>
 
 </Project>

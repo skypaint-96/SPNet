@@ -21,7 +21,7 @@ namespace SPNet.Workflow.WfSerializer
                 }
                 else if (string.Equals(options.Mode, "export", StringComparison.OrdinalIgnoreCase))
                 {
-                    WfActivityBuilderSerializer.ExportWorkflowYaml(options.InputXamlPath, options.OutputYamlPath);
+                    WfActivityBuilderSerializer.ExportWorkflowYaml(options.InputXamlPath, options.OutputYamlPath, options.FormFieldXmlPath);
                     Console.WriteLine("Saved YAML export to " + options.OutputYamlPath);
                 }
                 else if (string.Equals(options.Mode, "inspect", StringComparison.OrdinalIgnoreCase))
@@ -61,6 +61,7 @@ namespace SPNet.Workflow.WfSerializer
         public string InputXamlPath { get; private set; } = string.Empty;
         public string OutputReportPath { get; private set; } = string.Empty;
         public string OutputYamlPath { get; private set; } = string.Empty;
+        public string FormFieldXmlPath { get; private set; } = string.Empty;
         public string WorkflowYamlPath { get; private set; } = string.Empty;
         public string ConfigPath { get; private set; } = string.Empty;
         public string WorkflowName { get; private set; } = "GeneratedWorkflow";
@@ -72,7 +73,7 @@ namespace SPNet.Workflow.WfSerializer
         {
             if (args.Count == 0 || args.Any(a => string.Equals(a, "--help", StringComparison.OrdinalIgnoreCase) || string.Equals(a, "-h", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Usage: build --workflow <workflow.yml> --out <workflow.xaml> [--config <spnet.local.yml>] [--cache-folder <WebsiteCache>] OR export --xaml <workflow.xaml> --out <workflow.yml> OR inspect --in <workflow.xaml> [--cache-folder <WebsiteCache>]");
+                throw new ArgumentException("Usage: build --workflow <workflow.yml> --out <workflow.xaml> [--config <spnet.local.yml>] [--cache-folder <WebsiteCache>] OR export --xaml <workflow.xaml> --out <workflow.yml> [--form-field-xml <workflow.xaml.formfield.xml>] OR inspect --in <workflow.xaml> [--cache-folder <WebsiteCache>]");
             }
 
             var options = new WfSerializerOptions();
@@ -117,6 +118,10 @@ namespace SPNet.Workflow.WfSerializer
                 else if (string.Equals(arg, "--output-yaml", StringComparison.OrdinalIgnoreCase))
                 {
                     options.OutputYamlPath = RequireValue(args, ref i, arg);
+                }
+                else if (string.Equals(arg, "--form-field-xml", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "--formfield", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.FormFieldXmlPath = RequireValue(args, ref i, arg);
                 }
                 else if (string.Equals(arg, "--mode", StringComparison.OrdinalIgnoreCase))
                 {

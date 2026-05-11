@@ -1,0 +1,41 @@
+schemaVersion: spnet.workflow/v1
+name: ParameterWorkflow
+parameters:
+  requestTitle:
+    type: Text
+    maxLength: 255
+    displayName: Request title
+    description: Title shown on the initiation form.
+    default: New request
+  approved:
+    type: Boolean
+    displayName: Approved?
+    default: false
+  category:
+    type: Choice
+    format: Dropdown
+    baseType: Text
+    displayName: Category
+    default: Standard
+    choices:
+      - displayName: Standard
+        value: Standard
+      - displayName: Urgent
+        value: Urgent
+  requestedAmount:
+    type: Number
+    displayName: Requested amount
+    default: 0
+  dueDate:
+    type: DateTime
+    displayName: Due date
+stages:
+  - name: Stage 1
+    actions:
+      - type: writeHistory
+        message:
+          type: formatString
+          literal: "{}Request {0} category {1}"
+          values:
+            - variable: requestTitle
+            - variable: category

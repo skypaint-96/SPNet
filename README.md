@@ -49,8 +49,8 @@ If editor state shows `src/SPNet.Workflow.Core/`, `src/SPNet.Workflow.Cli/`, or 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action ValidateConfig -Config config\spnet.local.yml
 ```
 
-3. Edit `samples/workflow.example.yml` or your own `spnet.workflow/v1` YAML file.
-4. Build YAML to SPD-compatible XAML:
+3. Edit `samples/workflow.example.yml` or your own `spnet.workflow/v1` YAML file. YAML is the authoring source of truth for workflow structure and publish metadata.
+4. Build YAML to SPD-compatible XAML plus the generated publish metadata sidecar `*.xaml.metadata.json`:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Build -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -Config config\spnet.local.yml
@@ -69,7 +69,7 @@ Equivalent direct CLI:
 .\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 ```
 
-6. Publish through the retained PowerShell boundary. By default publish builds from `-Workflow` to `-XamlPath` first; pass `-NoBuild` when publishing an existing XAML file directly. The current publisher path uses WorkflowServices CSOM and submits XAML as opaque text:
+6. Publish through the retained PowerShell boundary. By default publish builds from `-Workflow` to `-XamlPath` first, emits `-XamlPath + '.metadata.json'`, and passes that metadata JSON to the publisher. Pass `-NoBuild` only when publishing an existing XAML file that already has a matching metadata JSON sidecar, or pass `-MetadataJsonPath` explicitly. The current publisher path uses WorkflowServices CSOM, submits XAML as opaque text, and uses metadata JSON as the normal publish contract:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Publish -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -TargetType Site -DryRun
@@ -78,17 +78,57 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWo
 
 Remove `-DryRun` only when SharePoint authentication/session state and WorkflowServices CSOM dependencies are available. For browser-authenticated SharePoint Online sessions, the wrapper can hand off WebLogin/WinINet cookies to the CSOM publisher; username/password/domain credentials and default Windows credentials remain available for environments that support them.
 
+7. Download published workflows back to XAML plus metadata JSON. Download always writes the XAML and `*.xaml.metadata.json`; it may also preserve `*.xaml.formfield.xml` when SharePoint exposes legacy FormField metadata so older export/inspection paths can still inspect it:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Download -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -Out artifacts\YamlFirstSmoke.downloaded.xaml
+```
+
 ## YAML schema `spnet.workflow/v1`
 
 Supported top-level fields:
 
 - `schemaVersion`: must be `spnet.workflow/v1`.
-- `name`: friendly workflow name.
-- `technicalName`: optional WF class name; defaults to `name + .MTW`.
-- `start`: `manual`, `autoStartCreate`, `autoStartChange` metadata for authoring/publish tooling.
-- `target`: `type` and optional `listTitle` metadata for publish tooling.
+- `name`: friendly workflow name. This is the legacy alias for canonical `metadata.displayName`.
+- `technicalName`: optional WF class name; defaults to `name + .MTW`. This is the legacy alias for canonical `metadata.technicalName`.
+- `metadata`: canonical publish metadata source. Supported fields are `displayName`, `technicalName`, `description`, `target`, `start`, and `initiation.formFields`.
+- `start`: legacy top-level `manual`, `autoStartCreate`, `autoStartChange` metadata for authoring/publish tooling. Canonical metadata uses `metadata.start.manual`, `metadata.start.onCreated`, and `metadata.start.onUpdated`.
+- `target`: legacy top-level `type` and optional `listTitle` metadata for publish tooling. Canonical metadata uses `metadata.target.type` and `metadata.target.listTitle`.
+- `parameters`: legacy top-level initiation form parameters. Canonical metadata uses `metadata.initiation.formFields`. Use either map-style YAML keyed by parameter name or list-style items with explicit `name`. Supported field types are `Text`, `Choice`, `Note`, `URL`, `UserMulti` (WF `String`), `Boolean` (WF `Boolean`), `Number` (WF `Double`), and `DateTime` (WF `DateTime`). Metadata properties include `formType`, `displayName`, `description`, `direction`, `default`, `choices`, `format`, `baseType`, `maxLength`, `numLines`, `sortable`, `richTextMode`, `list`, `showField`, `mult`, `userSelectionMode`, and `userSelectionScope`. Parameter names must not duplicate variables, expressions may read parameters by name, and assignment actions may not target parameters.
 - `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, `Boolean`/`Bool`, `Int32`/`Int`/`Integer`, `Guid`, and `DateTime`/`Date` are supported.
 - `stages`: one or more stages, each with supported actions.
+
+When YAML is built, SPNet emits public WF `InArgument<T>` declarations for effective initiation fields and writes a deterministic `*.xaml.metadata.json` sidecar. That JSON is generated from effective YAML metadata/defaults after applying the canonical `metadata` block and legacy aliases (`name`, `technicalName`, top-level `start`, top-level `target`, and `parameters`). It is the primary publish contract and contains display name, technical name, description, target, start options, initiation settings, and form fields. The normal round trip is YAML -> XAML + metadata JSON -> SharePoint publish with metadata JSON -> download XAML + metadata JSON. A legacy `*.xaml.formfield.xml` sidecar may still be generated for compatibility/inspection when form fields are present, and downloaded workflows may preserve it, but FormField XML is no longer the normal YAML publish input. Use `-FormFieldXmlPath` only as an explicit deprecated fallback when metadata JSON is unavailable.
+
+Canonical metadata example:
+
+```yaml
+schemaVersion: spnet.workflow/v1
+metadata:
+  displayName: ParameterWorkflow
+  technicalName: ParameterWorkflow.MTW
+  description: Workflow with initiation fields published from metadata JSON.
+  target:
+    type: List
+    listTitle: TestList
+  start:
+    manual: true
+    onCreated: false
+    onUpdated: false
+  initiation:
+    requiresForm: true
+    formFields:
+    - name: requestTitle
+      type: Text
+      displayName: Request title
+      default: New request
+stages:
+- name: Stage 1
+  actions:
+  - type: writeHistory
+    message:
+      variable: requestTitle
+```
 
 Supported actions:
 
@@ -99,8 +139,8 @@ Supported actions:
 - `comment`: emits SharePoint `Comment`, with `text`. This is a Designer annotation activity, not a runtime history-log action.
 - `delayFor`: emits SharePoint `DelayFor`, with numeric `days`, `hours`, and `minutes` expressions.
 - `delayUntil`: emits SharePoint `DelayUntil`, with a `date` expression. Prefer an explicit ISO-like date literal or a declared `DateTime` variable.
-- `while` / `loop`: emits WF `While`, with a comparison `condition` and nested `actions` sequence.
-- `if`: emits WF `If`, with a comparison `condition`, nested `then` sequence, and optional nested `else` sequence.
+- `while` / `loop`: emits WF `While`, with a structured Boolean `condition` and nested `actions` sequence.
+- `if`: emits WF `If`, with a structured Boolean `condition`, nested `then` sequence, and optional nested `else` sequence.
 - Lookup activities are supported only as expression values inside another activity, normally `assign` / `setVariable`. Top-level `lookupWorkflowContext` / `lookupContextProperty`, `getCurrentListId`, and `getCurrentItemGuid` actions are deprecated because SharePoint Designer can render them as blank actions and crash when their properties are selected.
 - `lookupWorkflowContext` / `lookupContextProperty` expressions emit SharePoint `LookupWorkflowContextProperty` inside an `InArgument`, with `propertyName`. Reference XAML confirms scalar context lookups such as `CurrentWebUrl` are nested expression activities rather than standalone stage actions.
 - `getCurrentListId` and `getCurrentItemGuid` expressions emit nested SharePoint `GetCurrentListId` / `GetCurrentItemGuid` inside Guid `InArgument` values.
@@ -146,10 +186,13 @@ Lookup example:
     variable: currentWebUrl
 ```
 
-Control-flow comparison expressions:
+Control-flow condition expressions:
 
-- comparison types: `isLessThan` / `lessThan`, `equals`, `greaterThan`, `lessThanOrEqual`, and `greaterThanOrEqual`.
-- operands: numeric `literal` or `variable` expressions, currently emitted as `Double` WF expression operands.
+- logical condition nodes: `and`, `or`, and `not`. `and`/`or` use `leftCondition` and `rightCondition`; `not` uses `operand`.
+- numeric comparison types: `isLessThan` / `lessThan`, `equals`, `greaterThan`, `lessThanOrEqual`, and `greaterThanOrEqual`.
+- typed comparison types: `isEqual` for Boolean, DateTime, and DynamicValue operands; `isEqualString`, `containsString`, `startsWithString`, `endsWithString`, and DateTime comparisons such as `isGreaterThan`.
+- operand expressions: `literal`, `variable`, `parseDate`, and `parseDynamicValue`. DateTime literals are normalized through SharePoint-local-to-UTC handling where the source XAML uses Designer-local date expressions.
+- `designerId`: optional condition/expression metadata used by exported YAML to preserve original SharePoint Designer activity `Id` GUIDs when that identity is necessary for Designer to render nested RHS operand tokens.
 
 Control-flow example:
 
@@ -181,6 +224,53 @@ Control-flow example:
   - type: setStatus
     status: Else branch
 ```
+
+Conditional round-trip example:
+
+```yaml
+- type: if
+  condition:
+    type: and
+    leftCondition:
+      type: or
+      leftCondition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: requestTitle
+        right:
+          literal: Approved
+      rightCondition:
+        type: containsString
+        valueType: String
+        left:
+          variable: requestTitle
+        right:
+          literal: Urgent
+    rightCondition:
+      type: not
+      operand:
+        type: isEqual
+        valueType: Boolean
+        left:
+          variable: rejected
+        right:
+          literal: true
+  then:
+  - type: setStatus
+    status: Condition matched
+```
+
+SharePoint Designer conditional compatibility caveats:
+
+- Workflow Manager validation is not enough to prove Designer rendering. Conditions can validate and publish but appear as `(insert a condition)` in SharePoint Designer when the structured condition expression metadata is not the exact Designer-compatible shape.
+- Boolean condition nodes and operand conversion expression nodes must retain Designer-compatible `Result="{x:Null}"` state and the expected Designer custom attributes; otherwise Designer may lose operand tokens even though the XAML is valid.
+- `ParseDate.CultureName` must be emitted in the property-element shape that calls `GetConfigurationValue`, matching SharePoint Designer-authored XAML. Flattening it to a plain culture attribute can break round-trip Designer display.
+- RHS `ArgumentValue` nodes inside conditions need `ArgumentValue.Result` / `OutArgument` wrappers so Designer can render the right-hand operand token instead of showing a blank value.
+- Nested RHS conversions such as `parseDate` and `parseDynamicValue` may require preserving the original Designer `Id` GUIDs through YAML as `designerId`; without those IDs, SharePoint Designer can omit the RHS value after a build/publish/download round trip.
+- SharePoint expression proxy namespaces should use the SharePoint Designer/publish-compatible non-assembly namespace form in generated XAML.
+
+The reference round-trip for these rules is `artifacts/ExampleConditionals.xaml` exported to `artifacts/ExampleConditionals.roundtrip.yml`, rebuilt with preserved IDs as `artifacts/ExampleConditionalsRoundTripPreserveIds.yml`, and live-validated as `ExampleConditionalsRoundTripPreserveIds4`. That workflow opened in SharePoint Designer with the previously missing RHS values visible. Keep generated/downloaded XAML and site-specific details in ignored `artifacts/`; do not commit credentials, URLs, cookies, or local config.
 
 Assignment example:
 
@@ -290,7 +380,9 @@ Deferred actions for future safe expansion batches: `copyItem`, `checkInItem`, `
 
 ## CSOM publishing, listing, and cleanup
 
-The CSOM publisher supports site workflows and list workflows. List publishing resolves the target list by `-TargetListTitle` or `-TargetListId`, creates a WorkflowServices definition scoped to that list, publishes a subscription for that list, and applies manual/create/update start flags from YAML or explicit parameters. It expects standard `Workflow History` and `Workflow Tasks` lists to exist in the target web.
+The CSOM publisher supports site workflows and list workflows. List publishing resolves the target list by `-TargetListTitle` or `-TargetListId`, creates a WorkflowServices definition scoped to that list, publishes a subscription for that list, and applies manual/create/update start flags from YAML-generated metadata JSON or explicit parameters. It expects standard `Workflow History` and `Workflow Tasks` lists to exist in the target web.
+
+For YAML-authored workflows, `*.xaml.metadata.json` is the expected metadata input. `Invoke-SPNetYamlWorkflow.ps1 -Action Publish` discovers `-XamlPath + '.metadata.json'` automatically after build or accepts `-MetadataJsonPath` for an explicit sidecar. Direct publishing with `Invoke-SPNetWorkflow.ps1` and the CSOM publisher follows the same contract through `-MetadataJsonPath` / `--metadata-json`. The publisher converts `metadata.initiation.formFields` to SharePoint Definition `FormField` metadata internally during publish; `*.xaml.formfield.xml` is only a deprecated fallback/compatibility input and is not used by the normal YAML publish path.
 
 Publishing currently uses an intentionally conservative `--if-exists Fail` policy. If a workflow definition with the requested name already exists, local tooling reports the conflict instead of overwriting or deleting live SharePoint content.
 
@@ -328,7 +420,7 @@ External dependencies are not packaged: SharePoint Designer WebsiteCache DLLs, O
 
 ## Validation
 
-The YAML-first baseline has been validated end-to-end in SharePoint Designer with `YamlFirstSmoke`: the workflow opens in Designer, the stage/action structure is visible, and Designer `Check for Errors` reports no errors. HTTP actions, DynamicValue property extraction, current-item list field updates, local list smoke generation, read-only list workflow listing, and CSOM list publishing have also been validated. List lifecycle create/update has been runtime-validated with `SPNetYamlListLifecycleManual-20260509-1535` on `TestList`: Designer showed misleading red boxes and incomplete variable-picker/action-builder rendering for the created item ID, but `Check for Errors` passed and runtime execution created an item and updated that new item's title via the returned ID. Generated artifacts are intentionally ignored by Git; keep only `artifacts/.gitkeep` committed in the workspace.
+The YAML-first baseline has been validated end-to-end in SharePoint Designer with `YamlFirstSmoke`: the workflow opens in Designer, the stage/action structure is visible, and Designer `Check for Errors` reports no errors. HTTP actions, DynamicValue property extraction, current-item list field updates, local list smoke generation, read-only list workflow listing, and CSOM list publishing have also been validated. Conditional workflow round-tripping was validated with `ExampleConditionals` artifacts and the live `ExampleConditionalsRoundTripPreserveIds4` workflow: nested `and`/`or`/`not`, string/Boolean/DateTime/DynamicValue comparisons, `parseDate`, `parseDynamicValue`, SharePoint-local-to-UTC date normalization, and Designer `Id` preservation opened in SharePoint Designer with RHS operand values visible. List lifecycle create/update has been runtime-validated with `SPNetYamlListLifecycleManual-20260509-1535` on `TestList`: Designer showed misleading red boxes and incomplete variable-picker/action-builder rendering for the created item ID, but `Check for Errors` passed and runtime execution created an item and updated that new item's title via the returned ID. Generated artifacts are intentionally ignored by Git; keep only `artifacts/.gitkeep` committed in the workspace.
 
 Publishing validation has also confirmed that raw VB/C# WF language expression activities are not acceptable output: a probe containing raw `Microsoft.CSharp.Activities.CSharpValue<TResult>` failed Workflow Manager validation with an invalid-type error, and earlier raw `VisualBasicValue<T>` string-action builders were rejected until replaced with `Microsoft.Activities.Expressions` structured proxy expression nodes. Keep this as a hard guardrail for generated XAML.
 
@@ -340,17 +432,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWo
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-SPNetYamlWorkflowGolden.ps1 -Workflow samples\workflow.example.yml -XamlPath artifacts\golden\YamlFirstSmoke.xaml -Config config\spnet.local.yml
 ```
 
-Downloaded workflow XAML can be captured without publishing:
+Downloaded workflow XAML can be captured from SharePoint and will be accompanied by metadata JSON:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Download -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -Out artifacts\YamlFirstSmoke.downloaded.xaml
 ```
 
-Live publish validation requires SharePoint auth/session support and pinned SharePoint Online CSOM dependencies used by the publisher project. Do not publish or clean workflows as part of local validation unless intentionally performing a live SharePoint smoke test. Manual validation guidance: publish a uniquely named test workflow, open it in SharePoint Designer, run `Check for Errors`, validate the target list subscription/start behavior, then list and clean only the uniquely named test artifacts.
+The downloaded metadata JSON is written beside the XAML as `artifacts\YamlFirstSmoke.downloaded.xaml.metadata.json`. If SharePoint exposes legacy FormField XML, the download path may also write `artifacts\YamlFirstSmoke.downloaded.xaml.formfield.xml` for compatibility and inspection.
+
+Live publish validation requires SharePoint auth/session support and pinned SharePoint Online CSOM dependencies used by the publisher project. Do not publish or clean workflows as part of local validation unless intentionally performing a live SharePoint smoke test. Manual validation guidance: publish a uniquely named test workflow using YAML -> XAML + metadata JSON, open it in SharePoint Designer, run `Check for Errors`, validate the target list subscription/start behavior and initiation fields, download the workflow to confirm XAML + metadata JSON round trip, then list and clean only the uniquely named test artifacts.
 
 ## Known limitations
 
-- YAML support is intentionally limited to logs/status/comments, assignment, scalar control flow, current item `setField`, HTTP calls, bounded `sendEmail`, bounded `singleTask`, REST property-name lookup, workflow context/current list/current item expressions, and DynamicValue string property extraction.
+- YAML support is intentionally limited to logs/status/comments, assignment, structured conditional control flow, current item `setField`, HTTP calls, bounded `sendEmail`, bounded `singleTask`, REST property-name lookup, workflow context/current list/current item expressions, and DynamicValue string property extraction.
 - `DynamicValue` variables are generated only for HTTP response targets; arbitrary YAML-declared `DynamicValue` variables and general dictionary mutation actions are deferred.
 - Top-level lookup actions are rejected because SharePoint Designer can render them as blank/crashing actions; use nested lookup expressions inside assignment or action arguments. This includes list item property lookups such as `lookupListItemStringProperty`.
 - The CSOM publisher does not overwrite, delete, or migrate existing live workflows; `if-exists` currently fails on name conflicts.

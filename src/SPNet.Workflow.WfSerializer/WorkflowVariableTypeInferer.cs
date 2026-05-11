@@ -8,17 +8,32 @@ namespace SPNet.Workflow.WfSerializer
     {
         public static Dictionary<string, Type> Infer(WorkflowYaml workflow, Type dynamicValueType, string emptyDynamicValueArgumentName, string requestHeadersArgumentName)
         {
-            var variableTypes = workflow.Variables?.ToDictionary(v => v.Name, v => MapDeclaredVariableType(v.Type), StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+            var variableTypes = workflow.Variables?.ToDictionary(v => v.Name, v => WorkflowTypeMapper.MapDeclaredVariableType(v.Type), StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+            foreach (var variable in workflow.Variables ?? Enumerable.Empty<VariableYaml>()) if (string.Equals(variable.Type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) variableTypes[variable.Name] = dynamicValueType;
             var actions = EnumerateActions(workflow).ToList();
 
             foreach (var target in actions.OfType<CalcActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(double));
             foreach (var target in actions.OfType<StringReplaceActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<StringSubstringActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<StringTrimActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<BuildUriActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<GetConfigurationValueActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<GetInstanceAddressActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var target in actions.OfType<CreateTimeSpanActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(TimeSpan));
+            foreach (var action in actions.OfType<GetTimeSpanFieldsActionYaml>())
+            {
+                foreach (var target in new[] { action.DaysTo, action.HoursTo, action.MinutesTo, action.SecondsTo }) AddIfMissing(variableTypes, target, typeof(int));
+                foreach (var target in new[] { action.TotalDaysTo, action.TotalHoursTo, action.TotalMinutesTo, action.TotalSecondsTo }) AddIfMissing(variableTypes, target, typeof(double));
+            }
+            foreach (var target in actions.OfType<DateOffsetActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(DateTime));
+            foreach (var target in actions.OfType<DateInRangeActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(bool));
             foreach (var target in actions.OfType<LookupListItemStringPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<LookupListItemIntPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(int));
             foreach (var target in actions.OfType<CallHttpWebServiceActionYaml>().SelectMany(a => new[] { a.ResponseContentTo, a.ResponseHeadersTo })) AddIfMissing(variableTypes, target, dynamicValueType);
-            foreach (var target in actions.OfType<GetDynamicValuePropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
+            foreach (var action in actions.OfType<GetDynamicValuePropertyActionYaml>()) AddIfMissing(variableTypes, action.To, MapDynamicValuePropertyType(action.ValueType, dynamicValueType));
+            foreach (var action in actions.OfType<SetDynamicValuePropertyActionYaml>()) AddIfMissing(variableTypes, string.IsNullOrWhiteSpace(action.To) ? action.Source : action.To, dynamicValueType);
+            foreach (var target in actions.OfType<CountDynamicValueItemsActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(int));
+            foreach (var target in actions.OfType<BuildDynamicValueActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, dynamicValueType);
             foreach (var target in actions.OfType<SingleTaskActionYaml>().Select(a => a.TaskIdTo)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<SingleTaskActionYaml>().Select(a => a.OutcomeTo)) AddIfMissing(variableTypes, target, typeof(int));
 
@@ -58,14 +73,15 @@ namespace SPNet.Workflow.WfSerializer
             if (!variableTypes.ContainsKey(name!)) variableTypes[name!] = variableType;
         }
 
-        private static Type MapDeclaredVariableType(string type)
+        internal static Type MapDynamicValuePropertyType(string? valueType, Type dynamicValueType)
         {
-            if (string.Equals(type, "Double", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Number", StringComparison.OrdinalIgnoreCase)) return typeof(double);
-            if (string.Equals(type, "Boolean", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Bool", StringComparison.OrdinalIgnoreCase)) return typeof(bool);
-            if (string.Equals(type, "DateTime", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Date", StringComparison.OrdinalIgnoreCase)) return typeof(DateTime);
-            if (string.Equals(type, "Guid", StringComparison.OrdinalIgnoreCase)) return typeof(Guid);
-            if (string.Equals(type, "DynamicValue", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("DynamicValue variables are only available as HTTP response targets and are emitted using the SharePoint Designer proxy type at build time.");
-            if (string.Equals(type, "Int32", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Int", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Integer", StringComparison.OrdinalIgnoreCase)) return typeof(int);
+            var normalized = (valueType ?? string.Empty).Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+            if (normalized == "dynamicvalue" || normalized == "dictionary") return dynamicValueType;
+            if (normalized == "boolean" || normalized == "bool") return typeof(bool);
+            if (normalized == "int32" || normalized == "int" || normalized == "integer") return typeof(int);
+            if (normalized == "double" || normalized == "number") return typeof(double);
+            if (normalized == "datetime" || normalized == "date") return typeof(DateTime);
+            if (normalized == "guid") return typeof(Guid);
             return typeof(string);
         }
     }
