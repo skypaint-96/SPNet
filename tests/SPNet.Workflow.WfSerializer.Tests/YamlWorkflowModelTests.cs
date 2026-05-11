@@ -130,6 +130,8 @@ variables:
     type: String
   - name: lengthValue
     type: Int32
+  - name: stringBoolValue
+    type: Boolean
   - name: dateValue
     type: DateTime
   - name: guidValue
@@ -157,6 +159,66 @@ stages:
           value:
             type: toLowerCase
             value: ABC
+      - type: assign
+        to: textValue
+        value:
+          type: replaceString
+          value:
+            variable: textValue
+          oldValue: A
+          newValue: B
+      - type: assign
+        to: textValue
+        value:
+          type: substring
+          value:
+            variable: textValue
+          startIndex: 0
+          length: 2
+      - type: assign
+        to: textValue
+        value:
+          type: trimString
+          value: '  spaced  '
+      - type: assign
+        to: lengthValue
+        value:
+          type: indexOfString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: isEmptyString
+          value:
+            variable: textValue
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: containsString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: startsWithString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: endsWithString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: parseBoolean
+          value: true
       - type: assign
         to: dateValue
         value:
@@ -186,17 +248,27 @@ stages:
 ");
 
             var assignments = workflow.Stages.Single().Actions.OfType<AssignActionYaml>().ToList();
-            Assert.AreEqual(7, assignments.Count);
+            Assert.AreEqual(16, assignments.Count);
             Assert.AreEqual("concatString", assignments[0].Value.Type);
             Assert.AreEqual("toUpperCase", assignments[0].Value.Values[1].Type);
             Assert.AreEqual("stringLength", assignments[1].Value.Type);
             Assert.AreEqual("toLowerCase", assignments[1].Value.Value!.Type);
-            Assert.AreEqual("currentDate", assignments[2].Value.Type);
-            Assert.AreEqual("parseGuid", assignments[3].Value.Type);
-            Assert.AreEqual("newGuid", assignments[4].Value.Type);
-            Assert.AreEqual("containsDynamicValueProperty", assignments[5].Value.Type);
-            Assert.AreEqual("payload", assignments[5].Value.Source!.Variable);
-            Assert.AreEqual("isEmptyDynamicValue", assignments[6].Value.Type);
+            Assert.AreEqual("replaceString", assignments[2].Value.Type);
+            Assert.AreEqual("A", assignments[2].Value.OldValue!.Literal);
+            Assert.AreEqual("substring", assignments[3].Value.Type);
+            Assert.AreEqual("trimString", assignments[4].Value.Type);
+            Assert.AreEqual("indexOfString", assignments[5].Value.Type);
+            Assert.AreEqual("isEmptyString", assignments[6].Value.Type);
+            Assert.AreEqual("containsString", assignments[7].Value.Type);
+            Assert.AreEqual("startsWithString", assignments[8].Value.Type);
+            Assert.AreEqual("endsWithString", assignments[9].Value.Type);
+            Assert.AreEqual("parseBoolean", assignments[10].Value.Type);
+            Assert.AreEqual("currentDate", assignments[11].Value.Type);
+            Assert.AreEqual("parseGuid", assignments[12].Value.Type);
+            Assert.AreEqual("newGuid", assignments[13].Value.Type);
+            Assert.AreEqual("containsDynamicValueProperty", assignments[14].Value.Type);
+            Assert.AreEqual("payload", assignments[14].Value.Source!.Variable);
+            Assert.AreEqual("isEmptyDynamicValue", assignments[15].Value.Type);
         }
 
         [DataTestMethod]
@@ -1262,6 +1334,8 @@ variables:
     type: String
   - name: lengthValue
     type: Int32
+  - name: stringBoolValue
+    type: Boolean
   - name: dateValue
     type: DateTime
   - name: guidValue
@@ -1296,6 +1370,66 @@ stages:
           value:
             variable: textValue
       - type: assign
+        to: textValue
+        value:
+          type: replaceString
+          value:
+            variable: textValue
+          oldValue: A
+          newValue: B
+      - type: assign
+        to: textValue
+        value:
+          type: substring
+          value:
+            variable: textValue
+          startIndex: 0
+          length: 2
+      - type: assign
+        to: textValue
+        value:
+          type: trimString
+          value: '  spaced  '
+      - type: assign
+        to: lengthValue
+        value:
+          type: indexOfString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: isEmptyString
+          value:
+            variable: textValue
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: containsString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: startsWithString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: endsWithString
+          value:
+            variable: textValue
+          searchValue: B
+      - type: assign
+        to: stringBoolValue
+        value:
+          type: parseBoolean
+          value: true
+      - type: assign
         to: dateValue
         value:
           type: currentDate
@@ -1326,6 +1460,15 @@ stages:
                 StringAssert.Contains(xaml, "ToLowerCase");
                 StringAssert.Contains(xaml, "ToUpperCase");
                 StringAssert.Contains(xaml, "StringLength");
+                StringAssert.Contains(xaml, "ReplaceString");
+                StringAssert.Contains(xaml, "Substring");
+                StringAssert.Contains(xaml, "Trim");
+                StringAssert.Contains(xaml, "IndexOfString");
+                StringAssert.Contains(xaml, "IsEmptyString");
+                StringAssert.Contains(xaml, "ContainsString");
+                StringAssert.Contains(xaml, "StartsWithString");
+                StringAssert.Contains(xaml, "EndsWithString");
+                StringAssert.Contains(xaml, "ParseBoolean");
                 StringAssert.Contains(xaml, "ConcatString");
                 StringAssert.Contains(xaml, "CurrentDate");
                 StringAssert.Contains(xaml, "NewGuid");

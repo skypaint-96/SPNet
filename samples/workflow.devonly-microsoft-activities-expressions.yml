@@ -16,8 +16,26 @@ variables:
     type: String
   - name: concatText
     type: String
+  - name: replacedText
+    type: String
+  - name: substringText
+    type: String
+  - name: trimmedText
+    type: String
   - name: textLength
     type: Int32
+  - name: textIndex
+    type: Int32
+  - name: textIsEmpty
+    type: Boolean
+  - name: textContains
+    type: Boolean
+  - name: textStarts
+    type: Boolean
+  - name: textEnds
+    type: Boolean
+  - name: parsedBool
+    type: Boolean
   - name: nowValue
     type: DateTime
   - name: generatedGuid
@@ -60,11 +78,72 @@ stages:
             -
               variable: upperText
       - type: assign
+        to: replacedText
+        value:
+          type: replaceString
+          value:
+            variable: concatText
+          oldValue: upper
+          newValue: UPPER
+      - type: assign
+        to: substringText
+        value:
+          type: substring
+          value:
+            variable: replacedText
+          startIndex: 0
+          length: 12
+      - type: assign
+        to: trimmedText
+        value:
+          type: trimString
+          value: '  trim me  '
+      - type: assign
         to: textLength
         value:
           type: stringLength
           value:
             variable: concatText
+      - type: assign
+        to: textIndex
+        value:
+          type: indexOfString
+          value:
+            variable: concatText
+          searchValue: upper
+      - type: assign
+        to: textIsEmpty
+        value:
+          type: isEmptyString
+          value:
+            variable: trimmedText
+      - type: assign
+        to: textContains
+        value:
+          type: containsString
+          value:
+            variable: concatText
+          searchValue: lower
+      - type: assign
+        to: textStarts
+        value:
+          type: startsWithString
+          value:
+            variable: concatText
+          searchValue: lower=
+      - type: assign
+        to: textEnds
+        value:
+          type: endsWithString
+          value:
+            variable: concatText
+          searchValue:
+            variable: upperText
+      - type: assign
+        to: parsedBool
+        value:
+          type: parseBoolean
+          value: true
       - type: assign
         to: nowValue
         value:
@@ -104,13 +183,20 @@ stages:
       - type: writeHistory
         message:
           type: formatString
-          literal: '{}DEV-ONLY Microsoft.Activities expressions: {0}; length={1}; hasTitle={2}; empty={3}'
+          literal: '{}DEV-ONLY Microsoft.Activities expressions: {0}; replaced={1}; substring={2}; index={3}; parsedBool={4}; hasTitle={5}; empty={6}'
           values:
             -
               variable: concatText
             -
+              variable: replacedText
+            -
+              variable: substringText
+            -
               toString:
-                variable: textLength
+                variable: textIndex
+            -
+              toString:
+                variable: parsedBool
             -
               toString:
                 variable: hasTitle

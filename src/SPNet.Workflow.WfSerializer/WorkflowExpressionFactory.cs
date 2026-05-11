@@ -147,9 +147,18 @@ namespace SPNet.Workflow.WfSerializer
         {
             var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
             if (type == "formatstring") return CreateFormatStringExpression(expression, resultType);
+            if (type == "replacestring" || type == "replace") return CreateReplaceStringExpression(expression, resultType);
+            if (type == "substring" || type == "substringstring") return CreateSubstringExpression(expression, resultType);
+            if (type == "trim" || type == "trimstring") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(string), valueExpressionTypes.TrimExpression, "Input");
             if (type == "tolowercase" || type == "lowercase" || type == "tolower") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(string), valueExpressionTypes.ToLowerCaseExpression, "Input");
             if (type == "touppercase" || type == "uppercase" || type == "toupper") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(string), valueExpressionTypes.ToUpperCaseExpression, "Input");
             if (type == "stringlength" || type == "lengthstring") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(int), valueExpressionTypes.StringLengthExpression, "Input");
+            if (type == "indexofstring" || type == "indexof") return CreateStringSearchValueExpression(expression, resultType, typeof(int), "Microsoft.Activities.Expressions.IndexOfString");
+            if (type == "isemptystring" || type == "stringisempty") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(bool), FindOptionalExpressionType("Microsoft.Activities.Expressions.IsEmptyString"), "Input");
+            if (type == "containsstring" || type == "contains") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.ContainsString");
+            if (type == "startswithstring" || type == "startswith") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.StartsWithString");
+            if (type == "endswithstring" || type == "endswith") return CreateStringSearchValueExpression(expression, resultType, typeof(bool), "Microsoft.Activities.Expressions.EndsWithString");
+            if (type == "parseboolean" || type == "parsebool") return CreateUnaryExpression(expression, resultType, typeof(string), typeof(bool), FindOptionalExpressionType("Microsoft.Activities.Expressions.ParseBoolean"), "Value");
             if (type == "concatstring" || type == "concat") return CreateConcatStringExpression(expression, resultType);
             if (type == "currentdate") return CreateParameterlessExpression(expression, resultType, typeof(DateTime), valueExpressionTypes.CurrentDateExpression);
             if (type == "newguid") return CreateParameterlessExpression(expression, resultType, typeof(Guid), valueExpressionTypes.NewGuidExpression);
@@ -211,6 +220,39 @@ namespace SPNet.Workflow.WfSerializer
 
             return null;
         }
+
+        private object CreateReplaceStringExpression(ExpressionYaml expression, Type resultType)
+        {
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(string));
+            var replace = ActivityReflectionWriter.Create(valueExpressionTypes.ReplaceStringExpression);
+            ActivityReflectionWriter.SetProperty(replace, "Input", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(replace, "Pattern", ToInArgument<string>(expression.Pattern ?? expression.OldValue ?? expression.Find ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(replace, "Replacement", ToInArgument<string>(expression.Replacement ?? expression.NewValue ?? expression.ReplaceWith ?? new ExpressionYaml { Literal = string.Empty }));
+            return replace;
+        }
+
+        private object CreateSubstringExpression(ExpressionYaml expression, Type resultType)
+        {
+            EnsureAssignableExpressionResult(expression.Type, resultType, typeof(string));
+            var substring = ActivityReflectionWriter.Create(valueExpressionTypes.SubstringExpression);
+            ActivityReflectionWriter.SetProperty(substring, "Input", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(substring, "StartIndex", ToInArgument<int>(expression.StartIndex ?? new ExpressionYaml { Literal = 0 }));
+            if (HasExpression(expression.Length)) ActivityReflectionWriter.SetProperty(substring, "Length", ToInArgument<int>(expression.Length ?? new ExpressionYaml()));
+            return substring;
+        }
+
+        private object CreateStringSearchValueExpression(ExpressionYaml expression, Type resultType, Type expressionResultType, string typeName)
+        {
+            EnsureAssignableExpressionResult(expression.Type, resultType, expressionResultType);
+            var expressionType = FindOptionalExpressionType(typeName) ?? throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            var activity = ActivityReflectionWriter.Create(expressionType);
+            ActivityReflectionWriter.SetProperty(activity, "Input", ToInArgument<string>(expression.Value ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetProperty(activity, "SearchValue", ToInArgument<string>(expression.SearchValue ?? expression.Pattern ?? expression.Find ?? new ExpressionYaml()));
+            ActivityReflectionWriter.SetPropertyIfWritable(activity, "IgnoreCase", string.Equals(expression.ValueType, "StringIgnoreCase", StringComparison.OrdinalIgnoreCase));
+            return activity;
+        }
+
+        private Type? FindOptionalExpressionType(string typeName) => valueExpressionTypes.ToStringExpression.Assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
 
         private object CreateUnaryExpression(ExpressionYaml expression, Type requestedResultType, Type inputType, Type expressionResultType, Type? expressionType, string inputPropertyName)
         {

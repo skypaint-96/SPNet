@@ -1069,6 +1069,24 @@ namespace SPNet.Workflow.WfSerializer
         public ExpressionYaml? Value { get; set; }
         /// <summary>Gets or sets ordered nested expression values used by formatString.</summary>
         public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
+        /// <summary>Gets or sets a string pattern/search operand for dev-only Microsoft.Activities string expressions.</summary>
+        public ExpressionYaml? Pattern { get; set; }
+        /// <summary>Gets or sets a string replacement operand for dev-only Microsoft.Activities string expressions.</summary>
+        public ExpressionYaml? Replacement { get; set; }
+        /// <summary>Gets or sets a string search operand for dev-only Microsoft.Activities string predicate expressions.</summary>
+        public ExpressionYaml? SearchValue { get; set; }
+        /// <summary>Gets or sets an alternate old-value operand alias for replaceString expressions.</summary>
+        public ExpressionYaml? OldValue { get; set; }
+        /// <summary>Gets or sets an alternate new-value operand alias for replaceString expressions.</summary>
+        public ExpressionYaml? NewValue { get; set; }
+        /// <summary>Gets or sets an alternate find operand alias for string search/replace expressions.</summary>
+        public ExpressionYaml? Find { get; set; }
+        /// <summary>Gets or sets an alternate replace-with operand alias for replaceString expressions.</summary>
+        public ExpressionYaml? ReplaceWith { get; set; }
+        /// <summary>Gets or sets a substring start-index operand for dev-only Microsoft.Activities substring expressions.</summary>
+        public ExpressionYaml? StartIndex { get; set; }
+        /// <summary>Gets or sets an optional substring length operand for dev-only Microsoft.Activities substring expressions.</summary>
+        public ExpressionYaml? Length { get; set; }
         /// <summary>Gets or sets a DynamicValue source variable/expression for dev-only Microsoft.Activities predicates.</summary>
         public ExpressionYaml? Source { get; set; }
         /// <summary>Gets or sets optional CLR/XAML type metadata used when an object-valued field expression must preserve a non-string type.</summary>
@@ -1092,7 +1110,7 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             return rootDeserializer(typeof(ExpressionYamlSurrogate)) is ExpressionYamlSurrogate s
-                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), Source = s.Source, ValueType = s.ValueType ?? string.Empty, DesignerId = s.DesignerId ?? string.Empty, ToString = s.ToString }
+                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), Pattern = s.Pattern, Replacement = s.Replacement, SearchValue = s.SearchValue, OldValue = s.OldValue, NewValue = s.NewValue, Find = s.Find, ReplaceWith = s.ReplaceWith, StartIndex = s.StartIndex, Length = s.Length, Source = s.Source, ValueType = s.ValueType ?? string.Empty, DesignerId = s.DesignerId ?? string.Empty, ToString = s.ToString }
                 : new ExpressionYaml();
         }
 
@@ -1116,6 +1134,15 @@ namespace SPNet.Workflow.WfSerializer
             if (expression.ItemGuid != null) WriteObject(emitter, serializer, "itemGuid", expression.ItemGuid);
             if (expression.Value != null) WriteObject(emitter, serializer, "value", expression.Value);
             if (expression.Values != null && expression.Values.Count > 0) WriteObject(emitter, serializer, "values", expression.Values);
+            if (expression.Pattern != null) WriteObject(emitter, serializer, "pattern", expression.Pattern);
+            if (expression.Replacement != null) WriteObject(emitter, serializer, "replacement", expression.Replacement);
+            if (expression.SearchValue != null) WriteObject(emitter, serializer, "searchValue", expression.SearchValue);
+            if (expression.OldValue != null) WriteObject(emitter, serializer, "oldValue", expression.OldValue);
+            if (expression.NewValue != null) WriteObject(emitter, serializer, "newValue", expression.NewValue);
+            if (expression.Find != null) WriteObject(emitter, serializer, "find", expression.Find);
+            if (expression.ReplaceWith != null) WriteObject(emitter, serializer, "replaceWith", expression.ReplaceWith);
+            if (expression.StartIndex != null) WriteObject(emitter, serializer, "startIndex", expression.StartIndex);
+            if (expression.Length != null) WriteObject(emitter, serializer, "length", expression.Length);
             if (expression.Source != null) WriteObject(emitter, serializer, "source", expression.Source);
             if (!string.IsNullOrWhiteSpace(expression.ValueType)) WriteScalar(emitter, "valueType", expression.ValueType);
             if (!string.IsNullOrWhiteSpace(expression.DesignerId)) WriteScalar(emitter, "designerId", expression.DesignerId);
@@ -1134,6 +1161,15 @@ namespace SPNet.Workflow.WfSerializer
             expression.ItemGuid == null &&
             expression.Value == null &&
             (expression.Values == null || expression.Values.Count == 0) &&
+            expression.Pattern == null &&
+            expression.Replacement == null &&
+            expression.SearchValue == null &&
+            expression.OldValue == null &&
+            expression.NewValue == null &&
+            expression.Find == null &&
+            expression.ReplaceWith == null &&
+            expression.StartIndex == null &&
+            expression.Length == null &&
             expression.Source == null &&
             string.IsNullOrWhiteSpace(expression.ValueType) &&
             string.IsNullOrWhiteSpace(expression.DesignerId) &&
@@ -1163,6 +1199,15 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml? ItemGuid { get; set; }
             public ExpressionYaml? Value { get; set; }
             public List<ExpressionYaml> Values { get; set; } = new List<ExpressionYaml>();
+            public ExpressionYaml? Pattern { get; set; }
+            public ExpressionYaml? Replacement { get; set; }
+            public ExpressionYaml? SearchValue { get; set; }
+            public ExpressionYaml? OldValue { get; set; }
+            public ExpressionYaml? NewValue { get; set; }
+            public ExpressionYaml? Find { get; set; }
+            public ExpressionYaml? ReplaceWith { get; set; }
+            public ExpressionYaml? StartIndex { get; set; }
+            public ExpressionYaml? Length { get; set; }
             public ExpressionYaml? Source { get; set; }
             public string ValueType { get; set; } = string.Empty;
             public string DesignerId { get; set; } = string.Empty;
