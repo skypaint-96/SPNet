@@ -10,11 +10,54 @@ param(
     [Parameter(Position = 0)]
     [string]$Command = 'help',
 
+    [Alias('out')]
+    [string]$CliOut,
+
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Arguments
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Write-SpNetError {
+    param(
+        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [string]$Hint = '',
+        [string]$Path = ''
+    )
+
+    [Console]::Error.WriteLine("SPNET_ERROR [$Code] $Message")
+    if (-not [string]::IsNullOrWhiteSpace($Path)) { [Console]::Error.WriteLine("  path: $Path") }
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) { [Console]::Error.WriteLine("  remediation: $Hint") }
+}
+
+function Throw-SpNetCliError {
+    param(
+        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [string]$Hint = '',
+        [string]$Path = ''
+    )
+
+    $exception = New-Object System.InvalidOperationException($Message)
+    $record = New-Object System.Management.Automation.ErrorRecord($exception, $Code, [System.Management.Automation.ErrorCategory]::InvalidOperation, $Path)
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) { $record.ErrorDetails = New-Object System.Management.Automation.ErrorDetails("$Message`nRemediation: $Hint") }
+    throw $record
+}
+
+function Resolve-UserPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+    if ([IO.Path]::IsPathRooted($Path)) { return [IO.Path]::GetFullPath($Path) }
+    return [IO.Path]::GetFullPath((Join-Path (Get-Location) $Path))
+}
+
+function Test-SpNetHelpToken {
+    param([string]$Value)
+    return ($Value -in @('-h', '--help', '/?', '?', 'help'))
+}
 
 function Write-SPNetWorkflowHelp {
     @'
@@ -22,6 +65,7 @@ SPNet Workflow primary packaged CLI
 
 Usage:
   .\scripts\spnet-workflow.ps1 <command> [options]
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 <command> [options]
 
 Commands:
   help       Show top-level help or subcommand help.
@@ -31,15 +75,27 @@ Commands:
   publish    Build and/or publish a YAML-authored workflow through the publish wrapper.
   doctor     Run local source/package integrity checks without SharePoint connectivity.
 
-Packaged examples:
+Source-tree examples:
   .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
   .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
   .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
   .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
   .\scripts\spnet-workflow.ps1 doctor
 
+Packaged examples:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 help
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 doctor --json
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow .\samples\workflow.example.yml --out .\artifacts\YamlFirstSmoke.xaml --config .\config\spnet.local.yml
+
+Path handling:
+  User-supplied relative paths are resolved from the caller's current directory.
+  Script and tool discovery is resolved relative to this command/package.
+
 Compatibility:
   Existing Invoke-SPNetYamlWorkflow.ps1, Invoke-SPNetWorkflow.ps1, serializer executable, and publisher executable remain available. Prefer this command for packaged usage.
+
+Errors:
+  Failures are reported as SPNET_ERROR [code] plus a remediation hint where possible.
 
 Use '.\scripts\spnet-workflow.ps1 help <command>' for subcommand options.
 '@
@@ -58,6 +114,11 @@ Delegates to Invoke-SPNetYamlWorkflow.ps1 -Action Build.
 
 Example:
   .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
+
+Packaged example:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow .\samples\workflow.example.yml --out .\artifacts\YamlFirstSmoke.xaml --config .\config\spnet.local.yml
+
+Relative paths are resolved from the caller's current directory.
 '@
         }
         'inspect' {
@@ -69,6 +130,11 @@ Delegates to Invoke-SPNetYamlWorkflow.ps1 -Action Inspect.
 
 Example:
   .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
+
+Packaged example:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 inspect --xaml .\artifacts\YamlFirstSmoke.xaml --config .\config\spnet.local.yml
+
+Relative paths are resolved from the caller's current directory.
 '@
         }
         'export' {
@@ -80,6 +146,11 @@ Delegates to Invoke-SPNetYamlWorkflow.ps1 -Action Export.
 
 Example:
   .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
+
+Packaged example:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 export --xaml .\artifacts\YamlFirstSmoke.xaml --out .\artifacts\YamlFirstSmoke.exported.yml
+
+Relative paths are resolved from the caller's current directory.
 '@
         }
         'publish' {
@@ -107,6 +178,11 @@ Common options:
 
 Example:
   .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
+
+Packaged example:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow .\samples\workflow.example.yml --xaml .\artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
+
+Relative paths are resolved from the caller's current directory.
 '@
         }
         'doctor' {
@@ -122,9 +198,11 @@ and PowerShell runtime basics.
 
 Example:
   .\scripts\spnet-workflow.ps1 doctor --json
+
+Doctor uses package/script-relative discovery for SPNet scripts and tools.
 '@
         }
-        default { throw "Unknown help topic '$Name'. Supported topics: build, inspect, export, publish, doctor." }
+        default { Throw-SpNetCliError -Code 'SPNET-CLI-HELP-001' -Message "Unknown help topic '$Name'." -Hint 'Run .\scripts\spnet-workflow.ps1 help for supported commands.' }
     }
 }
 
@@ -293,7 +371,7 @@ function Get-SPNetWorkflowScriptPath {
 
     $path = Join-Path $PSScriptRoot $Name
     if (Test-Path $path -PathType Leaf) { return $path }
-    throw "Required SPNet script not found beside primary CLI: $path"
+    Throw-SpNetCliError -Code 'SPNET-CLI-SCRIPT-001' -Message "Required SPNet wrapper script was not found: $Name." -Path $path -Hint 'Use a complete SPNet package or restore the scripts directory from the repository/package.'
 }
 
 function ConvertFrom-SPNetCliArguments {
@@ -313,9 +391,9 @@ function ConvertFrom-SPNetCliArguments {
                 $parsed[$name] = $true
                 continue
             }
-            if ($i + 1 -ge $Values.Count) { throw "Missing value for option $arg." }
+            if ($i + 1 -ge $Values.Count) { Throw-SpNetCliError -Code 'SPNET-CLI-ARGS-001' -Message "Missing value for option $arg." -Hint "Run .\scripts\spnet-workflow.ps1 help for usage." }
             $next = [string]$Values[$i + 1]
-            if ($next.StartsWith('-')) { throw "Missing value for option $arg." }
+            if ($next.StartsWith('-')) { Throw-SpNetCliError -Code 'SPNET-CLI-ARGS-001' -Message "Missing value for option $arg." -Hint "Provide a value after $arg, or run .\scripts\spnet-workflow.ps1 help for usage." }
             $parsed[$name] = $next
             $i++
         } else {
@@ -335,6 +413,53 @@ function Add-SPNetArgumentValue {
             return
         }
     }
+}
+
+function Convert-SPNetUserPathOptions {
+    param([hashtable]$Options, [string]$CommandName)
+
+    $pathOptionNames = @(
+        'workflow', 'workflow-yaml', 'xaml', 'xaml-path', 'out-xaml', 'out', 'output', 'output-yaml',
+        'config', 'cache-folder', 'cache', 'metadata-json', 'metadatajson', 'metadata-json-path',
+        'form-field-xml', 'formfieldxml', 'form-field-xml-path', 'backup-directory', 'backupdirectory',
+        'publisher-exe', 'publisher-exe-path', 'publisherexepath'
+    )
+
+    foreach ($name in $pathOptionNames) {
+        if ($Options.ContainsKey($name) -and $Options[$name] -is [string]) {
+            $Options[$name] = Resolve-UserPath -Path ([string]$Options[$name])
+        }
+    }
+
+    foreach ($name in @('workflow', 'workflow-yaml')) {
+        if ($Options.ContainsKey($name) -and -not (Test-Path ([string]$Options[$name]) -PathType Leaf)) {
+            Throw-SpNetCliError -Code 'SPNET-CLI-PATH-001' -Message 'Input workflow YAML file was not found.' -Path ([string]$Options[$name]) -Hint 'Check the --workflow path. Relative paths are resolved from the current directory where you invoked spnet-workflow.ps1.'
+        }
+    }
+
+    foreach ($name in @('xaml', 'xaml-path', 'out-xaml')) {
+        if ($Options.ContainsKey($name) -and $CommandName -in @('inspect', 'export') -and -not (Test-Path ([string]$Options[$name]) -PathType Leaf)) {
+            Throw-SpNetCliError -Code 'SPNET-CLI-PATH-002' -Message 'Input XAML file was not found.' -Path ([string]$Options[$name]) -Hint 'Check the --xaml path or build the workflow first. Relative paths are resolved from the current directory.'
+        }
+    }
+
+    foreach ($name in @('metadata-json', 'metadatajson', 'metadata-json-path')) {
+        if ($Options.ContainsKey($name) -and -not (Test-Path ([string]$Options[$name]) -PathType Leaf)) {
+            Throw-SpNetCliError -Code 'SPNET-CLI-PATH-003' -Message 'Metadata JSON file was not found.' -Path ([string]$Options[$name]) -Hint 'Build the workflow to generate the .metadata.json sidecar, or pass a valid --metadata-json path.'
+        }
+    }
+
+    foreach ($name in @('form-field-xml', 'formfieldxml', 'form-field-xml-path')) {
+        if ($Options.ContainsKey($name) -and -not (Test-Path ([string]$Options[$name]) -PathType Leaf)) {
+            Throw-SpNetCliError -Code 'SPNET-CLI-PATH-004' -Message 'FormField XML file was not found.' -Path ([string]$Options[$name]) -Hint 'Use metadata JSON for normal YAML publish, or pass a valid legacy FormField XML path.'
+        }
+    }
+
+    if ($Options.ContainsKey('publisher-exe') -and -not (Test-Path ([string]$Options['publisher-exe']) -PathType Leaf)) {
+        Throw-SpNetCliError -Code 'SPNET-CLI-PATH-005' -Message 'Publisher executable was not found.' -Path ([string]$Options['publisher-exe']) -Hint 'Use the packaged publisher, build the publisher project, or pass a valid --publisher-exe path.'
+    }
+
+    return $Options
 }
 
 function Add-SPNetArgumentSwitch {
@@ -379,28 +504,48 @@ function Invoke-SPNetYamlWrapperAction {
     Add-SPNetArgumentSwitch -Target $parameters -Source $Options -Names @('force') -ParameterName 'Force'
 
     & $wrapper @parameters
+    if ($LASTEXITCODE -ne 0) { Throw-SpNetCliError -Code 'SPNET-CLI-DELEGATE-001' -Message "Delegated YAML workflow command failed with exit code $LASTEXITCODE." -Hint 'Review the preceding wrapper/tool output. Run doctor to check package integrity and help <command> to verify options.' }
 }
 
-$normalizedCommand = if ([string]::IsNullOrWhiteSpace($Command)) { 'help' } else { $Command.ToLowerInvariant() }
-if ($normalizedCommand -in @('-h', '--help', '/?', '?')) { $normalizedCommand = 'help' }
-$options = ConvertFrom-SPNetCliArguments -Values @($Arguments)
+try {
+    if (-not [string]::IsNullOrWhiteSpace($CliOut)) {
+        if ($null -eq $Arguments) { $Arguments = @() }
+        $Arguments = @('--out', $CliOut) + @($Arguments)
+    }
 
-if ($normalizedCommand -eq 'help') {
-    $topics = @($options['__positionals'] | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-    if ($topics.Count -gt 0) { Write-SPNetWorkflowSubcommandHelp -Name $topics[0] } else { Write-SPNetWorkflowHelp }
-    return
-}
+    $normalizedCommand = if ([string]::IsNullOrWhiteSpace($Command)) { 'help' } else { $Command.ToLowerInvariant() }
+    if (Test-SpNetHelpToken -Value $normalizedCommand) { $normalizedCommand = 'help' }
+    $options = ConvertFrom-SPNetCliArguments -Values @($Arguments)
 
-if ($options.ContainsKey('help') -or $options.ContainsKey('h') -or $options.ContainsKey('?')) {
-    Write-SPNetWorkflowSubcommandHelp -Name $normalizedCommand
-    return
-}
+    if ($normalizedCommand -eq 'help') {
+        $topics = @($options['__positionals'] | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        if ($topics.Count -gt 0) { Write-SPNetWorkflowSubcommandHelp -Name $topics[0] } else { Write-SPNetWorkflowHelp }
+        return
+    }
 
-switch ($normalizedCommand) {
-    'build' { Invoke-SPNetYamlWrapperAction -Action 'Build' -Options $options }
-    'inspect' { Invoke-SPNetYamlWrapperAction -Action 'Inspect' -Options $options }
-    'export' { Invoke-SPNetYamlWrapperAction -Action 'Export' -Options $options }
-    'publish' { Invoke-SPNetYamlWrapperAction -Action 'Publish' -Options $options }
-    'doctor' { Invoke-SPNetDoctor -Options $options }
-    default { throw "Unknown command '$Command'. Run '.\scripts\spnet-workflow.ps1 help' for supported commands." }
+    if ($options.ContainsKey('help') -or $options.ContainsKey('h') -or $options.ContainsKey('?')) {
+        Write-SPNetWorkflowSubcommandHelp -Name $normalizedCommand
+        return
+    }
+
+    $validCommands = @('build', 'inspect', 'export', 'publish', 'doctor')
+    if ($normalizedCommand -notin $validCommands) {
+        Throw-SpNetCliError -Code 'SPNET-CLI-COMMAND-001' -Message "Unknown command '$Command'." -Hint "Run .\scripts\spnet-workflow.ps1 help for supported commands: $($validCommands -join ', ')."
+    }
+
+    $options = Convert-SPNetUserPathOptions -Options $options -CommandName $normalizedCommand
+
+    switch ($normalizedCommand) {
+        'build' { Invoke-SPNetYamlWrapperAction -Action 'Build' -Options $options }
+        'inspect' { Invoke-SPNetYamlWrapperAction -Action 'Inspect' -Options $options }
+        'export' { Invoke-SPNetYamlWrapperAction -Action 'Export' -Options $options }
+        'publish' { Invoke-SPNetYamlWrapperAction -Action 'Publish' -Options $options }
+        'doctor' { Invoke-SPNetDoctor -Options $options }
+    }
+} catch {
+    $code = if ($_.FullyQualifiedErrorId -and $_.FullyQualifiedErrorId -like 'SPNET-*') { $_.FullyQualifiedErrorId.Split(',')[0] } else { 'SPNET-CLI-UNHANDLED-001' }
+    $hint = if ($_.ErrorDetails -and $_.ErrorDetails.Message -match 'Remediation:\s*(.+)$') { $matches[1] } else { 'Run .\scripts\spnet-workflow.ps1 help for usage or doctor for package integrity checks.' }
+    $errorPath = if ($_.TargetObject) { [string]$_.TargetObject } else { '' }
+    Write-SpNetError -Code $code -Message $_.Exception.Message -Hint $hint -Path $errorPath
+    exit 1
 }

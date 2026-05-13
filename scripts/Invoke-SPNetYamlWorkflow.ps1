@@ -47,6 +47,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Write-SpNetWrapperError {
+    param([string]$Code, [string]$Message, [string]$Hint = '', [string]$Path = '')
+    Write-Error "SPNET_ERROR [$Code] $Message" -ErrorAction Continue
+    if (-not [string]::IsNullOrWhiteSpace($Path)) { Write-Error "  path: $Path" -ErrorAction Continue }
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) { Write-Error "  remediation: $Hint" -ErrorAction Continue }
+}
+
+function Throw-SpNetWrapperError {
+    param([string]$Code, [string]$Message, [string]$Hint = '', [string]$Path = '')
+    $exception = New-Object System.InvalidOperationException($Message)
+    $record = New-Object System.Management.Automation.ErrorRecord($exception, $Code, [System.Management.Automation.ErrorCategory]::InvalidOperation, $Path)
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) { $record.ErrorDetails = New-Object System.Management.Automation.ErrorDetails("$Message`nRemediation: $Hint") }
+    throw $record
+}
+
 function Resolve-SPNetSerializerToolPath {
     $candidates = @(
         (Join-Path $PSScriptRoot '..\tools\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.exe'),
@@ -56,14 +71,19 @@ function Resolve-SPNetSerializerToolPath {
     foreach ($candidate in $candidates) {
         if (Test-Path $candidate -PathType Leaf) { return [IO.Path]::GetFullPath($candidate) }
     }
-    return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe'))
+    return $null
 }
 
 $tool = Resolve-SPNetSerializerToolPath
-if (-not (Test-Path $tool)) {
+if ([string]::IsNullOrWhiteSpace($tool) -or -not (Test-Path $tool)) {
     $serializerProject = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj'
-    if (-not (Test-Path $serializerProject -PathType Leaf)) { throw "Serializer executable not found: $tool" }
+    if (-not (Test-Path $serializerProject -PathType Leaf)) {
+        Throw-SpNetWrapperError -Code 'SPNET-YAML-SERIALIZER-001' -Message 'Serializer executable was not found and no source fallback project exists.' -Path $tool -Hint 'Use a complete SPNet package, or run from a repository checkout containing src\SPNet.Workflow.WfSerializer.'
+    }
     dotnet build $serializerProject -c Release
+    if ($LASTEXITCODE -ne 0) { Throw-SpNetWrapperError -Code 'SPNET-YAML-SERIALIZER-002' -Message "Serializer build failed with exit code $LASTEXITCODE." -Path $serializerProject -Hint 'Fix the serializer project build or package with prebuilt tools.' }
+    $tool = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe'
+    if (-not (Test-Path $tool -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-SERIALIZER-003' -Message 'Serializer build completed but executable was not found.' -Path $tool -Hint 'Check build output and target framework net48.' }
 }
 
 function Get-SPNetYamlScalar {
@@ -183,24 +203,32 @@ switch ($Action) {
         if (-not [string]::IsNullOrWhiteSpace($BackupDirectory)) { $publishArgs.BackupDirectory = $BackupDirectory }
         if (-not [string]::IsNullOrWhiteSpace($PublisherExePath)) { $publishArgs.PublisherExePath = $PublisherExePath }
         if ($DryRun) { $publishArgs.DryRun = $true }
-        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @publishArgs
+        $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
+        if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }
+        & $publishWrapper @publishArgs
     }
     'Download' {
         if (-not $Out) { $Out = $XamlPath }
-        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') -Action Download -SiteUrl $SiteUrl -WorkflowName $WorkflowName -OutputXamlPath $Out
+        $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
+        if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }
+        & $publishWrapper -Action Download -SiteUrl $SiteUrl -WorkflowName $WorkflowName -OutputXamlPath $Out
     }
     'List' {
         $listArgs = @{ Action = 'List'; SiteUrl = $SiteUrl }
         if (-not [string]::IsNullOrWhiteSpace($WorkflowName)) { $listArgs.WorkflowName = $WorkflowName }
         if (-not [string]::IsNullOrWhiteSpace($WorkflowNamePrefix)) { $listArgs.WorkflowNamePrefix = $WorkflowNamePrefix }
         if ($IncludeSubscriptions) { $listArgs.IncludeSubscriptions = $true }
-        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @listArgs
+        $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
+        if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }
+        & $publishWrapper @listArgs
     }
     'Cleanup' {
         $cleanupArgs = @{ Action = 'Cleanup'; SiteUrl = $SiteUrl }
         if (-not [string]::IsNullOrWhiteSpace($WorkflowName)) { $cleanupArgs.WorkflowName = $WorkflowName }
         if (-not [string]::IsNullOrWhiteSpace($WorkflowNamePrefix)) { $cleanupArgs.WorkflowNamePrefix = $WorkflowNamePrefix }
         if ($Force) { $cleanupArgs.Force = $true }
-        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @cleanupArgs
+        $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
+        if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }
+        & $publishWrapper @cleanupArgs
     }
 }

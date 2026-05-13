@@ -27,11 +27,14 @@ Implementation planning is complete. The feedback should be implemented in two a
     - Status: implemented 2026-05-13 for scoped milestone 3.
     - Outcome: packaging defects are caught before build/publish.
 
-4. **Help, errors, and path handling**
-   - Add clean top-level and subcommand help with packaged and source-tree examples.
-   - Standardise relative path resolution.
-   - Add structured error codes and remediation hints for common failures: missing binaries, missing WebsiteCache, unsupported action, duplicate workflow, auth failure, local/publish mismatch.
-   - Outcome: probing with help does not fail strangely, and users get actionable diagnostics.
+4. **Help, errors, and path handling** - done
+   - Added clean top-level and subcommand help on [`scripts/spnet-workflow.ps1`](../scripts/spnet-workflow.ps1) with source-tree and packaged examples for `build`, `inspect`, `export`, `publish`, and `doctor`.
+   - Standardised primary CLI path resolution so user-supplied relative paths are resolved from the caller's current directory, while script and tool discovery remains package/script-relative.
+   - Added `SPNET_ERROR [code]` formatting plus remediation hints for low-risk common failures including invalid subcommands/help topics, missing wrapper scripts, missing workflow/XAML/metadata/form-field paths, missing explicit publisher tools, and failed delegated wrapper commands.
+   - Improved compatibility wrappers so packaged serializer/publisher lookup reports clearer errors when neither packaged tools nor source fallback projects/executables exist.
+   - Broader WebsiteCache, unsupported action, duplicate workflow, authentication, local/publish mismatch, lint/validate/report, true dry-run, and auth preflight diagnostics remain deferred to later milestones.
+   - Status: implemented 2026-05-13 for scoped milestone 4.
+   - Outcome: probing with help does not fail strangely, relative paths behave predictably, and users get actionable local/package diagnostics.
 
 5. **Authentication and publisher defaults**
    - Make auth mode explicit: browser-cookie/WebLogin, explicit cookie header, Windows/default credentials, or legacy username/password/domain if supported.

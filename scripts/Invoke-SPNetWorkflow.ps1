@@ -54,6 +54,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Throw-SpNetWorkflowWrapperError {
+    param([string]$Code, [string]$Message, [string]$Hint = '', [string]$Path = '')
+    $exception = New-Object System.InvalidOperationException($Message)
+    $record = New-Object System.Management.Automation.ErrorRecord($exception, $Code, [System.Management.Automation.ErrorCategory]::InvalidOperation, $Path)
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) { $record.ErrorDetails = New-Object System.Management.Automation.ErrorDetails("$Message`nRemediation: $Hint") }
+    throw $record
+}
+
 function ConvertTo-SPNetBool {
     param(
         [object]$Value,
@@ -153,18 +161,23 @@ function Invoke-SPNetCsomPublisher {
     if ($TargetType -eq 'Auto') { throw '-TargetType Site or -TargetType List is required when -PublisherMode Csom.' }
     if ($IfExists -ne 'Fail') { throw '-PublisherMode Csom currently supports only -IfExists Fail.' }
 
-    $publisherProject = Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj'
+    $publisherProject = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj'
     $publisherExe = if ([string]::IsNullOrWhiteSpace($PublisherExePath)) {
         $packagedPublisher = Join-Path $PSScriptRoot '..\tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe'
         if (Test-Path $packagedPublisher -PathType Leaf) { [IO.Path]::GetFullPath($packagedPublisher) }
-        else { Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\bin\Release\net48\SPNet.Workflow.Publisher.Csom.exe' }
+        else {
+            $sourcePublisher = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.Publisher.Csom\bin\Release\net48\SPNet.Workflow.Publisher.Csom.exe'
+            if (Test-Path $sourcePublisher -PathType Leaf) { [IO.Path]::GetFullPath($sourcePublisher) } else { $sourcePublisher }
+        }
     } else { $PublisherExePath }
     if (-not (Test-Path $publisherExe)) {
-        if (-not (Test-Path $publisherProject)) { throw "CSOM publisher project not found at '$publisherProject'." }
+        if (-not (Test-Path $publisherProject)) {
+            Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-001' -Message 'CSOM publisher executable was not found and no source fallback project exists.' -Path $publisherExe -Hint 'Use a complete SPNet package, build/package from source, or pass -PublisherExePath to a valid SPNet.Workflow.Publisher.Csom.exe.'
+        }
         dotnet build $publisherProject -v:minimal | Write-Output
-        if ($LASTEXITCODE -ne 0) { throw "CSOM publisher build failed with exit code $LASTEXITCODE." }
+        if ($LASTEXITCODE -ne 0) { Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-002' -Message "CSOM publisher build failed with exit code $LASTEXITCODE." -Path $publisherProject -Hint 'Fix the publisher project build or package with prebuilt tools.' }
     }
-    if (-not (Test-Path $publisherExe)) { throw "CSOM publisher executable not found at '$publisherExe'." }
+    if (-not (Test-Path $publisherExe)) { Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-003' -Message 'CSOM publisher executable was not found after build.' -Path $publisherExe -Hint 'Check build output and target framework net48, or pass -PublisherExePath.' }
 
     $publisherArgs = @(
         '--site-url', $SiteUrl,

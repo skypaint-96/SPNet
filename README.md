@@ -62,6 +62,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1
 
 The `doctor` subcommand performs offline source/package integrity checks before build or publish: root detection, primary and wrapper scripts, packaged tools or source fallback paths, safe config examples, artifacts writeability, package manifest readability in package mode, docs/samples presence, and PowerShell runtime basics. Use `doctor --json` for simple machine-readable output. It intentionally does not perform SharePoint authentication or online publish checks.
 
+Help, errors, and path handling are standardised around the primary CLI:
+
+- `help`, no-argument invocation, `--help`, and subcommand help such as `help build`, `build --help`, `publish --help`, and `doctor --help` are safe discovery operations.
+- User-supplied relative paths (`--workflow`, `--xaml`, `--out`, `--config`, `--cache-folder`, metadata/form-field paths, backup paths, and explicit tool paths) are resolved from the caller's current directory. Script and packaged tool discovery remains relative to `scripts\spnet-workflow.ps1`, so packaged usage does not depend on where the command is invoked from.
+- Common command and local path failures emit `SPNET_ERROR [code]` lines with remediation hints, including invalid subcommands, missing wrapper scripts, missing input YAML/XAML, missing metadata/form-field sidecars, missing serializer/publisher tools, and failed delegated commands. These failures return non-zero exit codes.
+- Wrapper-level failures retain compatibility while adding clearer messages when packaged tools and source fallback tools cannot be found.
+
 The retained wrappers and direct executables remain available for compatibility, but `scripts\spnet-workflow.ps1` is the intended packaged entry point.
 
 ## Current architecture
