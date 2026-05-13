@@ -10,8 +10,12 @@ Implementation planning is complete. The feedback should be implemented in two a
 
 2. **One packaged CLI entry point**
    - Introduce one primary packaged command, for example `spnet-workflow.exe`, with subcommands: build, inspect, export, publish, list, download, validate, lint, report, dry-run, doctor, cleanup, and help.
-   - Keep existing scripts as compatibility shims where possible.
+   - Milestone 2 implemented 2026-05-13 as [`scripts/spnet-workflow.ps1`](../scripts/spnet-workflow.ps1), with the scoped subcommands `help`, `build`, `inspect`, `export`, and `publish`.
+   - `build`, `inspect`, and `export` delegate to [`scripts/Invoke-SPNetYamlWorkflow.ps1`](../scripts/Invoke-SPNetYamlWorkflow.ps1) and the existing serializer path; `publish` delegates through the YAML wrapper to [`scripts/Invoke-SPNetWorkflow.ps1`](../scripts/Invoke-SPNetWorkflow.ps1).
+   - Existing scripts and direct executables remain compatibility paths, but packaged docs now prefer `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 <command> ...`.
+   - Later commands such as doctor, lint, report, true dry-run, list, download, cleanup, and auth preflight remain deferred to their own milestones.
    - Likely touched areas: [`src/SPNet.Workflow.WfSerializer/Program.cs`](src/SPNet.Workflow.WfSerializer/Program.cs), [`src/SPNet.Workflow.Publisher.Csom/Program.cs`](src/SPNet.Workflow.Publisher.Csom/Program.cs), [`scripts/Invoke-SPNetYamlWorkflow.ps1`](scripts/Invoke-SPNetYamlWorkflow.ps1), [`scripts/Invoke-SPNetWorkflow.ps1`](scripts/Invoke-SPNetWorkflow.ps1), [`scripts/Package-SPNetWorkflow.ps1`](scripts/Package-SPNetWorkflow.ps1).
+   - Status: implemented 2026-05-13 for scoped milestone 2.
    - Outcome: packaged users have one obvious command path instead of wrapper/direct-executable confusion.
 
 3. **Package integrity and doctor checks**

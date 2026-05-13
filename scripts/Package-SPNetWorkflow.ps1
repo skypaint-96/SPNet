@@ -126,6 +126,8 @@ try {
         version = $safeVersion
         createdUtc = (Get-Date).ToUniversalTime().ToString('o')
         configuration = $Configuration
+        primaryCommand = 'scripts\spnet-workflow.ps1'
+        commands = @('help', 'build', 'inspect', 'export', 'publish')
         tools = $projects.Name
         notes = 'Package intentionally excludes local config, SharePoint secrets, WebsiteCache/proxy assemblies, generated diagnostics, and transient build artifacts.'
     }

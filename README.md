@@ -49,12 +49,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Package-SPNetWorkf
 
 The package includes built command-line tools, runtime PowerShell scripts, safe config examples, docs, samples, and this README. It intentionally excludes local config, SharePoint secrets, SharePoint Designer WebsiteCache/proxy assemblies, generated diagnostics, and transient build artifacts.
 
+Packaged workflow usage should start with the primary command:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 help
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
+```
+
+The retained wrappers and direct executables remain available for compatibility, but `scripts\spnet-workflow.ps1` is the intended packaged entry point.
+
 ## Current architecture
 
 - `src/SPNet.Workflow.WfSerializer`: legacy .NET Framework 4.8 serializer/converter. It owns YAML parsing, WF activity construction, XAML export/inspection, SharePoint Designer metadata normalization, and WebsiteCache proxy assembly loading.
 - `src/SPNet.Workflow.Publisher.Csom`: standalone .NET Framework 4.8 WorkflowServices CSOM publisher. It treats generated XAML as opaque text and intentionally does not reference WF, SharePoint Designer, or serializer assemblies.
 - `tests/SPNet.Workflow.WfSerializer.Tests`: lightweight automated tests for YAML deserialization, action aliases, validation, and unsafe top-level lookup rejection. These tests do not require SharePoint or WebsiteCache proxy assemblies.
-- `scripts/Invoke-SPNetYamlWorkflow.ps1`: orchestration wrapper for local build/export/inspect/golden validation and live publish/list/cleanup flows.
+- `scripts/spnet-workflow.ps1`: primary packaged CLI entry point with `help`, `build`, `inspect`, `export`, and `publish` subcommands.
+- `scripts/Invoke-SPNetYamlWorkflow.ps1`: compatibility orchestration wrapper for local build/export/inspect/golden validation and live publish/list/cleanup flows.
 - `artifacts/`: ignored generated output and diagnostics workspace. Only `artifacts/.gitkeep` is intentional source control content.
 
 If editor state shows `src/SPNet.Workflow.Core/`, `src/SPNet.Workflow.Cli/`, or `src/SPNet.Workflow.SharePoint/`, those projects are not present in this repository snapshot and are not included in `SPNet.slnx`.
@@ -72,27 +85,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWo
 4. Build YAML to SPD-compatible XAML plus the generated publish metadata sidecar `*.xaml.metadata.json`:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Build -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -Config config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 ```
 
-Equivalent direct CLI:
+Equivalent retained wrapper/direct serializer paths:
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Build -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -Config config\spnet.local.yml
 .\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 ```
 
 5. Inspect or export generated/downloaded XAML:
 
 ```powershell
-.\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
-.\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 ```
 
 6. Publish through the retained PowerShell boundary. By default publish builds from `-Workflow` to `-XamlPath` first, emits `-XamlPath + '.metadata.json'`, and passes that metadata JSON to the publisher. Pass `-NoBuild` only when publishing an existing XAML file that already has a matching metadata JSON sidecar, or pass `-MetadataJsonPath` explicitly. The current publisher path uses WorkflowServices CSOM, submits XAML as opaque text, and uses metadata JSON as the normal publish contract:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Publish -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -TargetType Site -DryRun
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Publish -NoBuild -XamlPath artifacts\YamlFirstSmoke.xaml -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -TargetType Site -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --no-build --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
 ```
 
 Remove `-DryRun` only when SharePoint authentication/session state and WorkflowServices CSOM dependencies are available. For browser-authenticated SharePoint Online sessions, the wrapper can hand off WebLogin/WinINet cookies to the CSOM publisher; username/password/domain credentials and default Windows credentials remain available for environments that support them.
@@ -432,6 +446,7 @@ External dependencies are not packaged: SharePoint Designer WebsiteCache DLLs, O
 ## Retained components
 
 - `src/SPNet.Workflow.WfSerializer`: .NET Framework 4.8 serializer/converter. It loads WebsiteCache proxy DLLs, builds real WF activity trees, serializes XAML, and injects SPD stage metadata.
+- `scripts/spnet-workflow.ps1`: primary packaged CLI entry point. It delegates YAML build/inspect/export to the serializer wrapper and publish to the publish wrapper.
 - `scripts/Invoke-SPNetWorkflow.ps1`: live SharePoint publish/download boundary.
 - `scripts/Get-SPNetWorkflowDiagnostics.ps1`: read-only SharePoint workflow diagnostic/export helper.
 - `scripts/Invoke-SPNetYamlWorkflow.ps1`: wrapper/combiner for YAML build/export/inspect/publish/download actions.

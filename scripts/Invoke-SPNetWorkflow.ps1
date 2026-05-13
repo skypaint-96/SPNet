@@ -5,6 +5,8 @@ Publishes or downloads SharePoint 2013 Workflow Manager workflows for SPNet.
 .DESCRIPTION
 This is the intentionally explicit PowerShell boundary for live SharePoint operations. It publishes generated Windows Workflow Foundation XAML because many SharePoint 2013/Subscription Edition farms require legacy Microsoft.SharePoint.Client.WorkflowServices assemblies and legacy WebLogin authentication.
 
+Packaged usage should prefer the primary `scripts\spnet-workflow.ps1 publish` command. This script remains as the compatibility wrapper and live SharePoint publishing boundary.
+
 For YAML-authored workflows, the generated `*.xaml.metadata.json` sidecar is the normal publish contract. The metadata JSON contains display name, technical name, description, target, start options, initiation settings, and form fields. Publish uses it through `-MetadataJsonPath`, or discovers `-XamlPath + '.metadata.json'` when present. Download writes XAML plus `*.xaml.metadata.json` and may also preserve legacy `*.xaml.formfield.xml` for compatibility/inspection.
 
 .PARAMETER MetadataJsonPath
@@ -153,7 +155,9 @@ function Invoke-SPNetCsomPublisher {
 
     $publisherProject = Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj'
     $publisherExe = if ([string]::IsNullOrWhiteSpace($PublisherExePath)) {
-        Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\bin\Release\net48\SPNet.Workflow.Publisher.Csom.exe'
+        $packagedPublisher = Join-Path $PSScriptRoot '..\tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe'
+        if (Test-Path $packagedPublisher -PathType Leaf) { [IO.Path]::GetFullPath($packagedPublisher) }
+        else { Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\bin\Release\net48\SPNet.Workflow.Publisher.Csom.exe' }
     } else { $PublisherExePath }
     if (-not (Test-Path $publisherExe)) {
         if (-not (Test-Path $publisherProject)) { throw "CSOM publisher project not found at '$publisherProject'." }

@@ -5,6 +5,8 @@ Builds, inspects, publishes, downloads, lists, and cleans up SPNet YAML-authored
 .DESCRIPTION
 YAML is the authoring source of truth. The Build and Publish actions compile YAML to SharePoint Designer-compatible XAML and generate a `*.xaml.metadata.json` sidecar from effective YAML metadata/defaults. That metadata JSON is the normal publish contract for display name, technical name, description, target, start options, initiation settings, and form fields.
 
+Packaged usage should prefer the primary `scripts\spnet-workflow.ps1` command. This script remains as a compatibility wrapper and implementation boundary for YAML workflow orchestration.
+
 The normal YAML publish flow is YAML -> XAML + metadata JSON -> publish with metadata JSON -> download XAML + metadata JSON. Legacy `*.xaml.formfield.xml` may still be emitted or downloaded for compatibility/inspection, but it is not the normal publish input.
 
 .PARAMETER MetadataJsonPath
@@ -34,6 +36,7 @@ param(
     [string]$StatusColumn = '',
     [ValidateSet('Update', 'CreateNew', 'Fail')]
     [string]$IfExists = 'Update',
+    [string]$PublisherExePath = '',
     [string]$ExpectedDefinitionId = '',
     [string]$BackupDirectory = '',
     [switch]$NoBuild,
@@ -43,9 +46,24 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$tool = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe'
+
+function Resolve-SPNetSerializerToolPath {
+    $candidates = @(
+        (Join-Path $PSScriptRoot '..\tools\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.exe'),
+        (Join-Path $PSScriptRoot 'tools\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.exe'),
+        (Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate -PathType Leaf) { return [IO.Path]::GetFullPath($candidate) }
+    }
+    return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe'))
+}
+
+$tool = Resolve-SPNetSerializerToolPath
 if (-not (Test-Path $tool)) {
-    dotnet build (Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj') -c Release
+    $serializerProject = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj'
+    if (-not (Test-Path $serializerProject -PathType Leaf)) { throw "Serializer executable not found: $tool" }
+    dotnet build $serializerProject -c Release
 }
 
 function Get-SPNetYamlScalar {
@@ -163,6 +181,7 @@ switch ($Action) {
         $publishArgs.MetadataJsonPath = $effectiveMetadataJsonPath
         if (-not [string]::IsNullOrWhiteSpace($ExpectedDefinitionId)) { $publishArgs.ExpectedDefinitionId = $ExpectedDefinitionId }
         if (-not [string]::IsNullOrWhiteSpace($BackupDirectory)) { $publishArgs.BackupDirectory = $BackupDirectory }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherExePath)) { $publishArgs.PublisherExePath = $PublisherExePath }
         if ($DryRun) { $publishArgs.DryRun = $true }
         & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @publishArgs
     }
