@@ -8,6 +8,25 @@ Generated SharePoint workflow XAML must not contain raw WF language expression a
 
 See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md).
 
+## Release framing and production guidance
+
+This release is a stabilisation release for YAML-first workflow authoring. It is appropriate for controlled production use only when the workflow is built from documented **stable** actions, reviewed against the target SharePoint site/list, and validated through a test publish/download/runtime cycle before business use. Stable actions are not the same as **preview**, **experimental**, or **dev-only** actions:
+
+- **Stable** actions use visible or well-understood Workflow Manager-safe activity shapes and are the default choice for production workflows.
+- **Preview** actions build and have targeted validation, but may involve timers, external HTTP services, email/task side effects, list mutations, exact SharePoint Designer metadata, or partial export support. Use them only after validating against the target site and rollback plan.
+- **Experimental** actions are for controlled trials. They commonly involve `DynamicValue` or hidden `Microsoft.Activities` shapes whose runtime behavior can depend on the real response payload, proxy assembly version, and SharePoint Workflow Manager behavior.
+- **Dev-only** actions are for local diagnostics, sample builds, and developer experiments. A successful local build with WebsiteCache proxy assemblies does not prove that SharePoint publish, Designer rendering, or runtime execution will be acceptable.
+- **Unsupported** shapes are documented limitations or rejected YAML surfaces and should not be published.
+
+Production guidance:
+
+- Keep production workflows small, observable, and mostly orchestration-focused: set state, call bounded services, update a small number of SharePoint fields/items, and send reviewed notifications. Do not use workflows for heavy matrix-style computation, bulk data shaping, or large in-workflow transformations.
+- Treat Workflow Manager limits as practical design limits even when a generated XAML file builds locally: large workflows, deep nesting, high variable/property counts, long or unbounded loops, large `DynamicValue` payloads, and repeated large string operations can publish slowly, fail validation, render poorly in SharePoint Designer, or fail at runtime.
+- Validate every production candidate in a non-production site/list first: build YAML, inspect the generated XAML/metadata JSON, publish with a unique test name, open in SharePoint Designer, run `Check for Errors`, run realistic start conditions, download the workflow, and compare behavior before promoting the same shape.
+- Avoid hidden or experimental activities in production unless the owning team explicitly accepts the risk and has performed target-environment publish/runtime tests. Hidden activities may execute while remaining invisible or misleading in SharePoint Designer.
+- Be careful with `DynamicValue`: REST payloads can contain missing properties, arrays where objects are expected, primitive/null values, unexpected types, or payloads larger than Workflow Manager can comfortably process. Prefer explicit typed extraction and small response bodies.
+- Remember that local build success is not publish/runtime proof. The local serializer uses SharePoint Designer WebsiteCache proxy assemblies; SharePoint publishing and runtime use the target Workflow Manager environment. Version, metadata, auth, list schema, and service-response differences can create local-versus-live mismatches.
+
 ## CI, packaging, and releases
 
 GitHub Actions are intentionally scoped to the protected `development` and `production` branches. Pull requests into `production` must come from `development`; `development` runs validation only. A push to `production` runs validation, builds a distributable package, uploads Actions artifacts, and creates a GitHub Release.
@@ -449,3 +468,7 @@ Live publish validation requires SharePoint auth/session support and pinned Shar
 - Top-level lookup actions are rejected because SharePoint Designer can render them as blank/crashing actions; use nested lookup expressions inside assignment or action arguments. This includes list item property lookups such as `lookupListItemStringProperty`.
 - The CSOM publisher does not overwrite, delete, or migrate existing live workflows; `if-exists` currently fails on name conflicts.
 - Site/list publishing is validated for current SharePoint WorkflowServices scenarios, but Email/task workflows should remain local/golden validated only unless intentionally reviewed for safe recipients, assignees, and side effects. Broader task/process/list-item CRUD actions remain deferred until safe XAML shapes are captured and validated.
+- The support surface is classified in [docs/action-support-matrix.md](docs/action-support-matrix.md). Stable actions are the production baseline; preview actions require target-site validation; experimental/dev-only actions are not production defaults.
+- Large workflows, broad loops, many variables/properties, large HTTP/DynamicValue payloads, and repeated whole-body string manipulation can hit Workflow Manager validation, persistence, rendering, or runtime limits even when local YAML-to-XAML build succeeds.
+- SharePoint Designer rendering and Workflow Manager validation are separate compatibility bars. Some generated shapes can publish but show misleading red boxes, blank operands, or hidden activities in Designer.
+- Local WebsiteCache/proxy assemblies can differ from the target publish/runtime environment. Treat local build/export/inspect as necessary but not sufficient for live use.
