@@ -2,13 +2,13 @@ Implementation planning is complete. The feedback should be implemented in two a
 
 ## Stabilisation release
 
-1. **Action classification and release framing**
+1. **Action classification and release framing** - done
    - Mark every action as stable, preview, experimental, dev-only, or unsupported in [`docs/action-support-matrix.md`](docs/action-support-matrix.md).
    - Add production guidance and known limitations to [`README.md`](README.md).
    - Status: implemented 2026-05-13.
    - Outcome: users can distinguish safe workflows from risky hidden/experimental SharePoint activity usage.
 
-2. **One packaged CLI entry point**
+2. **One packaged CLI entry point** - done
    - Introduce one primary packaged command, for example `spnet-workflow.exe`, with subcommands: build, inspect, export, publish, list, download, validate, lint, report, dry-run, doctor, cleanup, and help.
    - Milestone 2 implemented 2026-05-13 as [`scripts/spnet-workflow.ps1`](../scripts/spnet-workflow.ps1), with the scoped subcommands `help`, `build`, `inspect`, `export`, and `publish`.
    - `build`, `inspect`, and `export` delegate to [`scripts/Invoke-SPNetYamlWorkflow.ps1`](../scripts/Invoke-SPNetYamlWorkflow.ps1) and the existing serializer path; `publish` delegates through the YAML wrapper to [`scripts/Invoke-SPNetWorkflow.ps1`](../scripts/Invoke-SPNetWorkflow.ps1).
@@ -18,10 +18,14 @@ Implementation planning is complete. The feedback should be implemented in two a
    - Status: implemented 2026-05-13 for scoped milestone 2.
    - Outcome: packaged users have one obvious command path instead of wrapper/direct-executable confusion.
 
-3. **Package integrity and doctor checks**
-   - Add package manifest/startup validation so packaged commands never silently depend on missing source-tree paths.
-   - Add `doctor` checks for package files, binaries, WebsiteCache/proxy metadata, CSOM assemblies, config, cache paths, artifacts paths, and optional SharePoint auth readiness.
-   - Outcome: packaging defects are caught before build/publish.
+3. **Package integrity and doctor checks** - done
+    - Add package manifest/startup validation so packaged commands never silently depend on missing source-tree paths.
+    - Milestone 3 implemented 2026-05-13 as `doctor` on [`scripts/spnet-workflow.ps1`](../scripts/spnet-workflow.ps1), including `doctor --json` for simple machine-readable output.
+    - Added local/offline checks for source/package root detection, primary CLI, retained wrappers, packaged serializer/publisher executables or source fallback paths, config defaults/examples, artifacts writeability, package manifest readability, docs/samples completeness, and PowerShell runtime basics.
+    - Updated [`scripts/Package-SPNetWorkflow.ps1`](../scripts/Package-SPNetWorkflow.ps1) manifest generation with integrity metadata: package kind/version, primary command, supported commands including `doctor`, expected scripts/tools/config/docs, and sample root.
+    - SharePoint connectivity, authentication preflight, online publish checks, lint/validate/report/dry-run, and safe update remain deferred to later milestones.
+    - Status: implemented 2026-05-13 for scoped milestone 3.
+    - Outcome: packaging defects are caught before build/publish.
 
 4. **Help, errors, and path handling**
    - Add clean top-level and subcommand help with packaged and source-tree examples.

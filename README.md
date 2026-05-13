@@ -53,11 +53,14 @@ Packaged workflow usage should start with the primary command:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 help
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 doctor
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
 ```
+
+The `doctor` subcommand performs offline source/package integrity checks before build or publish: root detection, primary and wrapper scripts, packaged tools or source fallback paths, safe config examples, artifacts writeability, package manifest readability in package mode, docs/samples presence, and PowerShell runtime basics. Use `doctor --json` for simple machine-readable output. It intentionally does not perform SharePoint authentication or online publish checks.
 
 The retained wrappers and direct executables remain available for compatibility, but `scripts\spnet-workflow.ps1` is the intended packaged entry point.
 
@@ -66,7 +69,7 @@ The retained wrappers and direct executables remain available for compatibility,
 - `src/SPNet.Workflow.WfSerializer`: legacy .NET Framework 4.8 serializer/converter. It owns YAML parsing, WF activity construction, XAML export/inspection, SharePoint Designer metadata normalization, and WebsiteCache proxy assembly loading.
 - `src/SPNet.Workflow.Publisher.Csom`: standalone .NET Framework 4.8 WorkflowServices CSOM publisher. It treats generated XAML as opaque text and intentionally does not reference WF, SharePoint Designer, or serializer assemblies.
 - `tests/SPNet.Workflow.WfSerializer.Tests`: lightweight automated tests for YAML deserialization, action aliases, validation, and unsafe top-level lookup rejection. These tests do not require SharePoint or WebsiteCache proxy assemblies.
-- `scripts/spnet-workflow.ps1`: primary packaged CLI entry point with `help`, `build`, `inspect`, `export`, and `publish` subcommands.
+- `scripts/spnet-workflow.ps1`: primary packaged CLI entry point with `help`, `build`, `inspect`, `export`, `publish`, and `doctor` subcommands.
 - `scripts/Invoke-SPNetYamlWorkflow.ps1`: compatibility orchestration wrapper for local build/export/inspect/golden validation and live publish/list/cleanup flows.
 - `artifacts/`: ignored generated output and diagnostics workspace. Only `artifacts/.gitkeep` is intentional source control content.
 
