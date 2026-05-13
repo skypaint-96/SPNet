@@ -73,6 +73,7 @@ Commands:
   inspect    Inspect generated or downloaded XAML.
   export     Export generated or downloaded XAML back to YAML.
   publish    Build and/or publish a YAML-authored workflow through the publish wrapper.
+  auth-test  Run local auth/publisher readiness checks without connecting to SharePoint.
   doctor     Run local source/package integrity checks without SharePoint connectivity.
 
 Source-tree examples:
@@ -80,6 +81,7 @@ Source-tree examples:
   .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
   .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
   .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
+  .\scripts\spnet-workflow.ps1 auth-test --site-url https://tenant.sharepoint.com/sites/site --auth-mode WebLogin
   .\scripts\spnet-workflow.ps1 doctor
 
 Packaged examples:
@@ -90,6 +92,11 @@ Packaged examples:
 Path handling:
   User-supplied relative paths are resolved from the caller's current directory.
   Script and tool discovery is resolved relative to this command/package.
+
+Authentication and publisher defaults:
+  Publish defaults to --auth-mode WebLogin, where the publish wrapper bootstraps browser/PnP WebLogin cookies for the CSOM publisher.
+  Supported publish auth modes are WebLogin, CookieHeader, WindowsDefault, and Credentials.
+  Packaged publish resolves tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe before source-build fallback. Direct CSOM publisher invocation is advanced because it does not perform WebLogin/cookie bootstrap.
 
 Compatibility:
   Existing Invoke-SPNetYamlWorkflow.ps1, Invoke-SPNetWorkflow.ps1, serializer executable, and publisher executable remain available. Prefer this command for packaged usage.
@@ -175,6 +182,25 @@ Common options:
   --backup-directory <path>       Guarded update backup directory.
   --dry-run                       Pass through existing dry-run behavior.
   --no-build                      Publish an existing XAML plus metadata JSON.
+  --auth-mode WebLogin|CookieHeader|WindowsDefault|Credentials
+                                  Default: WebLogin. WebLogin uses the wrapper to obtain PnP/WinINet cookies for the CSOM publisher.
+  --publisher-cookie-header <v>   Explicit Cookie header; normally used with --auth-mode CookieHeader.
+  --publisher-username <name>     Explicit username; normally used with --auth-mode Credentials.
+  --publisher-password <secret>   Explicit password for --publisher-username.
+  --publisher-domain <domain>     Optional Windows/domain credential domain.
+  --publisher-exe <path>          Override publisher executable. Omit for packaged default.
+
+Publisher discovery:
+  Omitted --publisher-exe resolves package-relative tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe first, then source build output/project fallback.
+
+Authentication modes:
+  WebLogin       Default. Wrapper opens/uses PnP WebLogin and passes cookies to the CSOM publisher.
+  CookieHeader   Wrapper passes --publisher-cookie-header directly; no WebLogin bootstrap.
+  WindowsDefault Wrapper invokes the CSOM publisher with default Windows credentials; no WebLogin bootstrap.
+  Credentials    Wrapper passes username/password/domain to the CSOM publisher; no WebLogin bootstrap.
+
+Direct publisher warning:
+  Direct SPNet.Workflow.Publisher.Csom.exe invocation does not bootstrap WebLogin/WinINet cookies. Use the primary CLI/wrappers unless all required cookies or credentials are supplied explicitly.
 
 Example:
   .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
@@ -183,6 +209,30 @@ Packaged example:
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow .\samples\workflow.example.yml --xaml .\artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
 
 Relative paths are resolved from the caller's current directory.
+'@
+        }
+        'auth-test' {
+            @'
+Usage:
+  .\scripts\spnet-workflow.ps1 auth-test --site-url <url> [--auth-mode <mode>] [--publisher-exe <path>] [auth options]
+
+Runs a local, non-mutating readiness check. This validates URL shape, selected auth mode, required local auth inputs, wrapper presence, and publisher executable discovery. It does not connect to SharePoint, does not validate credentials, and does not publish.
+
+Options:
+  --site-url <url>                SharePoint site URL to validate locally.
+  --auth-mode WebLogin|CookieHeader|WindowsDefault|Credentials
+                                  Default: WebLogin.
+  --publisher-cookie-header <v>   Required for CookieHeader mode.
+  --publisher-username <name>     Required for Credentials mode.
+  --publisher-password <secret>   Optional password for Credentials mode.
+  --publisher-domain <domain>     Optional domain for Credentials mode.
+  --publisher-exe <path>          Optional explicit publisher executable override.
+  --json                          Emit machine-readable JSON.
+
+Publisher discovery defaults to package-relative tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe before source fallback.
+
+Example:
+  .\scripts\spnet-workflow.ps1 auth-test --site-url https://tenant.sharepoint.com/sites/site --auth-mode WebLogin
 '@
         }
         'doctor' {
@@ -204,6 +254,93 @@ Doctor uses package/script-relative discovery for SPNet scripts and tools.
         }
         default { Throw-SpNetCliError -Code 'SPNET-CLI-HELP-001' -Message "Unknown help topic '$Name'." -Hint 'Run .\scripts\spnet-workflow.ps1 help for supported commands.' }
     }
+}
+
+function Resolve-SPNetPublisherToolPath {
+    param([string]$ExplicitPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        return [pscustomobject]@{ path = $ExplicitPath; source = 'explicit'; exists = (Test-Path $ExplicitPath -PathType Leaf); packagedDefault = $false }
+    }
+
+    $root = Get-SPNetWorkflowRoot
+    $packagedPublisher = Join-Path $root 'tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe'
+    if (Test-Path $packagedPublisher -PathType Leaf) { return [pscustomobject]@{ path = [IO.Path]::GetFullPath($packagedPublisher); source = 'packaged'; exists = $true; packagedDefault = $true } }
+
+    $sourcePublisher = Join-Path $root 'src\SPNet.Workflow.Publisher.Csom\bin\Release\net48\SPNet.Workflow.Publisher.Csom.exe'
+    if (Test-Path $sourcePublisher -PathType Leaf) { return [pscustomobject]@{ path = [IO.Path]::GetFullPath($sourcePublisher); source = 'source-output-fallback'; exists = $true; packagedDefault = $false } }
+
+    $sourceProject = Join-Path $root 'src\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj'
+    if (Test-Path $sourceProject -PathType Leaf) { return [pscustomobject]@{ path = [IO.Path]::GetFullPath($sourcePublisher); source = 'source-project-build-fallback'; exists = $false; packagedDefault = $false; project = [IO.Path]::GetFullPath($sourceProject) } }
+
+    return [pscustomobject]@{ path = [IO.Path]::GetFullPath($packagedPublisher); source = 'missing'; exists = $false; packagedDefault = $true }
+}
+
+function Invoke-SPNetAuthTest {
+    param([hashtable]$Options)
+
+    $jsonOutput = $Options.ContainsKey('json')
+    $siteUrl = if ($Options.ContainsKey('site-url')) { [string]$Options['site-url'] } elseif ($Options.ContainsKey('siteurl')) { [string]$Options['siteurl'] } else { '' }
+    $authMode = if ($Options.ContainsKey('auth-mode')) { [string]$Options['auth-mode'] } elseif ($Options.ContainsKey('authmode')) { [string]$Options['authmode'] } else { 'WebLogin' }
+    $validAuthModes = @('WebLogin','CookieHeader','WindowsDefault','Credentials')
+    $checks = New-Object 'System.Collections.Generic.List[object]'
+
+    Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'preflight scope' -Message 'Local readiness only; no SharePoint connection, credential validation, publish, update, or cleanup is performed.'
+
+    if ([string]::IsNullOrWhiteSpace($siteUrl)) { Add-SPNetDoctorCheck -Checks $checks -Status 'FAIL' -Name 'site URL' -Message 'Missing --site-url.' -Remediation 'Pass --site-url https://tenant.sharepoint.com/sites/site.' }
+    else {
+        $parsedUri = $null
+        if ([Uri]::TryCreate($siteUrl, [UriKind]::Absolute, [ref]$parsedUri) -and $parsedUri.Scheme -in @('http','https')) { Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'site URL' -Message 'Site URL is an absolute HTTP/HTTPS URI.' -Path $siteUrl }
+        else { Add-SPNetDoctorCheck -Checks $checks -Status 'FAIL' -Name 'site URL' -Message 'Site URL is not an absolute HTTP/HTTPS URI.' -Path $siteUrl -Remediation 'Use a full SharePoint site URL.' }
+    }
+
+    if ($authMode -notin $validAuthModes) { Add-SPNetDoctorCheck -Checks $checks -Status 'FAIL' -Name 'auth mode' -Message "Unsupported auth mode '$authMode'." -Remediation ('Use one of: ' + ($validAuthModes -join ', ') + '.') }
+    else { Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'auth mode' -Message "Selected $authMode." }
+
+    $cookieHeader = if ($Options.ContainsKey('publisher-cookie-header')) { [string]$Options['publisher-cookie-header'] } elseif ($Options.ContainsKey('publishercookieheader')) { [string]$Options['publishercookieheader'] } else { '' }
+    $username = if ($Options.ContainsKey('publisher-username')) { [string]$Options['publisher-username'] } elseif ($Options.ContainsKey('publisherusername')) { [string]$Options['publisherusername'] } else { '' }
+    if ($authMode -eq 'CookieHeader') {
+        if ([string]::IsNullOrWhiteSpace($cookieHeader)) { Add-SPNetDoctorCheck -Checks $checks -Status 'FAIL' -Name 'cookie auth input' -Message 'CookieHeader mode requires --publisher-cookie-header.' -Remediation 'Pass an explicit SharePoint Cookie header, or use --auth-mode WebLogin for wrapper bootstrap.' }
+        else { Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'cookie auth input' -Message 'Explicit cookie header was supplied.' }
+    } elseif ($authMode -eq 'Credentials') {
+        if ([string]::IsNullOrWhiteSpace($username)) { Add-SPNetDoctorCheck -Checks $checks -Status 'FAIL' -Name 'credential auth input' -Message 'Credentials mode requires --publisher-username.' -Remediation 'Pass --publisher-username and optional password/domain, or choose another auth mode.' }
+        else { Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'credential auth input' -Message 'Explicit username was supplied.' }
+    } elseif ($authMode -eq 'WebLogin') {
+        Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'WebLogin bootstrap' -Message 'Publish wrapper will attempt PnP WebLogin and cookie handoff at live publish time.'
+    } elseif ($authMode -eq 'WindowsDefault') {
+        Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'Windows default credentials' -Message 'Publisher will use default Windows credentials at live publish time.'
+    }
+
+    $wrapper = Get-SPNetWorkflowScriptPath -Name 'Invoke-SPNetWorkflow.ps1'
+    Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'publish wrapper' -Message 'Found publish wrapper that performs auth/bootstrap orchestration.' -Path $wrapper
+    $publisherInfo = Resolve-SPNetPublisherToolPath -ExplicitPath $(if ($Options.ContainsKey('publisher-exe')) { [string]$Options['publisher-exe'] } elseif ($Options.ContainsKey('publisher-exe-path')) { [string]$Options['publisher-exe-path'] } elseif ($Options.ContainsKey('publisherexepath')) { [string]$Options['publisherexepath'] } else { '' })
+    if ($publisherInfo.exists) { Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'publisher executable' -Message "Resolved $($publisherInfo.source) publisher executable. Packaged default preferred: $($publisherInfo.packagedDefault)." -Path $publisherInfo.path }
+    elseif ($publisherInfo.source -eq 'source-project-build-fallback') { Add-SPNetDoctorCheck -Checks $checks -Status 'WARN' -Name 'publisher executable' -Message 'Packaged publisher executable is missing; source project exists and live publish can build fallback.' -Path $publisherInfo.project -Remediation 'Prefer a complete package with tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe.' }
+    else { Add-SPNetDoctorCheck -Checks $checks -Status 'FAIL' -Name 'publisher executable' -Message 'No packaged publisher executable or source fallback was found.' -Path $publisherInfo.path -Remediation 'Use a complete package, build/package from source, or pass --publisher-exe.' }
+
+    Add-SPNetDoctorCheck -Checks $checks -Status 'OK' -Name 'direct publisher warning' -Message 'Direct CSOM publisher invocation is advanced and does not bootstrap WebLogin/cookies; use the wrapper unless explicit auth is supplied.'
+
+    $failCount = @($checks | Where-Object { $_.status -eq 'FAIL' }).Count
+    $warnCount = @($checks | Where-Object { $_.status -eq 'WARN' }).Count
+    $okCount = @($checks | Where-Object { $_.status -eq 'OK' }).Count
+    $summaryStatus = if ($failCount -gt 0) { 'FAIL' } elseif ($warnCount -gt 0) { 'WARN' } else { 'OK' }
+    $result = [pscustomobject]@{ status = $summaryStatus; authMode = $authMode; siteUrl = $siteUrl; publisher = $publisherInfo; liveAuthenticationPerformed = $false; generatedUtc = (Get-Date).ToUniversalTime().ToString('o'); counts = [pscustomobject]@{ ok = $okCount; warn = $warnCount; fail = $failCount }; checks = $checks.ToArray() }
+
+    if ($jsonOutput) { $result | ConvertTo-Json -Depth 6 }
+    else {
+        Write-Host "SPNet auth readiness: $summaryStatus (local only; no SharePoint connection)"
+        foreach ($check in $checks) {
+            $pathText = if ($check.path) { " [$($check.path)]" } else { '' }
+            $line = "[$($check.status)] $($check.name): $($check.message)$pathText"
+            if ($check.status -eq 'FAIL') { Write-Host $line -ForegroundColor Red }
+            elseif ($check.status -eq 'WARN') { Write-Host $line -ForegroundColor Yellow }
+            else { Write-Host $line -ForegroundColor Green }
+            if ($check.remediation) { Write-Host "      remediation: $($check.remediation)" }
+        }
+        Write-Host "Summary: $okCount OK, $warnCount warning(s), $failCount failure(s)."
+    }
+
+    if ($failCount -gt 0) { exit 1 }
 }
 
 function Add-SPNetDoctorCheck {
@@ -498,6 +635,11 @@ function Invoke-SPNetYamlWrapperAction {
     Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('expected-definition-id', 'expecteddefinitionid') -ParameterName 'ExpectedDefinitionId'
     Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('backup-directory', 'backupdirectory') -ParameterName 'BackupDirectory'
     Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('publisher-exe', 'publisher-exe-path', 'publisherexepath') -ParameterName 'PublisherExePath'
+    Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('auth-mode', 'authmode') -ParameterName 'AuthMode'
+    Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('publisher-cookie-header', 'publishercookieheader') -ParameterName 'PublisherCookieHeader'
+    Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('publisher-username', 'publisherusername') -ParameterName 'PublisherUsername'
+    Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('publisher-password', 'publisherpassword') -ParameterName 'PublisherPassword'
+    Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('publisher-domain', 'publisherdomain') -ParameterName 'PublisherDomain'
     Add-SPNetArgumentSwitch -Target $parameters -Source $Options -Names @('no-build', 'nobuild') -ParameterName 'NoBuild'
     Add-SPNetArgumentSwitch -Target $parameters -Source $Options -Names @('dry-run', 'dryrun') -ParameterName 'DryRun'
     Add-SPNetArgumentSwitch -Target $parameters -Source $Options -Names @('include-subscriptions', 'includesubscriptions') -ParameterName 'IncludeSubscriptions'
@@ -528,7 +670,7 @@ try {
         return
     }
 
-    $validCommands = @('build', 'inspect', 'export', 'publish', 'doctor')
+    $validCommands = @('build', 'inspect', 'export', 'publish', 'auth-test', 'doctor')
     if ($normalizedCommand -notin $validCommands) {
         Throw-SpNetCliError -Code 'SPNET-CLI-COMMAND-001' -Message "Unknown command '$Command'." -Hint "Run .\scripts\spnet-workflow.ps1 help for supported commands: $($validCommands -join ', ')."
     }
@@ -540,6 +682,7 @@ try {
         'inspect' { Invoke-SPNetYamlWrapperAction -Action 'Inspect' -Options $options }
         'export' { Invoke-SPNetYamlWrapperAction -Action 'Export' -Options $options }
         'publish' { Invoke-SPNetYamlWrapperAction -Action 'Publish' -Options $options }
+        'auth-test' { Invoke-SPNetAuthTest -Options $options }
         'doctor' { Invoke-SPNetDoctor -Options $options }
     }
 } catch {

@@ -57,17 +57,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 auth-test --site-url 'https://tenant.sharepoint.com/sites/site' --auth-mode WebLogin
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
 ```
 
-The `doctor` subcommand performs offline source/package integrity checks before build or publish: root detection, primary and wrapper scripts, packaged tools or source fallback paths, safe config examples, artifacts writeability, package manifest readability in package mode, docs/samples presence, and PowerShell runtime basics. Use `doctor --json` for simple machine-readable output. It intentionally does not perform SharePoint authentication or online publish checks.
+The `doctor` subcommand performs offline source/package integrity checks before build or publish: root detection, primary and wrapper scripts, packaged tools or source fallback paths, safe config examples, artifacts writeability, package manifest readability in package mode, docs/samples presence, and PowerShell runtime basics. Use `doctor --json` for simple machine-readable output. The `auth-test` subcommand performs a non-mutating local authentication/publisher readiness check: it validates site URL shape, auth mode inputs, publish wrapper availability, and package-relative publisher discovery. It intentionally does not connect to SharePoint, validate credentials, or publish.
 
 Help, errors, and path handling are standardised around the primary CLI:
 
-- `help`, no-argument invocation, `--help`, and subcommand help such as `help build`, `build --help`, `publish --help`, and `doctor --help` are safe discovery operations.
+- `help`, no-argument invocation, `--help`, and subcommand help such as `help build`, `build --help`, `publish --help`, `auth-test --help`, and `doctor --help` are safe discovery operations.
 - User-supplied relative paths (`--workflow`, `--xaml`, `--out`, `--config`, `--cache-folder`, metadata/form-field paths, backup paths, and explicit tool paths) are resolved from the caller's current directory. Script and packaged tool discovery remains relative to `scripts\spnet-workflow.ps1`, so packaged usage does not depend on where the command is invoked from.
 - Common command and local path failures emit `SPNET_ERROR [code]` lines with remediation hints, including invalid subcommands, missing wrapper scripts, missing input YAML/XAML, missing metadata/form-field sidecars, missing serializer/publisher tools, and failed delegated commands. These failures return non-zero exit codes.
 - Wrapper-level failures retain compatibility while adding clearer messages when packaged tools and source fallback tools cannot be found.
+- Publish defaults to `--auth-mode WebLogin`; supported modes are `WebLogin`, `CookieHeader`, `WindowsDefault`, and `Credentials`. Omitted `--publisher-exe` resolves `tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe` before source output/project fallback.
 
 The retained wrappers and direct executables remain available for compatibility, but `scripts\spnet-workflow.ps1` is the intended packaged entry point.
 
@@ -76,7 +78,7 @@ The retained wrappers and direct executables remain available for compatibility,
 - `src/SPNet.Workflow.WfSerializer`: legacy .NET Framework 4.8 serializer/converter. It owns YAML parsing, WF activity construction, XAML export/inspection, SharePoint Designer metadata normalization, and WebsiteCache proxy assembly loading.
 - `src/SPNet.Workflow.Publisher.Csom`: standalone .NET Framework 4.8 WorkflowServices CSOM publisher. It treats generated XAML as opaque text and intentionally does not reference WF, SharePoint Designer, or serializer assemblies.
 - `tests/SPNet.Workflow.WfSerializer.Tests`: lightweight automated tests for YAML deserialization, action aliases, validation, and unsafe top-level lookup rejection. These tests do not require SharePoint or WebsiteCache proxy assemblies.
-- `scripts/spnet-workflow.ps1`: primary packaged CLI entry point with `help`, `build`, `inspect`, `export`, `publish`, and `doctor` subcommands.
+- `scripts/spnet-workflow.ps1`: primary packaged CLI entry point with `help`, `build`, `inspect`, `export`, `publish`, `auth-test`, and `doctor` subcommands.
 - `scripts/Invoke-SPNetYamlWorkflow.ps1`: compatibility orchestration wrapper for local build/export/inspect/golden validation and live publish/list/cleanup flows.
 - `artifacts/`: ignored generated output and diagnostics workspace. Only `artifacts/.gitkeep` is intentional source control content.
 
@@ -119,7 +121,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --no-build --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
 ```
 
-Remove `-DryRun` only when SharePoint authentication/session state and WorkflowServices CSOM dependencies are available. For browser-authenticated SharePoint Online sessions, the wrapper can hand off WebLogin/WinINet cookies to the CSOM publisher; username/password/domain credentials and default Windows credentials remain available for environments that support them.
+Before live publish, run the local readiness check:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 auth-test --site-url 'https://tenant.sharepoint.com/sites/site' --auth-mode WebLogin
+```
+
+Remove `-DryRun` only when SharePoint authentication/session state and WorkflowServices CSOM dependencies are available. Publish defaults to `--auth-mode WebLogin`, where the wrapper attempts PnP WebLogin and passes PnP/WinINet cookies to the CSOM publisher. Use `--auth-mode CookieHeader --publisher-cookie-header <header>` when you already have a cookie header, `--auth-mode WindowsDefault` for default Windows credentials, or `--auth-mode Credentials --publisher-username <user> [--publisher-password <secret>] [--publisher-domain <domain>]` where legacy credentials are accepted by the target environment. Omit `--publisher-exe` for packaged usage; the wrapper resolves `tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe` before source fallback and reports the selected path in publish diagnostics.
 
 7. Download published workflows back to XAML plus metadata JSON. Download always writes the XAML and `*.xaml.metadata.json`; it may also preserve `*.xaml.formfield.xml` when SharePoint exposes legacy FormField metadata so older export/inspection paths can still inspect it:
 
@@ -426,6 +434,8 @@ Deferred actions for future safe expansion batches: `copyItem`, `checkInItem`, `
 The CSOM publisher supports site workflows and list workflows. List publishing resolves the target list by `-TargetListTitle` or `-TargetListId`, creates a WorkflowServices definition scoped to that list, publishes a subscription for that list, and applies manual/create/update start flags from YAML-generated metadata JSON or explicit parameters. It expects standard `Workflow History` and `Workflow Tasks` lists to exist in the target web.
 
 For YAML-authored workflows, `*.xaml.metadata.json` is the expected metadata input. `Invoke-SPNetYamlWorkflow.ps1 -Action Publish` discovers `-XamlPath + '.metadata.json'` automatically after build or accepts `-MetadataJsonPath` for an explicit sidecar. Direct publishing with `Invoke-SPNetWorkflow.ps1` and the CSOM publisher follows the same contract through `-MetadataJsonPath` / `--metadata-json`. The publisher converts `metadata.initiation.formFields` to SharePoint Definition `FormField` metadata internally during publish; `*.xaml.formfield.xml` is only a deprecated fallback/compatibility input and is not used by the normal YAML publish path.
+
+Packaged publishing should use `scripts\spnet-workflow.ps1 publish` or the retained wrappers rather than direct executable calls. The wrapper is the authentication/bootstrap boundary: `WebLogin` obtains browser/PnP cookies and hands them to the CSOM publisher, `CookieHeader` passes an explicit cookie header, `WindowsDefault` leaves the publisher on default network credentials, and `Credentials` passes username/password/domain. The wrapper emits `SPNET_AUTH` and `SPNET_PUBLISHER_TOOL` diagnostics showing the selected auth/bootstrap path and whether the package-relative publisher executable or a source fallback was used. Direct `SPNet.Workflow.Publisher.Csom.exe` invocation does not bootstrap WebLogin/WinINet cookies and is advanced/unsupported unless all required cookies or credentials are supplied explicitly.
 
 Publishing currently uses an intentionally conservative `--if-exists Fail` policy. If a workflow definition with the requested name already exists, local tooling reports the conflict instead of overwriting or deleting live SharePoint content.
 

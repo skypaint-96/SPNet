@@ -36,7 +36,13 @@ param(
     [string]$StatusColumn = '',
     [ValidateSet('Update', 'CreateNew', 'Fail')]
     [string]$IfExists = 'Update',
+    [ValidateSet('WebLogin','CookieHeader','WindowsDefault','Credentials')]
+    [string]$AuthMode = 'WebLogin',
     [string]$PublisherExePath = '',
+    [string]$PublisherCookieHeader = '',
+    [string]$PublisherUsername = '',
+    [string]$PublisherPassword = '',
+    [string]$PublisherDomain = '',
     [string]$ExpectedDefinitionId = '',
     [string]$BackupDirectory = '',
     [switch]$NoBuild,
@@ -192,6 +198,7 @@ switch ($Action) {
         if ([string]::IsNullOrWhiteSpace($startCreatedText)) { $startCreatedText = 'false' }
         if ([string]::IsNullOrWhiteSpace($startUpdatedText)) { $startUpdatedText = 'false' }
         $publishArgs = @{ Action = 'Publish'; SiteUrl = $SiteUrl; WorkflowName = $WorkflowName; XamlPath = $XamlPath; TargetType = $TargetType; StartManual = $startManualText; StartOnCreated = $startCreatedText; StartOnUpdated = $startUpdatedText; IfExists = $IfExists }
+        $publishArgs.AuthMode = $AuthMode
         if (-not [string]::IsNullOrWhiteSpace($TargetListTitle)) { $publishArgs.TargetListTitle = $TargetListTitle }
         if (-not [string]::IsNullOrWhiteSpace($StatusColumn)) { $publishArgs.StatusColumn = $StatusColumn }
         if (-not [string]::IsNullOrWhiteSpace($FormFieldXmlPath)) {
@@ -202,6 +209,10 @@ switch ($Action) {
         if (-not [string]::IsNullOrWhiteSpace($ExpectedDefinitionId)) { $publishArgs.ExpectedDefinitionId = $ExpectedDefinitionId }
         if (-not [string]::IsNullOrWhiteSpace($BackupDirectory)) { $publishArgs.BackupDirectory = $BackupDirectory }
         if (-not [string]::IsNullOrWhiteSpace($PublisherExePath)) { $publishArgs.PublisherExePath = $PublisherExePath }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { $publishArgs.PublisherCookieHeader = $PublisherCookieHeader }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherUsername)) { $publishArgs.PublisherUsername = $PublisherUsername }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherPassword)) { $publishArgs.PublisherPassword = $PublisherPassword }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherDomain)) { $publishArgs.PublisherDomain = $PublisherDomain }
         if ($DryRun) { $publishArgs.DryRun = $true }
         $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
         if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }

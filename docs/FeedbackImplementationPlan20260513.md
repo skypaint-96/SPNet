@@ -36,10 +36,17 @@ Implementation planning is complete. The feedback should be implemented in two a
    - Status: implemented 2026-05-13 for scoped milestone 4.
    - Outcome: probing with help does not fail strangely, relative paths behave predictably, and users get actionable local/package diagnostics.
 
-5. **Authentication and publisher defaults**
+5. **Authentication and publisher defaults** - done
    - Make auth mode explicit: browser-cookie/WebLogin, explicit cookie header, Windows/default credentials, or legacy username/password/domain if supported.
    - Add an auth preflight command that authenticates and reports cookie/source/CSOM info without publishing.
    - Ensure packaged publish defaults to the packaged publisher binary, not source output.
+   - Milestone 5 implemented 2026-05-13 with explicit primary CLI publish/auth options and an `auth-test` subcommand on [`scripts/spnet-workflow.ps1`](../scripts/spnet-workflow.ps1).
+   - `auth-test` is intentionally local/non-mutating: it validates site URL shape, auth mode inputs, wrapper presence, and publisher discovery, and clearly reports that it does not connect to SharePoint or validate credentials.
+   - Publish auth modes are now documented and passed through as `WebLogin`, `CookieHeader`, `WindowsDefault`, and `Credentials`; default publish behavior remains `WebLogin` with wrapper cookie bootstrap.
+   - [`scripts/Invoke-SPNetWorkflow.ps1`](../scripts/Invoke-SPNetWorkflow.ps1) now emits explicit `SPNET_AUTH` and `SPNET_PUBLISHER_TOOL` diagnostics for WebLogin/cookie bootstrap, explicit cookie, Windows/default credentials, explicit credentials, and selected publisher path.
+   - Packaged publisher discovery is explicit and package-relative first: `tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe` before source output/project fallback.
+   - Docs/help now warn that direct [`SPNet.Workflow.Publisher.Csom.exe`](../src/SPNet.Workflow.Publisher.Csom/Program.cs) invocation does not bootstrap WebLogin/WinINet cookies and is advanced/unsupported unless explicit cookies or credentials are supplied.
+   - Status: implemented 2026-05-13 for scoped milestone 5.
    - Outcome: direct publisher behavior stops being a trap, and publish failures happen before site mutation.
 
 6. **Safe publish iteration**
