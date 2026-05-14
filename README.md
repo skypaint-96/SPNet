@@ -6,7 +6,26 @@ This is intentionally not the old broad YAML conversion pipeline. The YAML schem
 
 Generated SharePoint workflow XAML must not contain raw WF language expression activities such as `VisualBasicValue`, `VisualBasicReference`, `CSharpValue`, or `CSharpReference`. Those activities require VB/C# expression compilation, and SharePoint Workflow Manager validation rejects them for published workflows (for example, raw `Microsoft.CSharp.Activities.CSharpValue<TResult>` fails as an invalid type). SPNet therefore emits structured SharePoint/Workflow Manager-safe activity nodes, primarily SharePoint proxy activities and `Microsoft.Activities.Expressions` proxy expression activities. Export/import compatibility may still recognize raw VB/C# expression text from legacy or downloaded XAML so it can produce diagnostic YAML, but that compatibility path is not an endorsed output format.
 
-See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md).
+See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md). For the deep nested `DynamicValue` build/write/read pattern and slash-path validation notes, see [docs/deep-dynamic-values.md](docs/deep-dynamic-values.md).
+
+## Release framing and production guidance
+
+This release is a stabilisation release for YAML-first workflow authoring. It is appropriate for controlled production use only when the workflow is built from documented **stable** actions, reviewed against the target SharePoint site/list, and validated through a test publish/download/runtime cycle before business use. Stable actions are not the same as **preview**, **experimental**, or **dev-only** actions:
+
+- **Stable** actions use visible or well-understood Workflow Manager-safe activity shapes and are the default choice for production workflows.
+- **Preview** actions build and have targeted validation, but may involve timers, external HTTP services, email/task side effects, list mutations, exact SharePoint Designer metadata, or partial export support. Use them only after validating against the target site and rollback plan.
+- **Experimental** actions are for controlled trials. They commonly involve `DynamicValue` or hidden `Microsoft.Activities` shapes whose runtime behavior can depend on the real response payload, proxy assembly version, and SharePoint Workflow Manager behavior.
+- **Dev-only** actions are for local diagnostics, sample builds, and developer experiments. A successful local build with WebsiteCache proxy assemblies does not prove that SharePoint publish, Designer rendering, or runtime execution will be acceptable.
+- **Unsupported** shapes are documented limitations or rejected YAML surfaces and should not be published.
+
+Production guidance:
+
+- Keep production workflows small, observable, and mostly orchestration-focused: set state, call bounded services, update a small number of SharePoint fields/items, and send reviewed notifications. Do not use workflows for heavy matrix-style computation, bulk data shaping, or large in-workflow transformations.
+- Treat Workflow Manager limits as practical design limits even when a generated XAML file builds locally: large workflows, deep nesting, high variable/property counts, long or unbounded loops, large `DynamicValue` payloads, and repeated large string operations can publish slowly, fail validation, render poorly in SharePoint Designer, or fail at runtime.
+- Validate every production candidate in a non-production site/list first: build YAML, inspect the generated XAML/metadata JSON, publish with a unique test name, open in SharePoint Designer, run `Check for Errors`, run realistic start conditions, download the workflow, and compare behavior before promoting the same shape.
+- Avoid hidden or experimental activities in production unless the owning team explicitly accepts the risk and has performed target-environment publish/runtime tests. Hidden activities may execute while remaining invisible or misleading in SharePoint Designer.
+- Be careful with `DynamicValue`: REST payloads can contain missing properties, arrays where objects are expected, primitive/null values, unexpected types, or payloads larger than Workflow Manager can comfortably process. Prefer explicit typed extraction and small response bodies.
+- Remember that local build success is not publish/runtime proof. The local serializer uses SharePoint Designer WebsiteCache proxy assemblies; SharePoint publishing and runtime use the target Workflow Manager environment. Version, metadata, auth, list schema, and service-response differences can create local-versus-live mismatches.
 
 ## CI, packaging, and releases
 
@@ -30,12 +49,37 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Package-SPNetWorkf
 
 The package includes built command-line tools, runtime PowerShell scripts, safe config examples, docs, samples, and this README. It intentionally excludes local config, SharePoint secrets, SharePoint Designer WebsiteCache/proxy assemblies, generated diagnostics, and transient build artifacts.
 
+Packaged workflow usage should start with the primary command:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 help
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 doctor
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 auth-test --site-url 'https://tenant.sharepoint.com/sites/site' --auth-mode WebLogin
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
+```
+
+The `doctor` subcommand performs offline source/package integrity checks before build or publish: root detection, primary and wrapper scripts, packaged tools or source fallback paths, safe config examples, artifacts writeability, package manifest readability in package mode, docs/samples presence, and PowerShell runtime basics. Use `doctor --json` for simple machine-readable output. The `auth-test` subcommand performs a non-mutating local authentication/publisher readiness check: it validates site URL shape, auth mode inputs, publish wrapper availability, and package-relative publisher discovery. It intentionally does not connect to SharePoint, validate credentials, or publish.
+
+Help, errors, and path handling are standardised around the primary CLI:
+
+- `help`, no-argument invocation, `--help`, and subcommand help such as `help build`, `build --help`, `publish --help`, `auth-test --help`, and `doctor --help` are safe discovery operations.
+- User-supplied relative paths (`--workflow`, `--xaml`, `--out`, `--config`, `--cache-folder`, metadata/form-field paths, backup paths, and explicit tool paths) are resolved from the caller's current directory. Script and packaged tool discovery remains relative to `scripts\spnet-workflow.ps1`, so packaged usage does not depend on where the command is invoked from.
+- Common command and local path failures emit `SPNET_ERROR [code]` lines with remediation hints, including invalid subcommands, missing wrapper scripts, missing input YAML/XAML, missing metadata/form-field sidecars, missing serializer/publisher tools, and failed delegated commands. These failures return non-zero exit codes.
+- Wrapper-level failures retain compatibility while adding clearer messages when packaged tools and source fallback tools cannot be found.
+- Publish defaults to `--auth-mode WebLogin`; supported modes are `WebLogin`, `CookieHeader`, `WindowsDefault`, and `Credentials`. Omitted `--publisher-exe` resolves `tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe` before source output/project fallback.
+
+The retained wrappers and direct executables remain available for compatibility, but `scripts\spnet-workflow.ps1` is the intended packaged entry point.
+
 ## Current architecture
 
 - `src/SPNet.Workflow.WfSerializer`: legacy .NET Framework 4.8 serializer/converter. It owns YAML parsing, WF activity construction, XAML export/inspection, SharePoint Designer metadata normalization, and WebsiteCache proxy assembly loading.
 - `src/SPNet.Workflow.Publisher.Csom`: standalone .NET Framework 4.8 WorkflowServices CSOM publisher. It treats generated XAML as opaque text and intentionally does not reference WF, SharePoint Designer, or serializer assemblies.
 - `tests/SPNet.Workflow.WfSerializer.Tests`: lightweight automated tests for YAML deserialization, action aliases, validation, and unsafe top-level lookup rejection. These tests do not require SharePoint or WebsiteCache proxy assemblies.
-- `scripts/Invoke-SPNetYamlWorkflow.ps1`: orchestration wrapper for local build/export/inspect/golden validation and live publish/list/cleanup flows.
+- `scripts/spnet-workflow.ps1`: primary packaged CLI entry point with `help`, `build`, `inspect`, `export`, `publish`, `auth-test`, and `doctor` subcommands.
+- `scripts/Invoke-SPNetYamlWorkflow.ps1`: compatibility orchestration wrapper for local build/export/inspect/golden validation and live publish/list/cleanup flows.
 - `artifacts/`: ignored generated output and diagnostics workspace. Only `artifacts/.gitkeep` is intentional source control content.
 
 If editor state shows `src/SPNet.Workflow.Core/`, `src/SPNet.Workflow.Cli/`, or `src/SPNet.Workflow.SharePoint/`, those projects are not present in this repository snapshot and are not included in `SPNet.slnx`.
@@ -53,30 +97,37 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWo
 4. Build YAML to SPD-compatible XAML plus the generated publish metadata sidecar `*.xaml.metadata.json`:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Build -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -Config config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 ```
 
-Equivalent direct CLI:
+Equivalent retained wrapper/direct serializer paths:
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Build -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -Config config\spnet.local.yml
 .\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 ```
 
 5. Inspect or export generated/downloaded XAML:
 
 ```powershell
-.\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
-.\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 ```
 
 6. Publish through the retained PowerShell boundary. By default publish builds from `-Workflow` to `-XamlPath` first, emits `-XamlPath + '.metadata.json'`, and passes that metadata JSON to the publisher. Pass `-NoBuild` only when publishing an existing XAML file that already has a matching metadata JSON sidecar, or pass `-MetadataJsonPath` explicitly. The current publisher path uses WorkflowServices CSOM, submits XAML as opaque text, and uses metadata JSON as the normal publish contract:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Publish -Workflow samples\workflow.example.yml -XamlPath artifacts\YamlFirstSmoke.xaml -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -TargetType Site -DryRun
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Publish -NoBuild -XamlPath artifacts\YamlFirstSmoke.xaml -SiteUrl 'https://tenant.sharepoint.com/sites/site' -WorkflowName YamlFirstSmoke -TargetType Site -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --no-build --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
 ```
 
-Remove `-DryRun` only when SharePoint authentication/session state and WorkflowServices CSOM dependencies are available. For browser-authenticated SharePoint Online sessions, the wrapper can hand off WebLogin/WinINet cookies to the CSOM publisher; username/password/domain credentials and default Windows credentials remain available for environments that support them.
+Before live publish, run the local readiness check:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 auth-test --site-url 'https://tenant.sharepoint.com/sites/site' --auth-mode WebLogin
+```
+
+Remove `-DryRun` only when SharePoint authentication/session state and WorkflowServices CSOM dependencies are available. Publish defaults to `--auth-mode WebLogin`, where the wrapper attempts PnP WebLogin and passes PnP/WinINet cookies to the CSOM publisher. Use `--auth-mode CookieHeader --publisher-cookie-header <header>` when you already have a cookie header, `--auth-mode WindowsDefault` for default Windows credentials, or `--auth-mode Credentials --publisher-username <user> [--publisher-password <secret>] [--publisher-domain <domain>]` where legacy credentials are accepted by the target environment. Omit `--publisher-exe` for packaged usage; the wrapper resolves `tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe` before source fallback and reports the selected path in publish diagnostics.
 
 7. Download published workflows back to XAML plus metadata JSON. Download always writes the XAML and `*.xaml.metadata.json`; it may also preserve `*.xaml.formfield.xml` when SharePoint exposes legacy FormField metadata so older export/inspection paths can still inspect it:
 
@@ -384,6 +435,8 @@ The CSOM publisher supports site workflows and list workflows. List publishing r
 
 For YAML-authored workflows, `*.xaml.metadata.json` is the expected metadata input. `Invoke-SPNetYamlWorkflow.ps1 -Action Publish` discovers `-XamlPath + '.metadata.json'` automatically after build or accepts `-MetadataJsonPath` for an explicit sidecar. Direct publishing with `Invoke-SPNetWorkflow.ps1` and the CSOM publisher follows the same contract through `-MetadataJsonPath` / `--metadata-json`. The publisher converts `metadata.initiation.formFields` to SharePoint Definition `FormField` metadata internally during publish; `*.xaml.formfield.xml` is only a deprecated fallback/compatibility input and is not used by the normal YAML publish path.
 
+Packaged publishing should use `scripts\spnet-workflow.ps1 publish` or the retained wrappers rather than direct executable calls. The wrapper is the authentication/bootstrap boundary: `WebLogin` obtains browser/PnP cookies and hands them to the CSOM publisher, `CookieHeader` passes an explicit cookie header, `WindowsDefault` leaves the publisher on default network credentials, and `Credentials` passes username/password/domain. The wrapper emits `SPNET_AUTH` and `SPNET_PUBLISHER_TOOL` diagnostics showing the selected auth/bootstrap path and whether the package-relative publisher executable or a source fallback was used. Direct `SPNet.Workflow.Publisher.Csom.exe` invocation does not bootstrap WebLogin/WinINet cookies and is advanced/unsupported unless all required cookies or credentials are supplied explicitly.
+
 Publishing currently uses an intentionally conservative `--if-exists Fail` policy. If a workflow definition with the requested name already exists, local tooling reports the conflict instead of overwriting or deleting live SharePoint content.
 
 Use read-only listing before any cleanup:
@@ -413,6 +466,7 @@ External dependencies are not packaged: SharePoint Designer WebsiteCache DLLs, O
 ## Retained components
 
 - `src/SPNet.Workflow.WfSerializer`: .NET Framework 4.8 serializer/converter. It loads WebsiteCache proxy DLLs, builds real WF activity trees, serializes XAML, and injects SPD stage metadata.
+- `scripts/spnet-workflow.ps1`: primary packaged CLI entry point. It delegates YAML build/inspect/export to the serializer wrapper and publish to the publish wrapper.
 - `scripts/Invoke-SPNetWorkflow.ps1`: live SharePoint publish/download boundary.
 - `scripts/Get-SPNetWorkflowDiagnostics.ps1`: read-only SharePoint workflow diagnostic/export helper.
 - `scripts/Invoke-SPNetYamlWorkflow.ps1`: wrapper/combiner for YAML build/export/inspect/publish/download actions.
@@ -449,3 +503,7 @@ Live publish validation requires SharePoint auth/session support and pinned Shar
 - Top-level lookup actions are rejected because SharePoint Designer can render them as blank/crashing actions; use nested lookup expressions inside assignment or action arguments. This includes list item property lookups such as `lookupListItemStringProperty`.
 - The CSOM publisher does not overwrite, delete, or migrate existing live workflows; `if-exists` currently fails on name conflicts.
 - Site/list publishing is validated for current SharePoint WorkflowServices scenarios, but Email/task workflows should remain local/golden validated only unless intentionally reviewed for safe recipients, assignees, and side effects. Broader task/process/list-item CRUD actions remain deferred until safe XAML shapes are captured and validated.
+- The support surface is classified in [docs/action-support-matrix.md](docs/action-support-matrix.md). Stable actions are the production baseline; preview actions require target-site validation; experimental/dev-only actions are not production defaults.
+- Large workflows, broad loops, many variables/properties, large HTTP/DynamicValue payloads, and repeated whole-body string manipulation can hit Workflow Manager validation, persistence, rendering, or runtime limits even when local YAML-to-XAML build succeeds.
+- SharePoint Designer rendering and Workflow Manager validation are separate compatibility bars. Some generated shapes can publish but show misleading red boxes, blank operands, or hidden activities in Designer.
+- Local WebsiteCache/proxy assemblies can differ from the target publish/runtime environment. Treat local build/export/inspect as necessary but not sufficient for live use.

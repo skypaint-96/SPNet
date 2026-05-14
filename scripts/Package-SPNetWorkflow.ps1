@@ -124,8 +124,32 @@ try {
     $manifest = [ordered]@{
         name = 'SPNet.Workflow'
         version = $safeVersion
+        packageKind = 'workflow-tools-zip'
         createdUtc = (Get-Date).ToUniversalTime().ToString('o')
         configuration = $Configuration
+        primaryCommand = 'scripts\spnet-workflow.ps1'
+        supportedCommands = @('help', 'build', 'inspect', 'export', 'publish', 'doctor')
+        expectedScripts = @(
+            'scripts\spnet-workflow.ps1',
+            'scripts\Invoke-SPNetYamlWorkflow.ps1',
+            'scripts\Invoke-SPNetWorkflow.ps1',
+            'scripts\Get-SPNetWorkflowDiagnostics.ps1',
+            'scripts\Test-SPNetYamlWorkflowGolden.ps1'
+        )
+        expectedTools = @(
+            'tools\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.exe',
+            'tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe'
+        )
+        expectedConfig = @(
+            'config\spnet.defaults.yml',
+            'config\spnet.local.example.yml'
+        )
+        expectedDocs = @(
+            'README.md',
+            'docs\action-support-matrix.md',
+            'docs\FeedbackImplementationPlan20260513.md'
+        )
+        expectedSampleRoot = 'samples'
         tools = $projects.Name
         notes = 'Package intentionally excludes local config, SharePoint secrets, WebsiteCache/proxy assemblies, generated diagnostics, and transient build artifacts.'
     }

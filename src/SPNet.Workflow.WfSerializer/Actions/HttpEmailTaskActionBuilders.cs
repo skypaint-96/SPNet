@@ -94,6 +94,7 @@ namespace SPNet.Workflow.WfSerializer
         private static Argument ToDynamicValuePropertyArgument(ExpressionYaml expression, string valueType, ValueExpressionTypes valueExpressionTypes)
         {
             var normalized = (valueType ?? expression.ValueType ?? string.Empty).Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+            if (normalized == "dynamicvalue" || normalized == "dictionary") return (Argument)ActivityReflectionWriter.CreateInArgumentReference(valueExpressionTypes.DynamicValue, expression.Variable ?? string.Empty);
             if (normalized == "boolean" || normalized == "bool" || expression.Literal is bool) return ToInArgument<bool>(expression, valueExpressionTypes);
             if (normalized == "int32" || normalized == "int" || normalized == "integer" || expression.Literal is int) return ToInArgument<int>(expression, valueExpressionTypes);
             if (normalized == "datetime" || normalized == "date" || expression.Literal is DateTime) return ToInArgument<DateTime>(expression, valueExpressionTypes);
