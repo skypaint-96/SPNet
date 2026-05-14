@@ -5,6 +5,8 @@ Builds, inspects, publishes, downloads, lists, and cleans up SPNet YAML-authored
 .DESCRIPTION
 YAML is the authoring source of truth. The Build and Publish actions compile YAML to SharePoint Designer-compatible XAML and generate a `*.xaml.metadata.json` sidecar from effective YAML metadata/defaults. That metadata JSON is the normal publish contract for display name, technical name, description, target, start options, initiation settings, and form fields.
 
+Packaged usage should prefer the primary `scripts\spnet-workflow.ps1` command. This script remains as a compatibility wrapper and implementation boundary for YAML workflow orchestration.
+
 The normal YAML publish flow is YAML -> XAML + metadata JSON -> publish with metadata JSON -> download XAML + metadata JSON. Legacy `*.xaml.formfield.xml` may still be emitted or downloaded for compatibility/inspection, but it is not the normal publish input.
 
 .PARAMETER MetadataJsonPath
@@ -34,6 +36,13 @@ param(
     [string]$StatusColumn = '',
     [ValidateSet('Update', 'CreateNew', 'Fail')]
     [string]$IfExists = 'Update',
+    [ValidateSet('WebLogin','CookieHeader','WindowsDefault','Credentials')]
+    [string]$AuthMode = 'WebLogin',
+    [string]$PublisherExePath = '',
+    [string]$PublisherCookieHeader = '',
+    [string]$PublisherUsername = '',
+    [string]$PublisherPassword = '',
+    [string]$PublisherDomain = '',
     [string]$ExpectedDefinitionId = '',
     [string]$BackupDirectory = '',
     [switch]$NoBuild,
@@ -43,9 +52,44 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$tool = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe'
-if (-not (Test-Path $tool)) {
-    dotnet build (Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj') -c Release
+
+function Write-SpNetWrapperError {
+    param([string]$Code, [string]$Message, [string]$Hint = '', [string]$Path = '')
+    Write-Error "SPNET_ERROR [$Code] $Message" -ErrorAction Continue
+    if (-not [string]::IsNullOrWhiteSpace($Path)) { Write-Error "  path: $Path" -ErrorAction Continue }
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) { Write-Error "  remediation: $Hint" -ErrorAction Continue }
+}
+
+function Throw-SpNetWrapperError {
+    param([string]$Code, [string]$Message, [string]$Hint = '', [string]$Path = '')
+    $exception = New-Object System.InvalidOperationException($Message)
+    $record = New-Object System.Management.Automation.ErrorRecord($exception, $Code, [System.Management.Automation.ErrorCategory]::InvalidOperation, $Path)
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) { $record.ErrorDetails = New-Object System.Management.Automation.ErrorDetails("$Message`nRemediation: $Hint") }
+    throw $record
+}
+
+function Resolve-SPNetSerializerToolPath {
+    $candidates = @(
+        (Join-Path $PSScriptRoot '..\tools\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.exe'),
+        (Join-Path $PSScriptRoot 'tools\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.exe'),
+        (Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate -PathType Leaf) { return [IO.Path]::GetFullPath($candidate) }
+    }
+    return $null
+}
+
+$tool = Resolve-SPNetSerializerToolPath
+if ([string]::IsNullOrWhiteSpace($tool) -or -not (Test-Path $tool)) {
+    $serializerProject = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj'
+    if (-not (Test-Path $serializerProject -PathType Leaf)) {
+        Throw-SpNetWrapperError -Code 'SPNET-YAML-SERIALIZER-001' -Message 'Serializer executable was not found and no source fallback project exists.' -Path $tool -Hint 'Use a complete SPNet package, or run from a repository checkout containing src\SPNet.Workflow.WfSerializer.'
+    }
+    dotnet build $serializerProject -c Release
+    if ($LASTEXITCODE -ne 0) { Throw-SpNetWrapperError -Code 'SPNET-YAML-SERIALIZER-002' -Message "Serializer build failed with exit code $LASTEXITCODE." -Path $serializerProject -Hint 'Fix the serializer project build or package with prebuilt tools.' }
+    $tool = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.WfSerializer\bin\Release\net48\SPNet.Workflow.WfSerializer.exe'
+    if (-not (Test-Path $tool -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-SERIALIZER-003' -Message 'Serializer build completed but executable was not found.' -Path $tool -Hint 'Check build output and target framework net48.' }
 }
 
 function Get-SPNetYamlScalar {
@@ -154,6 +198,7 @@ switch ($Action) {
         if ([string]::IsNullOrWhiteSpace($startCreatedText)) { $startCreatedText = 'false' }
         if ([string]::IsNullOrWhiteSpace($startUpdatedText)) { $startUpdatedText = 'false' }
         $publishArgs = @{ Action = 'Publish'; SiteUrl = $SiteUrl; WorkflowName = $WorkflowName; XamlPath = $XamlPath; TargetType = $TargetType; StartManual = $startManualText; StartOnCreated = $startCreatedText; StartOnUpdated = $startUpdatedText; IfExists = $IfExists }
+        $publishArgs.AuthMode = $AuthMode
         if (-not [string]::IsNullOrWhiteSpace($TargetListTitle)) { $publishArgs.TargetListTitle = $TargetListTitle }
         if (-not [string]::IsNullOrWhiteSpace($StatusColumn)) { $publishArgs.StatusColumn = $StatusColumn }
         if (-not [string]::IsNullOrWhiteSpace($FormFieldXmlPath)) {
@@ -163,25 +208,38 @@ switch ($Action) {
         $publishArgs.MetadataJsonPath = $effectiveMetadataJsonPath
         if (-not [string]::IsNullOrWhiteSpace($ExpectedDefinitionId)) { $publishArgs.ExpectedDefinitionId = $ExpectedDefinitionId }
         if (-not [string]::IsNullOrWhiteSpace($BackupDirectory)) { $publishArgs.BackupDirectory = $BackupDirectory }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherExePath)) { $publishArgs.PublisherExePath = $PublisherExePath }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { $publishArgs.PublisherCookieHeader = $PublisherCookieHeader }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherUsername)) { $publishArgs.PublisherUsername = $PublisherUsername }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherPassword)) { $publishArgs.PublisherPassword = $PublisherPassword }
+        if (-not [string]::IsNullOrWhiteSpace($PublisherDomain)) { $publishArgs.PublisherDomain = $PublisherDomain }
         if ($DryRun) { $publishArgs.DryRun = $true }
-        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @publishArgs
+        $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
+        if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }
+        & $publishWrapper @publishArgs
     }
     'Download' {
         if (-not $Out) { $Out = $XamlPath }
-        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') -Action Download -SiteUrl $SiteUrl -WorkflowName $WorkflowName -OutputXamlPath $Out
+        $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
+        if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }
+        & $publishWrapper -Action Download -SiteUrl $SiteUrl -WorkflowName $WorkflowName -OutputXamlPath $Out
     }
     'List' {
         $listArgs = @{ Action = 'List'; SiteUrl = $SiteUrl }
         if (-not [string]::IsNullOrWhiteSpace($WorkflowName)) { $listArgs.WorkflowName = $WorkflowName }
         if (-not [string]::IsNullOrWhiteSpace($WorkflowNamePrefix)) { $listArgs.WorkflowNamePrefix = $WorkflowNamePrefix }
         if ($IncludeSubscriptions) { $listArgs.IncludeSubscriptions = $true }
-        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @listArgs
+        $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
+        if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }
+        & $publishWrapper @listArgs
     }
     'Cleanup' {
         $cleanupArgs = @{ Action = 'Cleanup'; SiteUrl = $SiteUrl }
         if (-not [string]::IsNullOrWhiteSpace($WorkflowName)) { $cleanupArgs.WorkflowName = $WorkflowName }
         if (-not [string]::IsNullOrWhiteSpace($WorkflowNamePrefix)) { $cleanupArgs.WorkflowNamePrefix = $WorkflowNamePrefix }
         if ($Force) { $cleanupArgs.Force = $true }
-        & (Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1') @cleanupArgs
+        $publishWrapper = Join-Path $PSScriptRoot 'Invoke-SPNetWorkflow.ps1'
+        if (-not (Test-Path $publishWrapper -PathType Leaf)) { Throw-SpNetWrapperError -Code 'SPNET-YAML-WRAPPER-001' -Message 'Publish wrapper script was not found.' -Path $publishWrapper -Hint 'Use a complete SPNet package or restore scripts\Invoke-SPNetWorkflow.ps1.' }
+        & $publishWrapper @cleanupArgs
     }
 }

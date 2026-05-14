@@ -5,6 +5,8 @@ Publishes or downloads SharePoint 2013 Workflow Manager workflows for SPNet.
 .DESCRIPTION
 This is the intentionally explicit PowerShell boundary for live SharePoint operations. It publishes generated Windows Workflow Foundation XAML because many SharePoint 2013/Subscription Edition farms require legacy Microsoft.SharePoint.Client.WorkflowServices assemblies and legacy WebLogin authentication.
 
+Packaged usage should prefer the primary `scripts\spnet-workflow.ps1 publish` command. This script remains as the compatibility wrapper and live SharePoint publishing boundary.
+
 For YAML-authored workflows, the generated `*.xaml.metadata.json` sidecar is the normal publish contract. The metadata JSON contains display name, technical name, description, target, start options, initiation settings, and form fields. Publish uses it through `-MetadataJsonPath`, or discovers `-XamlPath + '.metadata.json'` when present. Download writes XAML plus `*.xaml.metadata.json` and may also preserve legacy `*.xaml.formfield.xml` for compatibility/inspection.
 
 .PARAMETER MetadataJsonPath
@@ -12,6 +14,9 @@ Metadata JSON sidecar to use for Publish. This is the preferred/normal metadata 
 
 .PARAMETER FormFieldXmlPath
 Deprecated Publish fallback. Used only when metadata JSON does not provide initiation form fields. Normal YAML publish must use metadata JSON instead. Download may still write FormField XML for compatibility/inspection.
+
+.PARAMETER AuthMode
+Authentication/bootstrap mode for Publish. WebLogin is the default and uses the wrapper to obtain PnP/WinINet cookies for the CSOM publisher. CookieHeader passes an explicit cookie header, WindowsDefault uses default Windows credentials, and Credentials passes username/password/domain. Direct CSOM publisher invocation does not perform WebLogin/cookie bootstrap and is advanced unless explicit cookies or credentials are supplied.
 #>
 [CmdletBinding()]
 param(
@@ -25,7 +30,7 @@ param(
     [string]$FormFieldXmlPath,
     [string]$MetadataJsonPath,
     [string]$OutputXamlPath,
-    [ValidateSet('WebLogin')]
+    [ValidateSet('WebLogin','CookieHeader','WindowsDefault','Credentials')]
     [string]$AuthMode = 'WebLogin',
     [ValidateSet('Site', 'List', 'Auto')]
     [string]$TargetType = 'Auto',
@@ -51,6 +56,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Throw-SpNetWorkflowWrapperError {
+    param([string]$Code, [string]$Message, [string]$Hint = '', [string]$Path = '')
+    $exception = New-Object System.InvalidOperationException($Message)
+    $record = New-Object System.Management.Automation.ErrorRecord($exception, $Code, [System.Management.Automation.ErrorCategory]::InvalidOperation, $Path)
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) { $record.ErrorDetails = New-Object System.Management.Automation.ErrorDetails("$Message`nRemediation: $Hint") }
+    throw $record
+}
 
 function ConvertTo-SPNetBool {
     param(
@@ -143,6 +156,33 @@ function Get-SPNetCookieNamesForDiagnostics {
     } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
 }
 
+function Get-SPNetPublisherToolInfo {
+    param([string]$ExplicitPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        return [pscustomobject]@{ Path = $ExplicitPath; Source = 'explicit'; PackagedDefault = $false; ProjectPath = $null }
+    }
+
+    $packagedPublisher = Join-Path $PSScriptRoot '..\tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe'
+    if (Test-Path $packagedPublisher -PathType Leaf) { return [pscustomobject]@{ Path = [IO.Path]::GetFullPath($packagedPublisher); Source = 'packaged'; PackagedDefault = $true; ProjectPath = $null } }
+
+    $sourcePublisher = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.Publisher.Csom\bin\Release\net48\SPNet.Workflow.Publisher.Csom.exe'
+    if (Test-Path $sourcePublisher -PathType Leaf) { return [pscustomobject]@{ Path = [IO.Path]::GetFullPath($sourcePublisher); Source = 'source-output-fallback'; PackagedDefault = $false; ProjectPath = $null } }
+
+    $publisherProject = Join-Path $PSScriptRoot '..\src\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj'
+    return [pscustomobject]@{ Path = [IO.Path]::GetFullPath($sourcePublisher); Source = 'source-build-fallback'; PackagedDefault = $false; ProjectPath = [IO.Path]::GetFullPath($publisherProject) }
+}
+
+function Write-SPNetAuthDiagnostics {
+    param([string]$Stage, [string]$Mode, [string]$Detail = '')
+
+    $payload = @{ Stage = $Stage; AuthMode = $Mode; Detail = $Detail }
+    if (-not [string]::IsNullOrWhiteSpace($PublisherUsername)) { $payload.HasPublisherUsername = $true }
+    if (-not [string]::IsNullOrWhiteSpace($PublisherDomain)) { $payload.HasPublisherDomain = $true }
+    if (-not [string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { $payload.CookieNames = @(Get-SPNetCookieNamesForDiagnostics -CookieHeader $PublisherCookieHeader) }
+    Write-Output ('SPNET_AUTH ' + ($payload | ConvertTo-Json -Compress -Depth 5))
+}
+
 function Invoke-SPNetCsomPublisher {
     if ($Action -ne 'Publish') { return $false }
     if ($PublisherMode -ne 'Csom') { return $false }
@@ -151,16 +191,19 @@ function Invoke-SPNetCsomPublisher {
     if ($TargetType -eq 'Auto') { throw '-TargetType Site or -TargetType List is required when -PublisherMode Csom.' }
     if ($IfExists -ne 'Fail') { throw '-PublisherMode Csom currently supports only -IfExists Fail.' }
 
-    $publisherProject = Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.csproj'
-    $publisherExe = if ([string]::IsNullOrWhiteSpace($PublisherExePath)) {
-        Join-Path (Join-Path (Get-Location) 'src') 'SPNet.Workflow.Publisher.Csom\bin\Release\net48\SPNet.Workflow.Publisher.Csom.exe'
-    } else { $PublisherExePath }
+    $publisherInfo = Get-SPNetPublisherToolInfo -ExplicitPath $PublisherExePath
+    $publisherProject = $publisherInfo.ProjectPath
+    $publisherExe = $publisherInfo.Path
+    Write-Output ('SPNET_PUBLISHER_TOOL ' + (@{ Path = $publisherExe; Source = $publisherInfo.Source; PackagedDefault = [bool]$publisherInfo.PackagedDefault; DirectInvocationWarning = 'Direct CSOM publisher invocation does not bootstrap WebLogin/cookies; prefer scripts\spnet-workflow.ps1 publish or Invoke-SPNetWorkflow.ps1 unless explicit auth is supplied.' } | ConvertTo-Json -Compress -Depth 4))
     if (-not (Test-Path $publisherExe)) {
-        if (-not (Test-Path $publisherProject)) { throw "CSOM publisher project not found at '$publisherProject'." }
+        if ([string]::IsNullOrWhiteSpace($publisherProject) -or -not (Test-Path $publisherProject)) {
+            Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-001' -Message 'CSOM publisher executable was not found and no source fallback project exists.' -Path $publisherExe -Hint 'Use a complete SPNet package, build/package from source, or pass -PublisherExePath to a valid SPNet.Workflow.Publisher.Csom.exe.'
+        }
+        Write-Warning 'Packaged publisher executable was not found; building source fallback. Packaged publish prefers tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe before source fallback.'
         dotnet build $publisherProject -v:minimal | Write-Output
-        if ($LASTEXITCODE -ne 0) { throw "CSOM publisher build failed with exit code $LASTEXITCODE." }
+        if ($LASTEXITCODE -ne 0) { Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-002' -Message "CSOM publisher build failed with exit code $LASTEXITCODE." -Path $publisherProject -Hint 'Fix the publisher project build or package with prebuilt tools.' }
     }
-    if (-not (Test-Path $publisherExe)) { throw "CSOM publisher executable not found at '$publisherExe'." }
+    if (-not (Test-Path $publisherExe)) { Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-003' -Message 'CSOM publisher executable was not found after build.' -Path $publisherExe -Hint 'Check build output and target framework net48, or pass -PublisherExePath.' }
 
     $publisherArgs = @(
         '--site-url', $SiteUrl,
@@ -182,7 +225,12 @@ function Invoke-SPNetCsomPublisher {
         $listGuid = [Guid]::Empty
         if ([Guid]::TryParse($TargetListTitle, [ref]$listGuid)) { $publisherArgs += @('--target-list-id', $TargetListTitle) } else { $publisherArgs += @('--target-list-title', $TargetListTitle) }
     }
-    if ([string]::IsNullOrWhiteSpace($PublisherCookieHeader) -and [string]::IsNullOrWhiteSpace($PublisherUsername)) {
+    if ($AuthMode -eq 'CookieHeader' -and [string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { throw '-AuthMode CookieHeader requires -PublisherCookieHeader.' }
+    if ($AuthMode -eq 'Credentials' -and [string]::IsNullOrWhiteSpace($PublisherUsername)) { throw '-AuthMode Credentials requires -PublisherUsername.' }
+    if ($AuthMode -eq 'WebLogin' -and (-not [string]::IsNullOrWhiteSpace($PublisherCookieHeader) -or -not [string]::IsNullOrWhiteSpace($PublisherUsername))) { Write-Warning 'Explicit publisher auth input was supplied with -AuthMode WebLogin; explicit cookie/credentials will be passed through and WebLogin bootstrap may be skipped.' }
+
+    if ($AuthMode -eq 'WebLogin' -and [string]::IsNullOrWhiteSpace($PublisherCookieHeader) -and [string]::IsNullOrWhiteSpace($PublisherUsername)) {
+        Write-SPNetAuthDiagnostics -Stage 'BeforeBootstrap' -Mode $AuthMode -Detail 'Using PnP WebLogin, then PnP CookieContainer or WinINet cookie handoff for CSOM publisher.'
         Connect-SPNetPnPOnline -Url $SiteUrl -Mode $AuthMode
         $pnpContext = Get-PnPContext
         if (-not $pnpContext) { throw 'PnP authenticated, but Get-PnPContext returned no client context for CSOM publisher bootstrap.' }
@@ -201,7 +249,7 @@ function Invoke-SPNetCsomPublisher {
             $cookies = $cookieContainer.GetCookieHeader([Uri]$SiteUrl)
             if (-not [string]::IsNullOrWhiteSpace($cookies)) {
                 $PublisherCookieHeader = $cookies
-                Write-Verbose ('CSOM publisher bootstrap using PnP CookieContainer cookies: ' + ((Get-SPNetCookieNamesForDiagnostics -CookieHeader $PublisherCookieHeader) -join ', '))
+                Write-SPNetAuthDiagnostics -Stage 'CookieBootstrap' -Mode $AuthMode -Detail ('CSOM publisher bootstrap using PnP CookieContainer cookies: ' + ((Get-SPNetCookieNamesForDiagnostics -CookieHeader $PublisherCookieHeader) -join ', '))
             }
         }
 
@@ -209,12 +257,16 @@ function Invoke-SPNetCsomPublisher {
             $cookies = Get-SPNetWinInetCookieHeader -Url $SiteUrl
             if (-not [string]::IsNullOrWhiteSpace($cookies)) {
                 $PublisherCookieHeader = $cookies
-                Write-Verbose ('CSOM publisher bootstrap using WinINet cookies: ' + ((Get-SPNetCookieNamesForDiagnostics -CookieHeader $PublisherCookieHeader) -join ', '))
+                Write-SPNetAuthDiagnostics -Stage 'CookieBootstrap' -Mode $AuthMode -Detail ('CSOM publisher bootstrap using WinINet cookies: ' + ((Get-SPNetCookieNamesForDiagnostics -CookieHeader $PublisherCookieHeader) -join ', '))
             }
         }
 
         if ([string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { throw 'PnP WebLogin did not expose a CookieContainer and no WinINet cookies were available for the CSOM publisher bootstrap.' }
     }
+    elseif ($AuthMode -eq 'CookieHeader') { Write-SPNetAuthDiagnostics -Stage 'Selected' -Mode $AuthMode -Detail 'Using explicit cookie header; no WebLogin bootstrap will be attempted.' }
+    elseif ($AuthMode -eq 'Credentials') { Write-SPNetAuthDiagnostics -Stage 'Selected' -Mode $AuthMode -Detail 'Using explicit username/password/domain for CSOM publisher; no WebLogin bootstrap will be attempted.' }
+    elseif ($AuthMode -eq 'WindowsDefault') { Write-SPNetAuthDiagnostics -Stage 'Selected' -Mode $AuthMode -Detail 'Using default Windows credentials in CSOM publisher; no WebLogin bootstrap will be attempted.' }
+    else { Write-SPNetAuthDiagnostics -Stage 'Selected' -Mode $AuthMode -Detail 'Explicit cookie/credentials supplied; no additional WebLogin bootstrap required.' }
     if (-not [string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { $publisherArgs += @('--cookie-header', $PublisherCookieHeader) }
     if (-not [string]::IsNullOrWhiteSpace($PublisherUsername)) { $publisherArgs += @('--username', $PublisherUsername) }
     if (-not [string]::IsNullOrWhiteSpace($PublisherPassword)) { $publisherArgs += @('--password', $PublisherPassword) }

@@ -81,6 +81,11 @@ namespace SPNet.Workflow.WfSerializer
             WriteParameterFormFieldSidecar(workflow, outputXamlPath);
         }
 
+        public static string SerializeYamlWorkflowForTest(WorkflowYaml workflow, string cacheFolder)
+        {
+            return SerializeBuilder(BuildWorkflowFromYaml(workflow, cacheFolder));
+        }
+
         /// <summary>
         /// Performs a lightweight structural export from workflow XAML to SPNet YAML for inspection and diagnostics.
         /// </summary>

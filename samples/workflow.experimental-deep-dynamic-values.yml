@@ -1,0 +1,111 @@
+# Experimental hidden Microsoft.Activities DynamicValue actions for nested payloads.
+# Safe/manual test: builds three nested DynamicValue layers, writes to the deepest
+# layer, reads back through each layer and through a single slash path, counts
+# items, and writes history only.
+# No SharePoint list data is mutated and no email/task actions are sent.
+schemaVersion: spnet.workflow/v1
+name: ExperimentalDeepDynamicValues
+metadata:
+  displayName: Experimental Deep DynamicValues
+  technicalName: ExperimentalDeepDynamicValues.MTW
+  description: "Experimental sample for reading from and writing to DynamicValue payloads at least three nested layers deep, including SharePoint Designer-style slash path access. Manual publish test only."
+  target:
+    type: Site
+  start:
+    manual: true
+    onCreated: false
+    onUpdated: false
+variables:
+  - name: layer1
+    type: DynamicValue
+  - name: layer2
+    type: DynamicValue
+  - name: layer3
+    type: DynamicValue
+  - name: updatedLayer3
+    type: DynamicValue
+  - name: updatedLayer2
+    type: DynamicValue
+  - name: updatedLayer1
+    type: DynamicValue
+  - name: readLayer2
+    type: DynamicValue
+  - name: readLayer3
+    type: DynamicValue
+  - name: readBackDeepTitle
+    type: String
+  - name: readBackSlashPathTitle
+    type: String
+  - name: deepItemCount
+    type: Int32
+stages:
+  - name: Deep DynamicValue experiment
+    actions:
+      - type: buildDynamicValue
+        to: layer3
+        entries:
+          - key: Title
+            value: Before deep SetDynamicValueProperty
+          - key: Enabled
+            value: true
+            valueType: Boolean
+      - type: buildDynamicValue
+        to: layer2
+        entries:
+          - key: Layer3
+            value:
+              variable: layer3
+            valueType: DynamicValue
+      - type: buildDynamicValue
+        to: layer1
+        entries:
+          - key: Layer2
+            value:
+              variable: layer2
+            valueType: DynamicValue
+      - type: setDynamicValueProperty
+        source: layer3
+        propertyName: Title
+        value: Set three layers deep
+        valueType: String
+        to: updatedLayer3
+      - type: setDynamicValueProperty
+        source: layer2
+        propertyName: Layer3
+        value:
+          variable: updatedLayer3
+        valueType: DynamicValue
+        to: updatedLayer2
+      - type: setDynamicValueProperty
+        source: layer1
+        propertyName: Layer2
+        value:
+          variable: updatedLayer2
+        valueType: DynamicValue
+        to: updatedLayer1
+      - type: getDynamicValueProperty
+        source: updatedLayer1
+        propertyName: Layer2
+        to: readLayer2
+        valueType: DynamicValue
+      - type: getDynamicValueProperty
+        source: readLayer2
+        propertyName: Layer3
+        to: readLayer3
+        valueType: DynamicValue
+      - type: getDynamicValueProperty
+        source: readLayer3
+        propertyName: Title
+        to: readBackDeepTitle
+        valueType: String
+      - type: getDynamicValueProperty
+        source: updatedLayer1
+        propertyName: Layer2/Layer3/Title
+        to: readBackSlashPathTitle
+        valueType: String
+      - type: countDynamicValueItems
+        source: readLayer3
+        to: deepItemCount
+      - type: writeHistory
+        message:
+          variable: readBackSlashPathTitle
