@@ -367,6 +367,67 @@ stages:
         }
 
         [TestMethod]
+        public void Load_DeepDynamicValuesSampleReadsAndWritesThreeNestedLayers()
+        {
+            var workflow = WorkflowYaml.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "workflow.experimental-deep-dynamic-values.yml")));
+
+            var actions = workflow.Stages.Single().Actions;
+            Assert.AreEqual(12, actions.Count);
+
+            var builds = actions.OfType<BuildDynamicValueActionYaml>().ToList();
+            Assert.AreEqual(3, builds.Count);
+            Assert.IsTrue(builds.Any(a => a.To == "layer1" && a.Entries.Single(e => e.Key == "Layer2").ValueType == "DynamicValue"));
+            Assert.IsTrue(builds.Any(a => a.To == "layer2" && a.Entries.Single(e => e.Key == "Layer3").ValueType == "DynamicValue"));
+
+            var writes = actions.OfType<SetDynamicValuePropertyActionYaml>().ToList();
+            Assert.AreEqual(3, writes.Count);
+            Assert.IsTrue(writes.Any(a => a.Source == "layer3" && a.To == "updatedLayer3" && Convert.ToString(a.PropertyName.Literal) == "Title"));
+            Assert.IsTrue(writes.Any(a => a.Source == "layer2" && a.To == "updatedLayer2" && Convert.ToString(a.PropertyName.Literal) == "Layer3" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(writes.Any(a => a.Source == "layer1" && a.To == "updatedLayer1" && Convert.ToString(a.PropertyName.Literal) == "Layer2" && a.ValueType == "DynamicValue"));
+
+            var reads = actions.OfType<GetDynamicValuePropertyActionYaml>().ToList();
+            Assert.AreEqual(4, reads.Count);
+            CollectionAssert.AreEqual(new[] { "Layer2", "Layer3", "Title", "Layer2/Layer3/Title" }, reads.Select(a => Convert.ToString(a.PropertyName.Literal)).ToArray());
+            CollectionAssert.AreEqual(new[] { "readLayer2", "readLayer3", "readBackDeepTitle", "readBackSlashPathTitle" }, reads.Select(a => a.To).ToArray());
+            Assert.IsTrue(workflow.Variables.Any(v => v.Name == "readBackSlashPathTitle" && v.Type == "String"), "Slash-path read result must be represented as a string variable in the YAML model.");
+        }
+
+        [TestMethod]
+        public void Build_DeepDynamicValuesSampleUsesDynamicValueArgumentForNestedPropertyWrites()
+        {
+            var cacheFolder = Environment.GetEnvironmentVariable("SPNET_SPD_CACHE");
+            if (string.IsNullOrWhiteSpace(cacheFolder) || !Directory.Exists(cacheFolder)) Assert.Inconclusive("SPNET_SPD_CACHE must point to a SharePoint Designer WebsiteCache folder for serializer integration coverage.");
+            var workflow = WorkflowYaml.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "workflow.experimental-deep-dynamic-values.yml")));
+
+            var xaml = WfActivityBuilderSerializer.SerializeYamlWorkflowForTest(workflow, cacheFolder);
+            var document = XDocument.Parse(xaml);
+            var propertyValues = document.Descendants().Where(e => e.Name.LocalName == "SetDynamicValueProperty.PropertyValue").ToList();
+
+            Assert.AreEqual(3, propertyValues.Count);
+            Assert.AreEqual(1, propertyValues.Count(e => e.Descendants().Any(d => d.Name.LocalName == "InArgument" && ((string?)d.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "x:String" && (d.Value ?? string.Empty).Contains("Set three layers deep"))));
+            Assert.AreEqual(2, propertyValues.Count(e => e.Descendants().Any(d => d.Name.LocalName == "InArgument" && ((string?)d.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "p:DynamicValue")));
+            Assert.IsFalse(propertyValues.Any(e => e.Descendants().Any(d => d.Name.LocalName == "ArgumentValue" && ((string?)d.Attribute("ArgumentName")) == "updatedLayer2" && ((string?)d.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "x:String")), "Nested DynamicValue writes must not serialize DynamicValue variables as string arguments.");
+            Assert.IsTrue(propertyValues.Any(e => e.Descendants().Any(d => d.Name.LocalName == "ArgumentValue" && ((string?)d.Attribute("ArgumentName")) == "updatedLayer2" && ((string?)d.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "p:DynamicValue")), "Nested DynamicValue writes must serialize DynamicValue variables as DynamicValue arguments.");
+        }
+
+        [TestMethod]
+        public void Build_DeepDynamicValuesSampleSerializesSlashPathGetDynamicValueProperty()
+        {
+            var cacheFolder = Environment.GetEnvironmentVariable("SPNET_SPD_CACHE");
+            if (string.IsNullOrWhiteSpace(cacheFolder) || !Directory.Exists(cacheFolder)) Assert.Inconclusive("SPNET_SPD_CACHE must point to a SharePoint Designer WebsiteCache folder for serializer integration coverage.");
+            var workflow = WorkflowYaml.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "workflow.experimental-deep-dynamic-values.yml")));
+
+            var xaml = WfActivityBuilderSerializer.SerializeYamlWorkflowForTest(workflow, cacheFolder);
+            var document = XDocument.Parse(xaml);
+            var slashPathLookup = document.Descendants()
+                .Where(e => e.Name.LocalName == "GetDynamicValueProperty")
+                .Single(e => ((string?)e.Attribute("PropertyName")) == "Layer2/Layer3/Title");
+
+            Assert.IsTrue(slashPathLookup.Descendants().Any(d => d.Name.LocalName == "ArgumentValue" && ((string?)d.Attribute("ArgumentName")) == "updatedLayer1" && ((string?)d.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "p:DynamicValue"), "Slash-path DynamicValue read must source the outer DynamicValue variable.");
+            Assert.IsTrue(slashPathLookup.Descendants().Any(d => d.Name.LocalName == "ArgumentReference" && ((string?)d.Attribute("ArgumentName")) == "readBackSlashPathTitle" && ((string?)d.Attribute(XName.Get("TypeArguments", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "x:String"), "Slash-path DynamicValue read must assign the result string variable.");
+        }
+
+        [TestMethod]
         public void Load_AllowsDevOnlyBatch1AndTimeSpanActions()
         {
             var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1

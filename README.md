@@ -6,7 +6,7 @@ This is intentionally not the old broad YAML conversion pipeline. The YAML schem
 
 Generated SharePoint workflow XAML must not contain raw WF language expression activities such as `VisualBasicValue`, `VisualBasicReference`, `CSharpValue`, or `CSharpReference`. Those activities require VB/C# expression compilation, and SharePoint Workflow Manager validation rejects them for published workflows (for example, raw `Microsoft.CSharp.Activities.CSharpValue<TResult>` fails as an invalid type). SPNet therefore emits structured SharePoint/Workflow Manager-safe activity nodes, primarily SharePoint proxy activities and `Microsoft.Activities.Expressions` proxy expression activities. Export/import compatibility may still recognize raw VB/C# expression text from legacy or downloaded XAML so it can produce diagnostic YAML, but that compatibility path is not an endorsed output format.
 
-See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md).
+See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md). For the deep nested `DynamicValue` build/write/read pattern and slash-path validation notes, see [docs/deep-dynamic-values.md](docs/deep-dynamic-values.md).
 
 ## Release framing and production guidance
 
