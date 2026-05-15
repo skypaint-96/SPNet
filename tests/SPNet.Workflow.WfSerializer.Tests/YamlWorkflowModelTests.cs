@@ -367,6 +367,33 @@ stages:
         }
 
         [TestMethod]
+        public void Load_AllowsHttpPostRequestContentAndHeadersVariables()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: HttpPostShape
+variables:
+  - name: requestBody
+    type: DynamicValue
+  - name: requestHeaders
+    type: DynamicValue
+stages:
+  - name: Stage 1
+    actions:
+      - type: callHttpWebService
+        address: https://example.invalid/_api/test
+        requestType: POST
+        requestContent: requestBody
+        requestHeaders: requestHeaders
+        responseStatusCodeTo: responseCode
+");
+
+            var action = workflow.Stages.Single().Actions.OfType<CallHttpWebServiceActionYaml>().Single();
+            Assert.AreEqual("requestBody", action.RequestContent);
+            Assert.AreEqual("requestHeaders", action.RequestHeaders);
+            Assert.AreEqual("responseCode", action.ResponseStatusCodeTo);
+        }
+
+        [TestMethod]
         public void Load_DeepDynamicValuesSampleReadsAndWritesThreeNestedLayers()
         {
             var workflow = WorkflowYaml.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "workflow.experimental-deep-dynamic-values.yml")));

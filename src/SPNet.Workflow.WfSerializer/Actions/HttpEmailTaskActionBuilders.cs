@@ -108,8 +108,8 @@ namespace SPNet.Workflow.WfSerializer
             var call = ActivityReflectionWriter.Create(callHttpWebServiceType);
             ActivityReflectionWriter.SetProperty(call, "Address", ToInArgument<string>(action.Address, valueExpressionTypes));
             ActivityReflectionWriter.SetProperty(call, "RequestType", ToInArgument<string>(NormalizeHttpRequestType(action.RequestType), valueExpressionTypes));
-            ActivityReflectionWriter.SetDynamicInArgumentReferenceIfWritable(call, "RequestContent", dynamicValueType, SpdEmptyDynamicValueArgumentName);
-            ActivityReflectionWriter.SetDynamicInArgumentReferenceIfWritable(call, "RequestHeaders", dynamicValueType, SpdRequestHeadersArgumentName);
+            ActivityReflectionWriter.SetDynamicInArgumentReferenceIfWritable(call, "RequestContent", dynamicValueType, string.IsNullOrWhiteSpace(action.RequestContent) ? SpdEmptyDynamicValueArgumentName : action.RequestContent);
+            ActivityReflectionWriter.SetDynamicInArgumentReferenceIfWritable(call, "RequestHeaders", dynamicValueType, string.IsNullOrWhiteSpace(action.RequestHeaders) ? SpdRequestHeadersArgumentName : action.RequestHeaders);
             if (!string.IsNullOrWhiteSpace(action.ResponseStatusCodeTo)) ActivityReflectionWriter.SetProperty(call, "ResponseStatusCode", new OutArgument<string>(new ArgumentReference<string>(action.ResponseStatusCodeTo)));
             if (!string.IsNullOrWhiteSpace(action.ResponseContentTo)) ActivityReflectionWriter.SetProperty(call, "ResponseContent", ActivityReflectionWriter.CreateOutArgument(dynamicValueType, action.ResponseContentTo));
             if (!string.IsNullOrWhiteSpace(action.ResponseHeadersTo)) ActivityReflectionWriter.SetProperty(call, "ResponseHeaders", ActivityReflectionWriter.CreateOutArgument(dynamicValueType, action.ResponseHeadersTo));

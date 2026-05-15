@@ -668,6 +668,8 @@ namespace SPNet.Workflow.WfSerializer
         public CallHttpWebServiceActionYaml() { Type = "callHttpWebService"; }
         public ExpressionYaml Address { get; set; } = new ExpressionYaml();
         public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "HTTPGET" };
+        public string RequestContent { get; set; } = string.Empty;
+        public string RequestHeaders { get; set; } = string.Empty;
         public string ResponseStatusCodeTo { get; set; } = string.Empty;
         public string ResponseContentTo { get; set; } = string.Empty;
         public string ResponseHeadersTo { get; set; } = string.Empty;
@@ -890,7 +892,7 @@ namespace SPNet.Workflow.WfSerializer
             Register(factories, y => new DeleteListItemActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml() }, "deleteListItem");
             Register(factories, y => new LookupListItemStringPropertyActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml(), FieldName = y.FieldName ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupListItemStringProperty", "lookupSPListItemStringProperty");
             Register(factories, y => new LookupListItemIntPropertyActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml(), FieldName = y.FieldName ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupListItemIntProperty", "lookupSPListItemIntProperty");
-            Register(factories, y => new CallHttpWebServiceActionYaml { Type = y.Type ?? string.Empty, Address = y.Address ?? new ExpressionYaml(), RequestType = y.RequestType ?? new ExpressionYaml { Literal = "GET" }, ResponseStatusCodeTo = y.ResponseStatusCodeTo ?? y.StatusCodeTo ?? string.Empty, ResponseContentTo = y.ResponseContentTo ?? y.ContentTo ?? string.Empty, ResponseHeadersTo = y.ResponseHeadersTo ?? y.HeadersTo ?? string.Empty }, "callHttpWebService", "callHttp", "http");
+            Register(factories, y => new CallHttpWebServiceActionYaml { Type = y.Type ?? string.Empty, Address = y.Address ?? new ExpressionYaml(), RequestType = y.RequestType ?? new ExpressionYaml { Literal = "GET" }, RequestContent = y.RequestContent ?? y.RequestBody ?? y.BodyVariable ?? string.Empty, RequestHeaders = y.RequestHeaders ?? y.RequestHeader ?? y.HeadersVariable ?? string.Empty, ResponseStatusCodeTo = y.ResponseStatusCodeTo ?? y.StatusCodeTo ?? string.Empty, ResponseContentTo = y.ResponseContentTo ?? y.ContentTo ?? string.Empty, ResponseHeadersTo = y.ResponseHeadersTo ?? y.HeadersTo ?? string.Empty }, "callHttpWebService", "callHttp", "http");
             Register(factories, y => new SendEmailActionYaml { Type = y.Type ?? string.Empty, To = y.To ?? new ExpressionYaml(), Cc = y.Cc ?? new ExpressionYaml { Literal = string.Empty }, Subject = y.Subject ?? new ExpressionYaml { Literal = string.Empty }, Body = y.Body ?? y.BodyExpression ?? new ExpressionYaml { Literal = string.Empty } }, "sendEmail", "email");
             Register(factories, y => new SingleTaskActionYaml { Type = y.Type ?? string.Empty, AssignedTo = y.AssignedTo ?? new ExpressionYaml(), Title = y.Title ?? new ExpressionYaml(), Body = y.TaskBody ?? y.BodyExpression ?? y.Body ?? new ExpressionYaml { Literal = string.Empty }, DueDate = y.DueDate ?? new ExpressionYaml(), AssignmentEmailSubject = y.AssignmentEmailSubject ?? new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" }, AssignmentEmailBody = y.AssignmentEmailBody ?? new ExpressionYaml(), WaitForTaskCompletion = y.WaitForTaskCompletion, WaiveAssignmentEmail = y.WaiveAssignmentEmail, WaiveCancelationEmail = y.WaiveCancelationEmail, ContentTypeId = y.ContentTypeId ?? string.Empty, OutcomeFieldName = y.OutcomeFieldName ?? string.Empty, CompletedStatus = y.CompletedStatus ?? string.Empty, TaskIdTo = y.TaskIdTo ?? string.Empty, OutcomeTo = y.OutcomeTo ?? string.Empty }, "singleTask", "task");
             Register(factories, y => new GetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), To = ReadString(y.To), ValueType = y.ValueType ?? string.Empty }, "getDynamicValueProperty", "getDictionaryItem", "getDictionaryValue", "getResponseProperty");
@@ -1018,7 +1020,7 @@ namespace SPNet.Workflow.WfSerializer
             }
             else if (value is CallHttpWebServiceActionYaml callHttp)
             {
-                WriteScalar(emitter, "type", callHttp.Type); WriteObject(emitter, serializer, "address", callHttp.Address); WriteObject(emitter, serializer, "requestType", callHttp.RequestType); WriteScalar(emitter, "responseStatusCodeTo", callHttp.ResponseStatusCodeTo); WriteScalar(emitter, "responseContentTo", callHttp.ResponseContentTo); WriteScalar(emitter, "responseHeadersTo", callHttp.ResponseHeadersTo);
+                WriteScalar(emitter, "type", callHttp.Type); WriteObject(emitter, serializer, "address", callHttp.Address); WriteObject(emitter, serializer, "requestType", callHttp.RequestType); WriteScalar(emitter, "requestContent", callHttp.RequestContent); WriteScalar(emitter, "requestHeaders", callHttp.RequestHeaders); WriteScalar(emitter, "responseStatusCodeTo", callHttp.ResponseStatusCodeTo); WriteScalar(emitter, "responseContentTo", callHttp.ResponseContentTo); WriteScalar(emitter, "responseHeadersTo", callHttp.ResponseHeadersTo);
             }
             else if (value is SendEmailActionYaml email)
             {
@@ -1114,6 +1116,12 @@ namespace SPNet.Workflow.WfSerializer
             public string ItemGuidTo { get; set; } = string.Empty;
             public ExpressionYaml Address { get; set; } = new ExpressionYaml();
             public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "HTTPGET" };
+            public string RequestContent { get; set; } = string.Empty;
+            public string RequestBody { get; set; } = string.Empty;
+            public string BodyVariable { get; set; } = string.Empty;
+            public string RequestHeaders { get; set; } = string.Empty;
+            public string RequestHeader { get; set; } = string.Empty;
+            public string HeadersVariable { get; set; } = string.Empty;
             public ExpressionYaml ListId { get; set; } = new ExpressionYaml();
             public string ResponseStatusCodeTo { get; set; } = string.Empty;
             public string ResponseContentTo { get; set; } = string.Empty;

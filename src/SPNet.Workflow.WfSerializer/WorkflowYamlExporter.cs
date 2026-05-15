@@ -222,7 +222,7 @@ namespace SPNet.Workflow.WfSerializer
             if (child.Name.LocalName == "DelayUntil") return new DelayUntilActionYaml { Date = ReadExpressionAttributeOrPlaceholder(child, "Date") };
             if (child.Name.LocalName == "SetField") return new SetFieldActionYaml { FieldName = ReadStringAttributeOrPlaceholder(child, "FieldName"), Value = ReadExpressionAttributeOrPlaceholder(child, "FieldValue") };
             if (child.Name.LocalName == "Email") return new SendEmailActionYaml { To = new ExpressionYaml { Literal = "<exported recipients>" }, Cc = new ExpressionYaml { Literal = "<exported recipients>" }, Subject = ReadExpressionAttributeOrPlaceholder(child, "Subject"), Body = ReadExpressionAttributeOrPlaceholder(child, "Body") };
-            if (child.Name.LocalName == "CallHTTPWebService") return new CallHttpWebServiceActionYaml { Address = ReadActivityPropertyExpression(child, "Address"), RequestType = ReadHttpRequestTypeExpression(child), ResponseStatusCodeTo = ReadOutArgumentTargetOrPlaceholder(child, "ResponseStatusCode"), ResponseContentTo = ReadOutArgumentTarget(child, "ResponseContent") ?? string.Empty, ResponseHeadersTo = ReadOutArgumentTarget(child, "ResponseHeaders") ?? string.Empty };
+            if (child.Name.LocalName == "CallHTTPWebService") return new CallHttpWebServiceActionYaml { Address = ReadActivityPropertyExpression(child, "Address"), RequestType = ReadHttpRequestTypeExpression(child), RequestContent = ReadArgumentName(child, "RequestContent"), RequestHeaders = ReadArgumentName(child, "RequestHeaders"), ResponseStatusCodeTo = ReadOutArgumentTargetOrPlaceholder(child, "ResponseStatusCode"), ResponseContentTo = ReadOutArgumentTarget(child, "ResponseContent") ?? string.Empty, ResponseHeadersTo = ReadOutArgumentTarget(child, "ResponseHeaders") ?? string.Empty };
             if (child.Name.LocalName == "SingleTask") return new SingleTaskActionYaml { AssignedTo = ReadExpressionAttributeOrPlaceholder(child, "AssignedTo"), Title = ReadExpressionAttributeOrPlaceholder(child, "Title"), Body = ReadExpressionAttributeOrPlaceholder(child, "Body"), DueDate = ReadExpressionAttributeOrPlaceholder(child, "DueDate"), TaskIdTo = ReadOutArgumentTarget(child, "TaskId"), OutcomeTo = ReadOutArgumentTarget(child, "Outcome") };
             if (child.Name.LocalName == "CreateListItem") return new CreateListItemActionYaml { ListId = ReadActivityPropertyExpression(child, "ListId"), Fields = ReadListItemProperties(child), ItemIdTo = ReadOutArgumentTarget(child, "ItemId"), ItemGuidTo = ReadOutArgumentTarget(child, "ItemGuid") ?? ReadOutArgumentTarget(child, "Result") };
             if (child.Name.LocalName == "UpdateListItem") return new UpdateListItemActionYaml { ListId = ReadActivityPropertyExpression(child, "ListId"), ItemId = ReadOptionalActivityPropertyExpression(child, "ItemId") ?? new ExpressionYaml(), ItemGuid = ReadOptionalActivityPropertyExpression(child, "ItemGuid") ?? new ExpressionYaml(), Fields = ReadListItemProperties(child) };
@@ -232,10 +232,18 @@ namespace SPNet.Workflow.WfSerializer
 
         private static WorkflowActionYaml? TryExportBuildDynamicValueAction(XElement child)
         {
-            // BuildDynamicValue export is intentionally conservative: generated HTTP actions already
-            // allocate the standard request-header DynamicValue variable, and incomplete dictionary
-            // reconstruction can prevent otherwise valid structural roundtrips.
-            return null;
+            var target = ReadOutArgumentTarget(child, "Result") ?? ReadInOutArgumentTarget(child, "Result");
+            if (string.IsNullOrWhiteSpace(target)) return null;
+            var entries = new List<DynamicValueEntryYaml>();
+            var propertiesElement = child.Element(child.Name.Namespace + (child.Name.LocalName + ".Properties")) ?? child.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(child.Name.LocalName + ".Properties", StringComparison.OrdinalIgnoreCase));
+            foreach (var argument in propertiesElement?.Descendants().Where(e => e.Name.LocalName == "InArgument") ?? Enumerable.Empty<XElement>())
+            {
+                var key = (string?)argument.Attribute(XamlNamespace + "Key") ?? (string?)argument.Attribute("Key") ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                entries.Add(new DynamicValueEntryYaml { Key = key, Value = ReadExpressionElementOrPlaceholder(argument), ValueType = MapXamlTypeArgumentToVariableType((string?)argument.Attribute(XamlNamespace + "TypeArguments") ?? string.Empty) });
+            }
+
+            return entries.Count == 0 ? null : new BuildDynamicValueActionYaml { To = target ?? string.Empty, Entries = entries };
         }
 
         private static WorkflowActionYaml? TryExportGetDynamicValuePropertyAction(XElement child)
@@ -479,6 +487,12 @@ namespace SPNet.Workflow.WfSerializer
         private static string ReadOutArgumentTarget(XElement element, string propertyName)
         {
             var propertyElement = element.Element(element.Name.Namespace + (element.Name.LocalName + "." + propertyName));
+            return propertyElement?.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value ?? string.Empty;
+        }
+
+        private static string ReadInOutArgumentTarget(XElement element, string propertyName)
+        {
+            var propertyElement = element.Element(element.Name.Namespace + (element.Name.LocalName + "." + propertyName)) ?? element.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(element.Name.LocalName + "." + propertyName, StringComparison.OrdinalIgnoreCase));
             return propertyElement?.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value ?? string.Empty;
         }
 
