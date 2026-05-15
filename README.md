@@ -202,7 +202,7 @@ Supported actions:
 - `deleteListItem`: emits SharePoint `DeleteListItem`, with `listId` plus `itemId` and/or `itemGuid`. Delete is supported by the proxy metadata but intentionally omitted from the safe list lifecycle sample.
 - `lookupListItemStringProperty` / `lookupSPListItemStringProperty`: supported only as a nested string expression inside another visible action, normally `assign` / `setVariable`. It emits SharePoint `LookupSPListItemStringProperty`, with `listId` (defaults to `type: getCurrentListId`), `itemId` and/or `itemGuid`, and `fieldName` or `propertyName`. Top-level list item lookup actions are rejected because SharePoint Designer can render them as invisible actions and crash when properties are opened.
 - `lookupListItemIntProperty` / `lookupSPListItemIntProperty`: YAML shape and Int32 `to` validation are present, but the tested PMteamblog WebsiteCache proxy assembly does not contain `LookupSPListItemIntProperty`; using it with that cache fails fast at build time and is documented as unsupported for that environment.
-- `callHttpWebService` / `callHttp` / `http`: emits SharePoint `CallHTTPWebService` with `address`, `requestType`, and any response targets: `responseStatusCodeTo`, `responseContentTo`, and `responseHeadersTo`. Literal methods accept `GET`, `POST`, `PUT`, `DELETE` and `HTTPGET`, `HTTPPOST`, `HTTPPUT`, `HTTPDELETE`; aliases are normalized to the `HTTP*` values SharePoint Designer expects.
+- `callHttpWebService` / `callHttp` / `http`: emits SharePoint `CallHTTPWebService` with `address`, `requestType`, optional `requestContent` / `requestHeaders` `DynamicValue` variable names, and any response targets: `responseStatusCodeTo`, `responseContentTo`, and `responseHeadersTo`. Literal methods accept `GET`, `POST`, `PUT`, `DELETE` and `HTTPGET`, `HTTPPOST`, `HTTPPUT`, `HTTPDELETE`; aliases are normalized to the `HTTP*` values SharePoint Designer expects.
 - `sendEmail` / `email`: emits SharePoint `Email` with `to`, `cc`, `subject`, and `body`. These fields accept scalar literal shorthand or full expression mappings. Recipients are always wrapped in the SPD-compatible `ExpandInitFormUsers` + `BuildCollection` shape; literal recipient lists are split on `;` and `,`, while variable and `formatString` recipients are emitted as a single dynamic `BuildCollection` item. `subject` and `body` support literals, variables, workflow-context/list-item lookups, `toString`, and `formatString`; `body` may be an HTML string composed with variables/lookups. Use safe placeholder recipients such as `spnet-workflow-test@example.invalid` in samples and validation. Attachments, from/reply-to, BCC, importance, and task-notification coupling are not implemented.
 - `singleTask` / `task`: emits bounded SharePoint `SingleTask` only, based on the `ExampleWF2` reference. Minimal YAML is `assignedTo`, `title`, optional `taskBody`, optional `dueDate`, `taskIdTo`, and `outcomeTo`. Defaults intentionally waive assignment/cancelation emails in samples to avoid accidental real notifications; do not live-publish task workflows until assignees and notification settings are reviewed.
 - `lookupRestPropertyName` / `lookupSPListItemPropertyNameInREST`: emits SharePoint `LookupSPListItemPropertyNameInREST` with `listId`, `propertyName`, and `to`.
@@ -413,7 +413,69 @@ HTTP/web service example:
   responseHeadersTo: httpResponseHeaders
 ```
 
-HTTP response content and headers are emitted as SharePoint Designer proxy `DynamicValue` variables at build time; they do not need to be declared in YAML, and declaring arbitrary `DynamicValue` variables is intentionally rejected. `RequestContent` and `RequestHeaders` are initialized to empty `DynamicValue` references so Designer can render the HTTP action. This HTTP shape was publish-validated against PMteamblog and opens with the expected display in SharePoint Designer. Known caveat: using top-level lookup actions can still leave an invisible previous action in Designer; keep lookup activities nested inside expressions such as the `CurrentWebUrl` URL construction above.
+HTTP response content and headers are emitted as SharePoint Designer proxy `DynamicValue` variables at build time when named by `responseContentTo` and `responseHeadersTo`; they do not need to be predeclared. If `requestContent` or `requestHeaders` are omitted, the generated action uses the standard empty request-content dictionary and standard request-header dictionary placeholders so Designer can render the HTTP action. For `POST` / `PUT`, build explicit request-body and request-header dictionaries with `buildDynamicValue`, declare them as `DynamicValue` variables, and point `requestContent` / `requestHeaders` at those variable names.
+
+HTTP POST with request headers and body example:
+
+```yaml
+variables:
+  - name: requestHeaders
+    type: DynamicValue
+  - name: requestBody
+    type: DynamicValue
+  - name: nestedPayload
+    type: DynamicValue
+  - name: httpStatusCode
+    type: String
+stages:
+  - name: HTTP POST call
+    actions:
+      - type: buildDynamicValue
+        to: requestHeaders
+        entries:
+          - key: Accept
+            value: application/json
+          - key: Content-Type
+            value: application/json
+      - type: buildDynamicValue
+        to: nestedPayload
+        entries:
+          - key: fdgfd
+            value: dfgfd
+      - type: buildDynamicValue
+        to: requestBody
+        entries:
+          - key: prop1
+            value: sdfas
+          - key: Prop2
+            value: egsdfg
+          - key: Prop3
+            value:
+              variable: nestedPayload
+            valueType: DynamicValue
+          - key: Prop4
+            value:
+              toString:
+                variable: nestedPayload
+      - type: callHttpWebService
+        address: http://example.com
+        requestType: POST
+        requestContent: requestBody
+        requestHeaders: requestHeaders
+        responseStatusCodeTo: httpStatusCode
+        responseContentTo: responseContent
+        responseHeadersTo: responseHeaders
+```
+
+Guidance for HTTP request dictionaries:
+
+- `requestHeaders` and `requestContent` are variable names, not inline objects. Build the dictionaries first with `buildDynamicValue`.
+- Header keys should match the target service's expected HTTP header names, for example `Accept` and `Content-Type`.
+- Body entries support scalar values and nested `DynamicValue` values. When an entry value is another dictionary variable, set `valueType: DynamicValue`; otherwise it will serialize as a string/scalar value.
+- Keep request/response bodies small and predictable. SharePoint Workflow Manager persists `DynamicValue` state and can be sensitive to large payloads, arrays, unexpected primitive/null values, and slow external services.
+- The full sample is `samples/workflow.http-post.yml`. The downloaded `httpposttest` workflow exported to `artifacts/httpposttest.exported.yml` demonstrates the same shape with `requestContent: reqB`, `requestHeaders: reqH`, and `requestType: HTTPPOST`.
+
+This HTTP shape was publish-validated against PMteamblog and opens with the expected display in SharePoint Designer. Known caveat: using top-level lookup actions can still leave an invisible previous action in Designer; keep lookup activities nested inside expressions such as the `CurrentWebUrl` URL construction above.
 
 DynamicValue extraction example:
 

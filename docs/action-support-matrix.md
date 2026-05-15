@@ -39,13 +39,13 @@ Production workflows should stay primarily in the **stable** set, add **preview*
 | `deleteListItem` | preview | none | `DeleteListItemActionYaml` | Supported; emits SharePoint `DeleteListItem`. | Structural export recognition added from checked-in diagnostics XAML; identity expressions placeholdered. | README shape only; intentionally omitted from safe sample. | Required identity plus reference export test. | Requires list id and identity. | High | Destructive; no live lifecycle fixture; keep out of production until separately approved and tested with recoverable data. |
 | `lookupListItemStringProperty` expression | preview | `lookupSPListItemStringProperty` | `ExpressionYaml`; top-level model exists only to reject unsafe usage. | Supported only as nested expression. | Partial nested expression export for recognizable generated `LookupSPListItemStringProperty` shapes with safe simple list/item/field operands. | `samples/workflow.list-item-lookup.yml` | Alias/model; top-level negative test; nested export reconstruction. | Nested expression requires property/field and identity; top-level action rejected. | High | Direct stage action can be invisible in Designer and crash property editing; unknown proxy variants remain unsupported. |
 | `lookupListItemIntProperty` | unsupported | `lookupSPListItemIntProperty` | `LookupListItemIntPropertyActionYaml` | YAML shape only; build fails if proxy type missing; top-level rejected. | Not exported. | none | Top-level negative test. | Top-level action rejected. | High | Tested cache lacks `LookupSPListItemIntProperty`; do not publish as visible action. |
-| `callHttpWebService` | preview | `callHttp`, `http` | `CallHttpWebServiceActionYaml` | Supported; emits SharePoint `CallHTTPWebService`. | Structural export recognition added when `CallHTTPWebService` is present in reference XAML. | `samples/workflow.http.yml`, complex samples | Alias/model/method validation. | Requires at least one response target; literal method allow-list. | Medium | No external HTTP call in automated tests; runtime depends on target service latency, auth, response size, and Workflow Manager HTTP limits. |
+| `callHttpWebService` | preview | `callHttp`, `http` | `CallHttpWebServiceActionYaml` | Supported; emits SharePoint `CallHTTPWebService` with request method, optional `requestContent` / `requestHeaders` DynamicValue variable references, and response targets. | Structural export recognizes `CallHTTPWebService`, including request content/header variables and response targets. | `samples/workflow.http.yml`, `samples/workflow.http-post.yml`, complex samples; `artifacts/httpposttest.exported.yml` diagnostics | Alias/model/method validation; request content/header YAML load coverage; WebsiteCache POST sample build. | Requires at least one response target; literal method allow-list. | Medium | For POST/PUT, build request headers/body first with `buildDynamicValue` and reference those variables from `requestHeaders` / `requestContent`; no external HTTP call in automated tests; runtime depends on target service latency, auth, response size, payload shape, and Workflow Manager HTTP limits. |
 | `sendEmail` | preview | `email` | `SendEmailActionYaml` | Supported; emits SharePoint `Email`. | Structural export recognition added from checked-in email/reference XAML; recipients placeholdered. | `samples/workflow.email.yml`, complex samples | Alias/model/required `to`. | Requires `to`. | High | Can notify real users; samples use safe placeholder recipients; review recipients/body and tenant mail behavior before live publish. |
 | `singleTask` | preview | `task` | `SingleTaskActionYaml` | Supported; emits bounded SharePoint `SingleTask`. | Structural export recognition added when `SingleTask` is present in reference XAML; assignee/title/body are retained when simple attributes. | `samples/workflow.task.yml` | Alias/model/required assignee/title plus structural export recognition. | Requires `assignedTo` and `title`. | High | Defaults waive emails; review assignees, task list behavior, and escalation expectations before live publish. |
 | `lookupRestPropertyName` | preview | `lookupSPListItemPropertyNameInREST` | `LookupRestPropertyNameActionYaml` | Supported; emits SharePoint REST property-name lookup. | Not exported. | HTTP/REST samples | Alias/model/required `to`. | Requires `to`. | Medium | Requires proxy metadata at build time and should be tested with the exact REST response shape produced by the target site. |
 | `getDynamicValueProperty` | experimental | `getDictionaryItem`, `getDictionaryValue`, `getResponseProperty` | `GetDynamicValuePropertyActionYaml` | Supported for typed extraction from HTTP/manual `DynamicValue`. | Structural export recognizes downloaded/generated `GetDynamicValueProperty` shapes. | HTTP/REST samples; `samples/workflow.experimental-dynamic-values.yml` | Alias/model/required source/to; dynamic array export tests. | Requires `source` and `to`; build validates variable types. | Medium | Supports explicit value type hints for String, Boolean, Int32, Double, DateTime, Guid, and DynamicValue; runtime fails can come from missing/null properties, array/object mismatches, or unexpected REST payloads. |
 | `setDynamicValueProperty` | experimental | `setDictionaryItem`, `setDictionaryValue`, `setResponseProperty` | `SetDynamicValuePropertyActionYaml` | Experimental support; emits hidden Microsoft.Activities `SetDynamicValueProperty` to produce/update a `DynamicValue`. | Not exported. | `samples/workflow.experimental-dynamic-values.yml` | Alias/model/required source; build dispatch. | Requires `source`; optional `to` defaults to source; build validates source/target are `DynamicValue`. | High | Hidden Designer action. Manual SharePoint/Designer test confirmed hidden-action execution, but exposed a manual-start metadata follow-up; publish/runtime behavior may differ by proxy version. |
-| `buildDynamicValue` | experimental | `buildDictionary`, `createDictionary` | `BuildDynamicValueActionYaml` | Supported; emits Microsoft.Activities `BuildDynamicValue` for request payload/header dictionaries and experimental DynamicValue samples. | Not exported. | `samples/workflow.experimental-dynamic-values.yml` | Alias/model/required `to`; entry validation. | Requires `to` and at least one keyed entry; target is inferred as `DynamicValue` if omitted. | Medium | Supports scalar/string/numeric/Boolean/DateTime/Guid entry values. Workflow artifacts such as `DynamicArrayWFEx` must still be downloaded/exported from SharePoint before artifact-driven parity can be verified. |
+| `buildDynamicValue` | experimental | `buildDictionary`, `createDictionary` | `BuildDynamicValueActionYaml` | Supported; emits Microsoft.Activities `BuildDynamicValue` for request payload/header dictionaries and experimental DynamicValue samples. | Structural export recognizes generated/downloaded `BuildDynamicValue` dictionaries when entries are directly representable as simple arguments or variable references. | `samples/workflow.experimental-dynamic-values.yml`, `samples/workflow.http-post.yml`; `artifacts/httpposttest.exported.yml` diagnostics | Alias/model/required `to`; entry validation; HTTP POST export/build coverage. | Requires `to` and at least one keyed entry; target is inferred as `DynamicValue` if omitted. | Medium | Supports scalar/string/numeric/Boolean/DateTime/Guid entry values and nested `DynamicValue` entries with `valueType: DynamicValue`; structural export is diagnostic and may placeholder or misclassify complex operands that are not simple literals/variables. |
 | `buildUri` | dev-only | none | `BuildUriActionYaml` | Dev-only hidden action; emits Microsoft.Activities `BuildUri`, accepting `source` or scalar `scheme`/`host`/`port`/`path`/`query`/`fragment`, writing a `String`. | Not exported. | `samples/workflow.devonly-microsoft-activities-expressions.yml` | Alias/model/build dispatch; WebsiteCache sample build. | Requires `to`; target inferred as `String`. | High | Hidden in SharePoint Designer; inspect generated XAML and runtime-test before publishing. |
 | `getConfigurationValue` | dev-only | none | `GetConfigurationValueActionYaml` | Dev-only hidden action; emits Microsoft.Activities `GetConfigurationValue`. | Not exported. | `samples/workflow.devonly-microsoft-activities-expressions.yml` | Alias/model/build dispatch; WebsiteCache sample build. | Requires `name` and `to`; target inferred as `String`. | High | Hidden in SharePoint Designer; runtime values are environment/proxy-defined. |
 | `getInstanceAddress` | dev-only | none | `GetInstanceAddressActionYaml` | Dev-only hidden action; emits Microsoft.Activities `GetInstanceAddress`, writing a `String`. | Not exported. | `samples/workflow.devonly-microsoft-activities-expressions.yml` | Alias/model/build dispatch; WebsiteCache sample build. | Requires `to`; target inferred as `String`. | High | Hidden in SharePoint Designer. |
@@ -76,6 +76,79 @@ Production workflows should stay primarily in the **stable** set, add **preview*
 | `ClearDictionary` hidden action | unsupported | none | none | Not implemented. Current YAML variable model represents `DynamicValue`; the inspected `ClearDictionary<TKey,TValue>` action requires an `IDictionary<TKey,TValue>` variable/action surface. | Not exported. | `samples/workflow.experimental-dictionary-clear-notes.yml` | Safe limitation sample build. | Not applicable. | High | Left as a documented limitation to avoid adding broad IDictionary support in this subtask. |
 
 ## Experimental DynamicValue manual test notes
+
+## HTTP request header/body guidance
+
+Use `callHttpWebService` for HTTP GET/POST/PUT/DELETE calls. Literal `requestType` values can be the short method names (`GET`, `POST`, `PUT`, `DELETE`) or SharePoint Designer names (`HTTPGET`, `HTTPPOST`, `HTTPPUT`, `HTTPDELETE`); YAML build normalizes short names to the SharePoint Designer form.
+
+For GET-style calls, `requestContent` and `requestHeaders` can be omitted. The builder supplies SharePoint Designer-compatible placeholder `DynamicValue` references so the `CallHTTPWebService` activity renders cleanly.
+
+For POST/PUT calls with headers or a body:
+
+1. Declare the request header/body variables as `DynamicValue`.
+2. Build each dictionary with `buildDynamicValue` before the HTTP call.
+3. Set `requestHeaders` to the header dictionary variable name.
+4. Set `requestContent` to the body dictionary variable name.
+5. Use `responseStatusCodeTo`, `responseContentTo`, and/or `responseHeadersTo` for outputs. Response content/header variables are inferred as `DynamicValue` when omitted from the `variables` list.
+
+Minimal POST pattern:
+
+```yaml
+variables:
+  - name: requestHeaders
+    type: DynamicValue
+  - name: requestBody
+    type: DynamicValue
+  - name: httpStatusCode
+    type: String
+stages:
+  - name: POST
+    actions:
+      - type: buildDynamicValue
+        to: requestHeaders
+        entries:
+          - key: Accept
+            value: application/json
+          - key: Content-Type
+            value: application/json
+      - type: buildDynamicValue
+        to: requestBody
+        entries:
+          - key: Title
+            value: Example title
+      - type: callHttpWebService
+        address: http://example.com
+        requestType: POST
+        requestHeaders: requestHeaders
+        requestContent: requestBody
+        responseStatusCodeTo: httpStatusCode
+        responseContentTo: responseContent
+        responseHeadersTo: responseHeaders
+```
+
+Nested body dictionaries are supported, but the nested entry must opt into `DynamicValue` serialization:
+
+```yaml
+- type: buildDynamicValue
+  to: childPayload
+  entries:
+    - key: childProp
+      value: child value
+- type: buildDynamicValue
+  to: requestBody
+  entries:
+    - key: Child
+      value:
+        variable: childPayload
+      valueType: DynamicValue
+```
+
+Operational caveats:
+
+- `requestHeaders` / `requestContent` are variable names, not inline dictionaries.
+- Keep payloads small and explicitly shaped; large or unpredictable `DynamicValue` payloads can fail publish/runtime persistence or become hard to inspect in SharePoint Designer.
+- Validate external endpoint latency, auth expectations, status codes, and response payload shape in a non-production SharePoint site before production use.
+- `samples/workflow.http-post.yml` is the reference YAML sample. The downloaded SharePoint Designer workflow `httpposttest` exported to `artifacts/httpposttest.exported.yml` confirms the supported POST/header/body shape from live XAML.
 
 2026-05-11 manual SharePoint/SharePoint Designer test: `samples/workflow.experimental-dynamic-values.yml` published with manual start enabled, and the hidden `Microsoft.Activities` actions were not visible in SharePoint Designer. SharePoint Designer did not report validation errors for those hidden activities, preserved them when re-publishing, and a site-triggered run wrote workflow history output including `Set by hidden Microsoft.Activities.SetDynamicValueProperty`. This confirms the current hidden-action approach can emit extra `Microsoft.Activities` namespace actions that SharePoint Designer does not show visually, and those hidden actions can still execute successfully after a Designer re-publish.
 
