@@ -1,0 +1,51 @@
+schemaVersion: spnet.workflow/v1
+name: YamlHttpPostWorkflow
+target:
+  type: Site
+variables:
+  - name: requestHeaders
+    type: DynamicValue
+  - name: requestBody
+    type: DynamicValue
+  - name: nestedPayload
+    type: DynamicValue
+  - name: httpStatusCode
+    type: String
+stages:
+  - name: HTTP POST call
+    actions:
+      - type: buildDynamicValue
+        to: requestHeaders
+        entries:
+          - key: Accept
+            value: application/json
+          - key: Content-Type
+            value: application/json
+      - type: buildDynamicValue
+        to: nestedPayload
+        entries:
+          - key: fdgfd
+            value: dfgfd
+      - type: buildDynamicValue
+        to: requestBody
+        entries:
+          - key: prop1
+            value: sdfas
+          - key: Prop2
+            value: egsdfg
+          - key: Prop3
+            value:
+              variable: nestedPayload
+            valueType: DynamicValue
+          - key: Prop4
+            value:
+              toString:
+                variable: nestedPayload
+      - type: callHttpWebService
+        address: http://example.com
+        requestType: POST
+        requestContent: requestBody
+        requestHeaders: requestHeaders
+        responseStatusCodeTo: httpStatusCode
+        responseContentTo: responseContent
+        responseHeadersTo: responseHeaders

@@ -18,12 +18,17 @@ namespace SPNet.Workflow.WfSerializer
     {
         public static void ExportWorkflowYaml(string inputXamlPath, string outputYamlPath)
         {
-            WorkflowYamlExporter.Export(inputXamlPath, outputYamlPath, string.Empty);
+            WorkflowYamlExporter.Export(inputXamlPath, outputYamlPath, string.Empty, string.Empty);
         }
 
         public static void ExportWorkflowYaml(string inputXamlPath, string outputYamlPath, string formFieldXmlPath)
         {
-            WorkflowYamlExporter.Export(inputXamlPath, outputYamlPath, formFieldXmlPath);
+            WorkflowYamlExporter.Export(inputXamlPath, outputYamlPath, formFieldXmlPath, string.Empty);
+        }
+
+        public static void ExportWorkflowYaml(string inputXamlPath, string outputYamlPath, string formFieldXmlPath, string cacheFolder)
+        {
+            WorkflowYamlExporter.Export(inputXamlPath, outputYamlPath, formFieldXmlPath, cacheFolder);
         }
     }
 
@@ -34,7 +39,7 @@ namespace SPNet.Workflow.WfSerializer
         private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
         private static readonly XNamespace SharePointNamespace = "clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities";
 
-        public static void Export(string inputXamlPath, string outputYamlPath, string formFieldXmlPath)
+        public static void Export(string inputXamlPath, string outputYamlPath, string formFieldXmlPath, string cacheFolder)
         {
             if (!File.Exists(inputXamlPath)) throw new FileNotFoundException("Input XAML not found: " + inputXamlPath, inputXamlPath);
             var document = XDocument.Parse(File.ReadAllText(inputXamlPath));
@@ -58,18 +63,466 @@ namespace SPNet.Workflow.WfSerializer
                 workflow.Metadata.Initiation.FormFields = workflow.Parameters;
                 workflow.ExportWarnings.Add("FormField metadata export: parameters were populated from SharePoint workflow definition FormField metadata sidecar, preserving display names, defaults, choices, and field-specific settings where present.");
             }
-            var stageElements = document.Descendants(ActivitiesNamespace + "Sequence").Where(e => !string.IsNullOrWhiteSpace((string?)e.Attribute("DisplayName"))).ToList();
-            foreach (var stageElement in stageElements.Take(20))
+            var usedObjectModel = false;
+            if (!string.IsNullOrWhiteSpace(cacheFolder))
             {
-                var stage = new StageYaml { Name = (string?)stageElement.Attribute("DisplayName") ?? "Stage" };
-                foreach (var action in ExportActions(stageElement)) stage.Actions.Add(action);
-                if (stage.Actions.Count > 0) workflow.Stages.Add(stage);
+                if (WfActivityBuilderSerializer.TryDeserializeWorkflowXaml(inputXamlPath, cacheFolder, out var builder, out _, out var error))
+                {
+                    usedObjectModel = TryExportObjectModelFlowchartStages(document, builder, workflow);
+                    if (usedObjectModel) workflow.ExportWarnings.Add("WF object-model flowchart export: stage ordering and transitions were reconstructed from System.Activities.Statements.Flowchart, FlowStep.Next, and FlowDecision.True/False object references.");
+                    else workflow.ExportWarnings.Add("WF object-model export skipped: deserialized ActivityBuilder did not expose a supported Flowchart stage graph; XML structural export was used.");
+                }
+                else
+                {
+                    workflow.ExportWarnings.Add("WF object-model export failed and XML structural export was used: " + error);
+                }
+            }
+
+            if (!usedObjectModel && !TryExportFlowchartStages(document, workflow))
+            {
+                var stageElements = document.Descendants(ActivitiesNamespace + "Sequence").Where(e => !string.IsNullOrWhiteSpace((string?)e.Attribute("DisplayName"))).ToList();
+                foreach (var stageElement in stageElements.Take(20))
+                {
+                    var stage = new StageYaml { Name = (string?)stageElement.Attribute("DisplayName") ?? "Stage" };
+                    foreach (var action in ExportActions(stageElement)) stage.Actions.Add(action);
+                    if (stage.Actions.Count > 0) workflow.Stages.Add(stage);
+                }
             }
             MoveAssignedParametersToVariables(workflow);
-            workflow.ExportWarnings.Add("Partial structural export: supported SharePoint actions are listed, but expressions and list dictionaries may be placeholders when WF deserialization is not used.");
+            workflow.ExportWarnings.Add(usedObjectModel
+                ? "Partial object-model export: flow transitions use WF object references, while supported SharePoint actions and expressions are still projected through downloaded XAML markup and may contain placeholders."
+                : "Partial structural export: supported SharePoint actions are listed, but expressions and list dictionaries may be placeholders when WF deserialization is not used.");
             if (workflow.Parameters.Count == 0 && formFieldParameters.Count == 0) workflow.ExportWarnings.Add("XAML-only variable export: no SharePoint FormField metadata was present, so x:Members InArgument entries were exported as workflow variables rather than initiation parameters.");
             if (workflow.Stages.Count == 0) workflow.Stages.Add(new StageYaml { Name = "Unsupported XAML", Actions = new System.Collections.Generic.List<WorkflowActionYaml>() });
             workflow.Save(outputYamlPath);
+        }
+
+        private static bool TryExportObjectModelFlowchartStages(XDocument document, ActivityBuilder? builder, WorkflowYaml workflow)
+        {
+            var flowchart = FindFlowchart(builder?.Implementation);
+            if (flowchart == null || flowchart.Nodes.Count == 0) return false;
+
+            var xmlFlowchart = document.Descendants(ActivitiesNamespace + "Flowchart").FirstOrDefault();
+            if (xmlFlowchart == null) return false;
+
+            var xmlNodes = CreateObjectModelNodeXmlOrder(xmlFlowchart);
+            var objectNodes = flowchart.Nodes.ToList();
+            var xmlByObject = new Dictionary<FlowNode, XElement>();
+            for (var i = 0; i < objectNodes.Count && i < xmlNodes.Count; i++) xmlByObject[objectNodes[i]] = xmlNodes[i];
+
+            var stageNodes = flowchart.Nodes.OfType<FlowStep>()
+                .Select(s => new FlowStepStageObject(s, xmlByObject.TryGetValue(s, out var xml) ? xml : null, xmlByObject.TryGetValue(s, out xml) ? FindStageSequence(xml) : null, xmlByObject.TryGetValue(s, out xml) ? FindStageActionContainer(xml) : null))
+                .Where(s => s.StageSequence != null && s.ActionContainer != null)
+                .ToList();
+            if (stageNodes.Count == 0) return false;
+
+            if (flowchart.StartNode is FlowStep || flowchart.StartNode is FlowDecision) stageNodes = OrderObjectStagesFromStart(stageNodes, flowchart.StartNode);
+
+            var targetNames = CreateStageTargetNames(stageNodes.Select(s => new FlowStepStageXml(s.Element!, ReadObjectNodeName(s.Step, s.Element), s.StageSequence, s.ActionContainer)));
+            var stages = new List<StageYaml>();
+            foreach (var stageNode in stageNodes)
+            {
+                var nodeName = ReadObjectNodeName(stageNode.Step, stageNode.Element);
+                var stage = new StageYaml { Name = targetNames[nodeName] };
+                foreach (var action in ExportActions(stageNode.ActionContainer!)) stage.Actions.Add(action);
+                stages.Add(stage);
+            }
+
+            var stageIndexByNode = stageNodes.Select((s, i) => new { s.Step, Index = i }).ToDictionary(s => s.Step, s => s.Index);
+            var explicitTransitions = new Dictionary<int, StageTransitionYaml>();
+            var terminalStageIndexes = new List<int>();
+            var hasNonLinearTransition = false;
+            for (var i = 0; i < stageNodes.Count; i++)
+            {
+                var next = stageNodes[i].Step.Next;
+                var expectedLinearTarget = i + 1 < stageNodes.Count ? stageNodes[i + 1].Step : null;
+                if (next == null) terminalStageIndexes.Add(i);
+                if (ReferenceEquals(next, expectedLinearTarget)) continue;
+
+                if (TryReadObjectStageTransition(next, targetNames, xmlByObject, out var transition))
+                {
+                    explicitTransitions[i] = transition;
+                    hasNonLinearTransition = true;
+                }
+            }
+
+            if (hasNonLinearTransition)
+            {
+                foreach (var index in terminalStageIndexes)
+                {
+                    if (!explicitTransitions.ContainsKey(index)) explicitTransitions[index] = new StageTransitionYaml { Default = new StageTransitionGotoYaml { Goto = "end" } };
+                }
+
+                foreach (var pair in explicitTransitions) stages[pair.Key].Transition = pair.Value;
+            }
+
+            foreach (var stage in stages.Where(s => !s.Transition.IsSpecified)) stage.Transition = null!;
+            workflow.Stages.AddRange(stages.Where(s => s.Actions.Count > 0 || s.Transition?.IsSpecified == true));
+            if (terminalStageIndexes.Count > 0) workflow.ExportWarnings.Add("WF object-model export: null FlowStep.Next or FlowDecision branch references were exported as the end sentinel target 'end'.");
+            return workflow.Stages.Count > 0;
+        }
+
+        private static List<XElement> CreateObjectModelNodeXmlOrder(XElement xmlFlowchart)
+        {
+            var byName = xmlFlowchart.Descendants()
+                .Where(e => e.Name.LocalName == "FlowStep" || e.Name.LocalName == "FlowDecision")
+                .Select(e => new { Name = ReadXamlName(e), Element = e })
+                .Where(n => !string.IsNullOrWhiteSpace(n.Name))
+                .ToDictionary(n => n.Name, n => n.Element, StringComparer.OrdinalIgnoreCase);
+            var result = new List<XElement>();
+            foreach (var child in xmlFlowchart.Elements())
+            {
+                if (child.Name.LocalName == "FlowStep" || child.Name.LocalName == "FlowDecision") result.Add(child);
+                else if (child.Name.LocalName == "Reference")
+                {
+                    var reference = ReadReference((string?)child.Attribute("Name") ?? child.Value ?? string.Empty);
+                    if (!string.IsNullOrWhiteSpace(reference) && byName.TryGetValue(reference, out var element)) result.Add(element);
+                }
+            }
+
+            if (result.Count == 0) result.AddRange(xmlFlowchart.Descendants().Where(e => e.Name.LocalName == "FlowStep" || e.Name.LocalName == "FlowDecision"));
+            return result;
+        }
+
+        private static Flowchart? FindFlowchart(Activity? activity)
+        {
+            if (activity == null) return null;
+            if (activity is Flowchart flowchart) return flowchart;
+            if (activity is Sequence sequence)
+            {
+                foreach (var child in sequence.Activities)
+                {
+                    var found = FindFlowchart(child);
+                    if (found != null) return found;
+                }
+            }
+
+            return null;
+        }
+
+        private static List<FlowStepStageObject> OrderObjectStagesFromStart(List<FlowStepStageObject> stages, FlowNode? startNode)
+        {
+            var byStep = stages.ToDictionary(s => s.Step);
+            var ordered = new List<FlowStepStageObject>();
+            var seen = new HashSet<FlowNode>();
+            var current = startNode;
+            while (current != null && seen.Add(current))
+            {
+                if (current is FlowStep step && byStep.TryGetValue(step, out var stage))
+                {
+                    ordered.Add(stage);
+                    current = step.Next;
+                    continue;
+                }
+
+                break;
+            }
+
+            foreach (var stage in stages)
+            {
+                if (seen.Add(stage.Step)) ordered.Add(stage);
+            }
+
+            return ordered;
+        }
+
+        private static bool TryReadObjectStageTransition(FlowNode? nextNode, IReadOnlyDictionary<string, string> targetNames, IReadOnlyDictionary<FlowNode, XElement> xmlByObject, out StageTransitionYaml transition)
+        {
+            transition = new StageTransitionYaml();
+            if (nextNode == null)
+            {
+                transition.Default = new StageTransitionGotoYaml { Goto = "end" };
+                return true;
+            }
+
+            if (nextNode is FlowStep step)
+            {
+                transition.Default = new StageTransitionGotoYaml { Goto = ResolveStageTarget(ReadObjectNodeName(step, xmlByObject.TryGetValue(step, out var stepXml) ? stepXml : null), targetNames) };
+                return true;
+            }
+
+            var seenDecisions = new HashSet<FlowDecision>();
+            while (nextNode is FlowDecision decision)
+            {
+                if (!seenDecisions.Add(decision)) return false;
+                xmlByObject.TryGetValue(decision, out var decisionXml);
+                transition.Branches.Add(new StageTransitionBranchYaml
+                {
+                    Condition = ReadConditionOrPlaceholder(decisionXml?.Element(ActivitiesNamespace + "FlowDecision.Condition")),
+                    Goto = ResolveObjectStageTarget(decision.True, targetNames, xmlByObject)
+                });
+
+                if (decision.False == null)
+                {
+                    transition.Default = new StageTransitionGotoYaml { Goto = "end" };
+                    return true;
+                }
+
+                if (decision.False is FlowStep falseStep)
+                {
+                    transition.Default = new StageTransitionGotoYaml { Goto = ResolveStageTarget(ReadObjectNodeName(falseStep, xmlByObject.TryGetValue(falseStep, out var falseXml) ? falseXml : null), targetNames) };
+                    return true;
+                }
+
+                nextNode = decision.False;
+            }
+
+            transition.Default = new StageTransitionGotoYaml { Goto = "end" };
+            return transition.Branches.Count > 0;
+        }
+
+        private static string ResolveObjectStageTarget(FlowNode? node, IReadOnlyDictionary<string, string> targetNames, IReadOnlyDictionary<FlowNode, XElement> xmlByObject)
+        {
+            if (node == null) return "end";
+            return node is FlowStep step ? ResolveStageTarget(ReadObjectNodeName(step, xmlByObject.TryGetValue(step, out var xml) ? xml : null), targetNames) : "end";
+        }
+
+        private static string ReadObjectNodeName(FlowNode node, XElement? element)
+        {
+            var name = element == null ? string.Empty : ReadXamlName(element);
+            return string.IsNullOrWhiteSpace(name) ? "node" + node.GetHashCode().ToString(CultureInfo.InvariantCulture) : name;
+        }
+
+        private sealed class FlowStepStageObject
+        {
+            public FlowStepStageObject(FlowStep step, XElement? element, XElement? stageSequence, XElement? actionContainer) { Step = step; Element = element; StageSequence = stageSequence; ActionContainer = actionContainer; }
+            public FlowStep Step { get; }
+            public XElement? Element { get; }
+            public XElement? StageSequence { get; }
+            public XElement? ActionContainer { get; }
+        }
+
+        private static bool TryExportFlowchartStages(XDocument document, WorkflowYaml workflow)
+        {
+            var flowchart = document.Descendants(ActivitiesNamespace + "Flowchart").FirstOrDefault();
+            if (flowchart == null) return false;
+
+            var nodesByName = flowchart.Elements()
+                .Where(e => e.Name.LocalName == "FlowStep" || e.Name.LocalName == "FlowDecision")
+                .Select(e => new FlowNodeXml(e, ReadXamlName(e)))
+                .Where(n => !string.IsNullOrWhiteSpace(n.Name))
+                .ToDictionary(n => n.Name, StringComparer.OrdinalIgnoreCase);
+            if (nodesByName.Count == 0) return false;
+
+            var stageNodes = flowchart.Elements(ActivitiesNamespace + "FlowStep")
+                .Select(e => new FlowStepStageXml(e, ReadXamlName(e), FindStageSequence(e), FindStageActionContainer(e)))
+                .Where(s => !string.IsNullOrWhiteSpace(s.NodeName) && s.StageSequence != null && s.ActionContainer != null)
+                .ToList();
+            if (stageNodes.Count == 0) return false;
+
+            var startReference = ReadReference((string?)flowchart.Attribute("StartNode") ?? string.Empty);
+            if (!string.IsNullOrWhiteSpace(startReference)) stageNodes = OrderStagesFromStart(stageNodes, nodesByName, startReference);
+
+            var targetNames = CreateStageTargetNames(stageNodes);
+            var stages = new List<StageYaml>();
+            foreach (var stageNode in stageNodes)
+            {
+                var stage = new StageYaml { Name = targetNames[stageNode.NodeName] };
+                foreach (var action in ExportActions(stageNode.ActionContainer!)) stage.Actions.Add(action);
+                stages.Add(stage);
+            }
+
+            var stageIndexByNodeName = stageNodes.Select((s, i) => new { s.NodeName, Index = i }).ToDictionary(s => s.NodeName, s => s.Index, StringComparer.OrdinalIgnoreCase);
+            var explicitTransitions = new Dictionary<int, StageTransitionYaml>();
+            var terminalStageIndexes = new List<int>();
+            var hasNonLinearTransition = false;
+            for (var i = 0; i < stageNodes.Count; i++)
+            {
+                var nextReference = NormalizeTargetReference(ReadFlowStepNextReference(stageNodes[i].Element), nodesByName, targetNames);
+                var expectedLinearTarget = i + 1 < stageNodes.Count ? stageNodes[i + 1].NodeName : string.Empty;
+                if (string.IsNullOrWhiteSpace(nextReference)) terminalStageIndexes.Add(i);
+                if (IsLinearTarget(nextReference, expectedLinearTarget)) continue;
+
+                if (TryReadStageTransition(nextReference, nodesByName, targetNames, out var transition))
+                {
+                    explicitTransitions[i] = transition;
+                    hasNonLinearTransition = true;
+                }
+            }
+
+            if (hasNonLinearTransition)
+            {
+                foreach (var index in terminalStageIndexes)
+                {
+                    if (!explicitTransitions.ContainsKey(index)) explicitTransitions[index] = new StageTransitionYaml { Default = new StageTransitionGotoYaml { Goto = "end" } };
+                }
+
+                foreach (var pair in explicitTransitions) stages[pair.Key].Transition = pair.Value;
+            }
+
+            foreach (var stage in stages.Where(s => !s.Transition.IsSpecified)) stage.Transition = null!;
+            workflow.Stages.AddRange(stages.Where(s => s.Actions.Count > 0 || s.Transition?.IsSpecified == true));
+            return workflow.Stages.Count > 0;
+        }
+
+        private static List<FlowStepStageXml> OrderStagesFromStart(List<FlowStepStageXml> stages, IReadOnlyDictionary<string, FlowNodeXml> nodesByName, string startReference)
+        {
+            var byName = stages.ToDictionary(s => s.NodeName, StringComparer.OrdinalIgnoreCase);
+            var ordered = new List<FlowStepStageXml>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var current = startReference;
+            while (!string.IsNullOrWhiteSpace(current) && byName.TryGetValue(current, out var stage) && seen.Add(current))
+            {
+                ordered.Add(stage);
+                var next = ReadFlowStepNextReference(stage.Element);
+                if (string.IsNullOrWhiteSpace(next)) break;
+                if (byName.ContainsKey(next)) current = next;
+                else if (nodesByName.TryGetValue(next, out var node) && node.Element.Name.LocalName == "FlowDecision") break;
+                else break;
+            }
+
+            foreach (var stage in stages)
+            {
+                if (seen.Add(stage.NodeName)) ordered.Add(stage);
+            }
+
+            return ordered;
+        }
+
+        private static Dictionary<string, string> CreateStageTargetNames(IEnumerable<FlowStepStageXml> stageNodes)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var stageNode in stageNodes)
+            {
+                var baseName = ReadStageDisplayName(stageNode.StageSequence!, stageNode.ActionContainer!) ?? stageNode.NodeName;
+                var name = string.IsNullOrWhiteSpace(baseName) ? "Stage" : baseName.Trim();
+                var unique = name;
+                var suffix = 2;
+                while (!used.Add(unique)) unique = name + " " + suffix++;
+                result[stageNode.NodeName] = unique;
+            }
+
+            return result;
+        }
+
+        private static bool TryReadStageTransition(string nextReference, IReadOnlyDictionary<string, FlowNodeXml> nodesByName, IReadOnlyDictionary<string, string> targetNames, out StageTransitionYaml transition)
+        {
+            transition = new StageTransitionYaml();
+            if (string.IsNullOrWhiteSpace(nextReference))
+            {
+                transition.Default = new StageTransitionGotoYaml { Goto = "end" };
+                return true;
+            }
+
+            if (!nodesByName.TryGetValue(nextReference, out var node)) return false;
+            if (node.Element.Name.LocalName == "FlowStep")
+            {
+                transition.Default = new StageTransitionGotoYaml { Goto = ResolveStageTarget(nextReference, targetNames) };
+                return true;
+            }
+
+            if (node.Element.Name.LocalName != "FlowDecision") return false;
+            var seenDecisions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (node.Element.Name.LocalName == "FlowDecision")
+            {
+                if (!seenDecisions.Add(node.Name)) return false;
+                var trueReference = ReadFlowDecisionTargetReference(node.Element, "True");
+                transition.Branches.Add(new StageTransitionBranchYaml
+                {
+                    Condition = ReadConditionOrPlaceholder(node.Element.Element(ActivitiesNamespace + "FlowDecision.Condition")),
+                    Goto = ResolveStageTarget(trueReference, targetNames)
+                });
+
+                var falseReference = ReadFlowDecisionTargetReference(node.Element, "False");
+                if (string.IsNullOrWhiteSpace(falseReference))
+                {
+                    transition.Default = new StageTransitionGotoYaml { Goto = "end" };
+                    return true;
+                }
+
+                if (!nodesByName.TryGetValue(falseReference, out node))
+                {
+                    transition.Default = new StageTransitionGotoYaml { Goto = ResolveStageTarget(falseReference, targetNames) };
+                    return true;
+                }
+            }
+
+            transition.Default = new StageTransitionGotoYaml { Goto = ResolveStageTarget(node.Name, targetNames) };
+            return transition.Branches.Count > 0;
+        }
+
+        private static bool IsLinearTarget(string actualReference, string expectedReference) =>
+            string.IsNullOrWhiteSpace(actualReference)
+                ? string.IsNullOrWhiteSpace(expectedReference)
+                : string.Equals(actualReference, expectedReference, StringComparison.OrdinalIgnoreCase);
+
+        private static string NormalizeTargetReference(string reference, IReadOnlyDictionary<string, FlowNodeXml> nodesByName, IReadOnlyDictionary<string, string> targetNames)
+        {
+            if (string.IsNullOrWhiteSpace(reference)) return string.Empty;
+            if (nodesByName.ContainsKey(reference) || targetNames.ContainsKey(reference)) return reference;
+            return string.Empty;
+        }
+
+        private static string ResolveStageTarget(string reference, IReadOnlyDictionary<string, string> targetNames)
+        {
+            if (string.IsNullOrWhiteSpace(reference)) return "end";
+            return targetNames.TryGetValue(reference, out var target) ? target : "end";
+        }
+
+        private static XElement? FindStageSequence(XElement flowStep) => flowStep.Elements(ActivitiesNamespace + "Sequence").FirstOrDefault();
+
+        private static XElement? FindStageActionContainer(XElement flowStep)
+        {
+            var sequence = FindStageSequence(flowStep);
+            if (sequence == null) return null;
+            if (!HasStageContainerMetadata(sequence)) return sequence;
+            return sequence.Elements(ActivitiesNamespace + "Sequence")
+                .FirstOrDefault(e => !IsStageFooter(e) && ExportActions(e).Any())
+                ?? sequence.Elements(ActivitiesNamespace + "Sequence").FirstOrDefault(e => !IsStageFooter(e))
+                ?? sequence;
+        }
+
+        private static bool HasStageContainerMetadata(XElement sequence) => sequence.Elements().Any(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes" && e.Descendants().Any(d => d.Name.LocalName == "String" && string.Equals((string?)d.Attribute(XamlNamespace + "Key"), "StageAttribute", StringComparison.OrdinalIgnoreCase) && ((string?)d ?? string.Empty).StartsWith("StageContainer-", StringComparison.OrdinalIgnoreCase)));
+
+        private static bool IsStageFooter(XElement sequence) => sequence.Elements().Any(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes" && e.Descendants().Any(d => d.Name.LocalName == "String" && string.Equals((string?)d.Attribute(XamlNamespace + "Key"), "StageAttribute", StringComparison.OrdinalIgnoreCase) && ((string?)d ?? string.Empty).StartsWith("StageFooter-", StringComparison.OrdinalIgnoreCase)));
+
+        private static string? ReadStageDisplayName(XElement stageSequence, XElement actionContainer)
+        {
+            var bodyName = (string?)actionContainer.Attribute("DisplayName");
+            if (!string.IsNullOrWhiteSpace(bodyName)) return bodyName;
+            var status = stageSequence.Elements().FirstOrDefault(e => e.Name.LocalName == "SetWorkflowStatus")?.Attribute("Status")?.Value;
+            if (!string.IsNullOrWhiteSpace(status)) return status;
+            return (string?)stageSequence.Attribute("DisplayName");
+        }
+
+        private static string ReadFlowStepNextReference(XElement flowStep) => ReadNodeTargetReference(flowStep, "Next");
+
+        private static string ReadFlowDecisionTargetReference(XElement flowDecision, string propertyName) => ReadNodeTargetReference(flowDecision, propertyName);
+
+        private static string ReadNodeTargetReference(XElement node, string propertyName)
+        {
+            var attributeReference = ReadReference((string?)node.Attribute(propertyName) ?? string.Empty);
+            if (!string.IsNullOrWhiteSpace(attributeReference)) return attributeReference;
+            var propertyElement = node.Element(ActivitiesNamespace + (node.Name.LocalName + "." + propertyName)) ?? node.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(node.Name.LocalName + "." + propertyName, StringComparison.OrdinalIgnoreCase));
+            var referenceElement = propertyElement?.Elements().FirstOrDefault(e => e.Name.LocalName == "Reference");
+            return ReadReference((string?)referenceElement?.Attribute("Name") ?? referenceElement?.Value ?? string.Empty);
+        }
+
+        private static string ReadXamlName(XElement element) => (string?)element.Attribute(XamlNamespace + "Name") ?? (string?)element.Attribute("Name") ?? string.Empty;
+
+        private static string ReadReference(string value)
+        {
+            value = (value ?? string.Empty).Trim();
+            const string marker = "{x:Reference ";
+            if (value.StartsWith(marker, StringComparison.OrdinalIgnoreCase) && value.EndsWith("}", StringComparison.Ordinal)) return value.Substring(marker.Length, value.Length - marker.Length - 1).Trim();
+            return value;
+        }
+
+        private sealed class FlowNodeXml
+        {
+            public FlowNodeXml(XElement element, string name) { Element = element; Name = name; }
+            public XElement Element { get; }
+            public string Name { get; }
+        }
+
+        private sealed class FlowStepStageXml
+        {
+            public FlowStepStageXml(XElement element, string nodeName, XElement? stageSequence, XElement? actionContainer) { Element = element; NodeName = nodeName; StageSequence = stageSequence; ActionContainer = actionContainer; }
+            public XElement Element { get; }
+            public string NodeName { get; }
+            public XElement? StageSequence { get; }
+            public XElement? ActionContainer { get; }
         }
 
         private static void MoveAssignedParametersToVariables(WorkflowYaml workflow)
@@ -222,7 +675,7 @@ namespace SPNet.Workflow.WfSerializer
             if (child.Name.LocalName == "DelayUntil") return new DelayUntilActionYaml { Date = ReadExpressionAttributeOrPlaceholder(child, "Date") };
             if (child.Name.LocalName == "SetField") return new SetFieldActionYaml { FieldName = ReadStringAttributeOrPlaceholder(child, "FieldName"), Value = ReadExpressionAttributeOrPlaceholder(child, "FieldValue") };
             if (child.Name.LocalName == "Email") return new SendEmailActionYaml { To = new ExpressionYaml { Literal = "<exported recipients>" }, Cc = new ExpressionYaml { Literal = "<exported recipients>" }, Subject = ReadExpressionAttributeOrPlaceholder(child, "Subject"), Body = ReadExpressionAttributeOrPlaceholder(child, "Body") };
-            if (child.Name.LocalName == "CallHTTPWebService") return new CallHttpWebServiceActionYaml { Address = ReadActivityPropertyExpression(child, "Address"), RequestType = ReadHttpRequestTypeExpression(child), ResponseStatusCodeTo = ReadOutArgumentTargetOrPlaceholder(child, "ResponseStatusCode"), ResponseContentTo = ReadOutArgumentTarget(child, "ResponseContent") ?? string.Empty, ResponseHeadersTo = ReadOutArgumentTarget(child, "ResponseHeaders") ?? string.Empty };
+            if (child.Name.LocalName == "CallHTTPWebService") return new CallHttpWebServiceActionYaml { Address = ReadActivityPropertyExpression(child, "Address"), RequestType = ReadHttpRequestTypeExpression(child), RequestContent = ReadArgumentName(child, "RequestContent"), RequestHeaders = ReadArgumentName(child, "RequestHeaders"), ResponseStatusCodeTo = ReadOutArgumentTargetOrPlaceholder(child, "ResponseStatusCode"), ResponseContentTo = ReadOutArgumentTarget(child, "ResponseContent") ?? string.Empty, ResponseHeadersTo = ReadOutArgumentTarget(child, "ResponseHeaders") ?? string.Empty };
             if (child.Name.LocalName == "SingleTask") return new SingleTaskActionYaml { AssignedTo = ReadExpressionAttributeOrPlaceholder(child, "AssignedTo"), Title = ReadExpressionAttributeOrPlaceholder(child, "Title"), Body = ReadExpressionAttributeOrPlaceholder(child, "Body"), DueDate = ReadExpressionAttributeOrPlaceholder(child, "DueDate"), TaskIdTo = ReadOutArgumentTarget(child, "TaskId"), OutcomeTo = ReadOutArgumentTarget(child, "Outcome") };
             if (child.Name.LocalName == "CreateListItem") return new CreateListItemActionYaml { ListId = ReadActivityPropertyExpression(child, "ListId"), Fields = ReadListItemProperties(child), ItemIdTo = ReadOutArgumentTarget(child, "ItemId"), ItemGuidTo = ReadOutArgumentTarget(child, "ItemGuid") ?? ReadOutArgumentTarget(child, "Result") };
             if (child.Name.LocalName == "UpdateListItem") return new UpdateListItemActionYaml { ListId = ReadActivityPropertyExpression(child, "ListId"), ItemId = ReadOptionalActivityPropertyExpression(child, "ItemId") ?? new ExpressionYaml(), ItemGuid = ReadOptionalActivityPropertyExpression(child, "ItemGuid") ?? new ExpressionYaml(), Fields = ReadListItemProperties(child) };
@@ -232,10 +685,18 @@ namespace SPNet.Workflow.WfSerializer
 
         private static WorkflowActionYaml? TryExportBuildDynamicValueAction(XElement child)
         {
-            // BuildDynamicValue export is intentionally conservative: generated HTTP actions already
-            // allocate the standard request-header DynamicValue variable, and incomplete dictionary
-            // reconstruction can prevent otherwise valid structural roundtrips.
-            return null;
+            var target = ReadOutArgumentTarget(child, "Result") ?? ReadInOutArgumentTarget(child, "Result");
+            if (string.IsNullOrWhiteSpace(target)) return null;
+            var entries = new List<DynamicValueEntryYaml>();
+            var propertiesElement = child.Element(child.Name.Namespace + (child.Name.LocalName + ".Properties")) ?? child.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(child.Name.LocalName + ".Properties", StringComparison.OrdinalIgnoreCase));
+            foreach (var argument in propertiesElement?.Descendants().Where(e => e.Name.LocalName == "InArgument") ?? Enumerable.Empty<XElement>())
+            {
+                var key = (string?)argument.Attribute(XamlNamespace + "Key") ?? (string?)argument.Attribute("Key") ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                entries.Add(new DynamicValueEntryYaml { Key = key, Value = ReadExpressionElementOrPlaceholder(argument), ValueType = MapXamlTypeArgumentToVariableType((string?)argument.Attribute(XamlNamespace + "TypeArguments") ?? string.Empty) });
+            }
+
+            return entries.Count == 0 ? null : new BuildDynamicValueActionYaml { To = target ?? string.Empty, Entries = entries };
         }
 
         private static WorkflowActionYaml? TryExportGetDynamicValuePropertyAction(XElement child)
@@ -479,6 +940,12 @@ namespace SPNet.Workflow.WfSerializer
         private static string ReadOutArgumentTarget(XElement element, string propertyName)
         {
             var propertyElement = element.Element(element.Name.Namespace + (element.Name.LocalName + "." + propertyName));
+            return propertyElement?.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value ?? string.Empty;
+        }
+
+        private static string ReadInOutArgumentTarget(XElement element, string propertyName)
+        {
+            var propertyElement = element.Element(element.Name.Namespace + (element.Name.LocalName + "." + propertyName)) ?? element.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(element.Name.LocalName + "." + propertyName, StringComparison.OrdinalIgnoreCase));
             return propertyElement?.Descendants().FirstOrDefault(e => e.Name.LocalName == "ArgumentReference")?.Attribute("ArgumentName")?.Value ?? string.Empty;
         }
 

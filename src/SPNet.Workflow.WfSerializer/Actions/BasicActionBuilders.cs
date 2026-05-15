@@ -120,8 +120,16 @@ namespace SPNet.Workflow.WfSerializer
             if (targetType == typeof(DateTime)) return new Assign<DateTime> { To = new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)), Value = ToInArgument<DateTime>(value, valueExpressionTypes) };
             if (targetType == typeof(Guid)) return new Assign<Guid> { To = new OutArgument<Guid>(new ArgumentReference<Guid>(action.To)), Value = ToInArgument<Guid>(value, valueExpressionTypes) };
             if (targetType == typeof(int)) return new Assign<int> { To = new OutArgument<int>(new ArgumentReference<int>(action.To)), Value = ToInArgument<int>(value, valueExpressionTypes) };
-            if (targetType.FullName == "Microsoft.Activities.DynamicValue") return new Assign<object> { To = new OutArgument<object>(new ArgumentReference<object>(action.To)), Value = ToInArgument<object>(value, valueExpressionTypes) };
+            if (targetType.FullName == "Microsoft.Activities.DynamicValue") return BuildDynamicValueAssign(action.To, value, targetType, valueExpressionTypes);
             return new Assign<string> { To = new OutArgument<string>(new ArgumentReference<string>(action.To)), Value = ToInArgument<string>(value, valueExpressionTypes) };
+        }
+
+        private static Activity BuildDynamicValueAssign(string variableName, ExpressionYaml value, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes)
+        {
+            var assign = Activator.CreateInstance(typeof(Assign<>).MakeGenericType(dynamicValueType)) ?? throw new InvalidOperationException("Could not create DynamicValue assign activity.");
+            ActivityReflectionWriter.SetProperty(assign, "To", ActivityReflectionWriter.CreateOutArgument(dynamicValueType, variableName));
+            ActivityReflectionWriter.SetProperty(assign, "Value", ToTypedDynamicValueInArgument(value, valueExpressionTypes));
+            return (Activity)assign;
         }
 
         private static Activity BuildStringReplace(StringReplaceActionYaml action, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)

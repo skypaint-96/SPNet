@@ -16,18 +16,22 @@ namespace SPNet.Workflow.WfSerializer
                 {
                     var config = SpNetToolConfig.Load(options.ConfigPath);
                     var cacheFolder = options.CacheFolder.OrIfEmpty(config.SpdCacheFolder).OrIfEmpty(Environment.GetEnvironmentVariable("SPNET_SPD_CACHE"));
+                    WfSerializerOptions.ValidateCacheFolder(cacheFolder);
                     WfActivityBuilderSerializer.SerializeYamlWorkflow(options.WorkflowYamlPath, options.OutputXamlPath, cacheFolder, config);
                     Console.WriteLine("Saved XAML to " + options.OutputXamlPath);
                 }
                 else if (string.Equals(options.Mode, "export", StringComparison.OrdinalIgnoreCase))
                 {
-                    WfActivityBuilderSerializer.ExportWorkflowYaml(options.InputXamlPath, options.OutputYamlPath, options.FormFieldXmlPath);
+                    var config = SpNetToolConfig.Load(options.ConfigPath);
+                    var cacheFolder = options.CacheFolder.OrIfEmpty(config.SpdCacheFolder).OrIfEmpty(Environment.GetEnvironmentVariable("SPNET_SPD_CACHE"));
+                    WfActivityBuilderSerializer.ExportWorkflowYaml(options.InputXamlPath, options.OutputYamlPath, options.FormFieldXmlPath, cacheFolder);
                     Console.WriteLine("Saved YAML export to " + options.OutputYamlPath);
                 }
                 else if (string.Equals(options.Mode, "inspect", StringComparison.OrdinalIgnoreCase))
                 {
                     var config = SpNetToolConfig.Load(options.ConfigPath);
                     options.SetCacheFolder(options.CacheFolder.OrIfEmpty(config.SpdCacheFolder).OrIfEmpty(Environment.GetEnvironmentVariable("SPNET_SPD_CACHE")));
+                    WfSerializerOptions.ValidateCacheFolder(options.CacheFolder);
                     var report = WfActivityBuilderSerializer.InspectWorkflowXaml(options.InputXamlPath, options.CacheFolder);
                     if (string.IsNullOrWhiteSpace(options.OutputReportPath)) Console.WriteLine(report);
                     else
@@ -41,6 +45,7 @@ namespace SPNet.Workflow.WfSerializer
                 {
                     var config = SpNetToolConfig.Load(options.ConfigPath);
                     options.SetCacheFolder(options.CacheFolder.OrIfEmpty(config.SpdCacheFolder).OrIfEmpty(Environment.GetEnvironmentVariable("SPNET_SPD_CACHE")));
+                    WfSerializerOptions.ValidateCacheFolder(options.CacheFolder);
                     WfActivityBuilderSerializer.SerializeSampleWorkflow(options);
                     Console.WriteLine("Saved XAML to " + options.OutputXamlPath);
                 }
@@ -73,7 +78,7 @@ namespace SPNet.Workflow.WfSerializer
         {
             if (args.Count == 0 || args.Any(a => string.Equals(a, "--help", StringComparison.OrdinalIgnoreCase) || string.Equals(a, "-h", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Usage: build --workflow <workflow.yml> --out <workflow.xaml> [--config <spnet.local.yml>] [--cache-folder <WebsiteCache>] OR export --xaml <workflow.xaml> --out <workflow.yml> [--form-field-xml <workflow.xaml.formfield.xml>] OR inspect --in <workflow.xaml> [--cache-folder <WebsiteCache>]");
+                throw new ArgumentException("Usage: build --workflow <workflow.yml> --out <workflow.xaml> [--config <spnet.local.yml>] [--cache-folder <WebsiteCache>] OR export --xaml <workflow.xaml> --out <workflow.yml> [--form-field-xml <workflow.xaml.formfield.xml>] [--cache-folder <WebsiteCache>] OR inspect --in <workflow.xaml> [--cache-folder <WebsiteCache>]");
             }
 
             var options = new WfSerializerOptions();
@@ -153,13 +158,13 @@ namespace SPNet.Workflow.WfSerializer
                 if (string.IsNullOrWhiteSpace(options.InputXamlPath)) throw new ArgumentException("Missing required --in value for inspect mode.");
             }
             else if (string.IsNullOrWhiteSpace(options.OutputXamlPath)) throw new ArgumentException("Missing required --out value.");
-            if (!string.Equals(options.Mode, "export", StringComparison.OrdinalIgnoreCase))
-            {
-                if (string.IsNullOrWhiteSpace(options.CacheFolder)) options.CacheFolder = Environment.GetEnvironmentVariable("SPNET_SPD_CACHE") ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(options.CacheFolder)) throw new ArgumentException("Missing SharePoint Designer WebsiteCache folder. Set --cache-folder, config spdCacheFolder, or SPNET_SPD_CACHE.");
-                if (!Directory.Exists(options.CacheFolder)) throw new DirectoryNotFoundException("Cache folder not found: " + options.CacheFolder);
-            }
             return options;
+        }
+
+        public static void ValidateCacheFolder(string cacheFolder)
+        {
+            if (string.IsNullOrWhiteSpace(cacheFolder)) throw new ArgumentException("Missing SharePoint Designer WebsiteCache folder. Set --cache-folder, config spdCacheFolder, or SPNET_SPD_CACHE.");
+            if (!Directory.Exists(cacheFolder)) throw new DirectoryNotFoundException("Cache folder not found: " + cacheFolder);
         }
 
         private static string RequireValue(IReadOnlyList<string> args, ref int index, string option)

@@ -227,7 +227,6 @@ namespace SPNet.Workflow.Publisher.Csom
         internal static void ApplyWorkflowDefinitionMetadata(object definition, PublisherWorkflowMetadata metadata, string formFieldXml, string initiationUrl)
         {
             if (definition == null) return;
-            if (metadata != null && !string.IsNullOrWhiteSpace(metadata.DisplayName)) TrySetPublicProperty(definition, "DisplayName", metadata.DisplayName);
             if (metadata != null && !string.IsNullOrWhiteSpace(metadata.Description)) TrySetPublicProperty(definition, "Description", metadata.Description);
             if (!string.IsNullOrWhiteSpace(formFieldXml))
             {

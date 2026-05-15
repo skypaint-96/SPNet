@@ -1,0 +1,458 @@
+# Complex DynamicValue sample aligned with the published deepworkflowexample workflow.
+# Safe/manual test: builds nested DynamicValue payloads, writes/reads deep properties
+# across supported scalar types, demonstrates DynamicValue dictionary/lookup-like
+# nesting, and writes history only. No SharePoint list data is mutated and no
+# email/task actions are sent.
+schemaVersion: spnet.workflow/v1
+name: deepworkflowexample
+metadata:
+  displayName: deepworkflowexample
+  technicalName: deepworkflowexample.MTW
+  description: "Complex deep DynamicValue sample for validating nested set/get operations, explicit valueType casts, and slash-path reads on the published deepworkflowexample site workflow."
+  target:
+    type: Site
+  start:
+    manual: true
+    onCreated: false
+    onUpdated: false
+variables:
+  - name: lookupLikeValue
+    type: DynamicValue
+  - name: auditValue
+    type: DynamicValue
+  - name: itemsValue
+    type: DynamicValue
+  - name: leafValue
+    type: DynamicValue
+  - name: branchValue
+    type: DynamicValue
+  - name: rootValue
+    type: DynamicValue
+  - name: updatedLeafValue
+    type: DynamicValue
+  - name: updatedBranchValue
+    type: DynamicValue
+  - name: updatedRootValue
+    type: DynamicValue
+  - name: updatedRootWithAudit
+    type: DynamicValue
+  - name: updatedRootWithSlashString
+    type: DynamicValue
+  - name: updatedRootWithSlashNumber
+    type: DynamicValue
+  - name: updatedRootWithSlashBoolean
+    type: DynamicValue
+  - name: updatedRootWithItems
+    type: DynamicValue
+  - name: updatedRootWithArraySlashWrite
+    type: DynamicValue
+  - name: updatedRootWithCopiedArrayValue
+    type: DynamicValue
+  - name: readBranchValue
+    type: DynamicValue
+  - name: readLeafValue
+    type: DynamicValue
+  - name: readLookupLikeValue
+    type: DynamicValue
+  - name: readAuditValue
+    type: DynamicValue
+  - name: readTitle
+    type: String
+  - name: readCount
+    type: Int32
+  - name: readAmount
+    type: Double
+  - name: readEnabled
+    type: Boolean
+  - name: readDueDate
+    type: DateTime
+  - name: readUrl
+    type: String
+  - name: readLookupId
+    type: Int32
+  - name: readLookupTitle
+    type: String
+  - name: readSlashTitle
+    type: String
+  - name: readSlashCount
+    type: Int32
+  - name: readSlashEnabled
+    type: Boolean
+  - name: readFirstItemTitle
+    type: String
+  - name: readSecondItemStatus
+    type: String
+  - name: readFirstItemValue
+    type: DynamicValue
+  - name: readFirstItemSecondTag
+    type: String
+  - name: firstItemHistorySummary
+    type: String
+  - name: readLeafItemCount
+    type: Int32
+  - name: readAuditUser
+    type: String
+  - name: hasAudit
+    type: Boolean
+  - name: isAuditEmpty
+    type: Boolean
+  - name: isFirstItemReady
+    type: Boolean
+stages:
+  - name: Build typed nested DynamicValues
+    actions:
+      - type: buildDynamicValue
+        to: lookupLikeValue
+        entries:
+          - key: LookupId
+            value: 42
+            valueType: Int32
+          - key: LookupTitle
+            value: Contoso item 42
+            valueType: String
+          - key: LookupUrl
+            value: https://contoso.sharepoint.com/sites/demo/Lists/Lookup/DispForm.aspx?ID=42
+            valueType: String
+      - type: buildDynamicValue
+        to: auditValue
+        entries:
+          - key: User
+            value: SPNet local validation
+            valueType: String
+          - key: WhenUtc
+            value:
+              type: parseDate
+              value: '2026-05-15T10:00:00Z'
+            valueType: DateTime
+      - type: assign
+        to: itemsValue
+        value:
+          type: parseDynamicValue
+          value: '[{"Title":"First array item","Status":"Ready","Tags":["Primary","Blue"]},{"Title":"Second array item","Status":"Pending","Tags":["Secondary","Green"]}]'
+      - type: buildDynamicValue
+        to: leafValue
+        entries:
+          - key: Title
+            value: Before deep update
+            valueType: String
+          - key: Count
+            value: 7
+            valueType: Int32
+          - key: Amount
+            value: 123.45
+            valueType: Double
+          - key: Enabled
+            value: true
+            valueType: Boolean
+          - key: DueDate
+            value:
+              type: parseDate
+              value: '2026-05-20T09:30:00Z'
+            valueType: DateTime
+          - key: Url
+            value: https://contoso.sharepoint.com/sites/demo/SitePages/Home.aspx
+            valueType: String
+          - key: Lookup
+            value:
+              variable: lookupLikeValue
+            valueType: DynamicValue
+      - type: buildDynamicValue
+        to: branchValue
+        entries:
+          - key: Leaf
+            value:
+              variable: leafValue
+            valueType: DynamicValue
+      - type: buildDynamicValue
+        to: rootValue
+        entries:
+          - key: Branch
+            value:
+              variable: branchValue
+            valueType: DynamicValue
+  - name: Update and read deep typed values
+    actions:
+      - type: setDynamicValueProperty
+        source: leafValue
+        propertyName: Title
+        value: Updated by deepworkflowexample
+        valueType: String
+        to: updatedLeafValue
+      - type: setDynamicValueProperty
+        source: updatedLeafValue
+        propertyName: Count
+        value: 9
+        valueType: Int32
+        to: updatedLeafValue
+      - type: setDynamicValueProperty
+        source: updatedLeafValue
+        propertyName: Amount
+        value: 456.78
+        valueType: Double
+        to: updatedLeafValue
+      - type: setDynamicValueProperty
+        source: updatedLeafValue
+        propertyName: Enabled
+        value: false
+        valueType: Boolean
+        to: updatedLeafValue
+      - type: setDynamicValueProperty
+        source: updatedLeafValue
+        propertyName: DueDate
+        value:
+          type: parseDate
+          value: '2026-06-01T12:00:00Z'
+        valueType: DateTime
+        to: updatedLeafValue
+      - type: setDynamicValueProperty
+        source: updatedLeafValue
+        propertyName: Url
+        value: https://contoso.sharepoint.com/sites/demo/SitePages/Updated.aspx
+        valueType: String
+        to: updatedLeafValue
+      - type: setDynamicValueProperty
+        source: branchValue
+        propertyName: Leaf
+        value:
+          variable: updatedLeafValue
+        valueType: DynamicValue
+        to: updatedBranchValue
+      - type: setDynamicValueProperty
+        source: rootValue
+        propertyName: Branch
+        value:
+          variable: updatedBranchValue
+        valueType: DynamicValue
+        to: updatedRootValue
+      - type: setDynamicValueProperty
+        source: updatedRootValue
+        propertyName: Audit
+        value:
+          variable: auditValue
+        valueType: DynamicValue
+        to: updatedRootWithAudit
+      - type: setDynamicValueProperty
+        source: updatedRootWithAudit
+        propertyName: Branch/Leaf/Title
+        value: Updated through slash path
+        valueType: String
+        to: updatedRootWithSlashString
+      - type: setDynamicValueProperty
+        source: updatedRootWithSlashString
+        propertyName: Branch/Leaf/Count
+        value: 11
+        valueType: Int32
+        to: updatedRootWithSlashNumber
+      - type: setDynamicValueProperty
+        source: updatedRootWithSlashNumber
+        propertyName: Branch/Leaf/Enabled
+        value: true
+        valueType: Boolean
+        to: updatedRootWithSlashBoolean
+      - type: setDynamicValueProperty
+        source: updatedRootWithSlashBoolean
+        propertyName: Branch/Items
+        value:
+          variable: itemsValue
+        valueType: DynamicValue
+        to: updatedRootWithItems
+      - type: setDynamicValueProperty
+        source: updatedRootWithItems
+        propertyName: Branch/Items(1)/Status
+        value: Reviewed through parenthesized array index
+        valueType: String
+        to: updatedRootWithArraySlashWrite
+      - type: setDynamicValueProperty
+        source: updatedRootWithArraySlashWrite
+        propertyName: Branch/Leaf/ArrayFirstTitleCopy
+        value:
+          type: getDynamicValueProperty
+          source:
+            variable: updatedRootWithArraySlashWrite
+          propertyName: Branch/Items(0)/Title
+          valueType: String
+        valueType: String
+        to: updatedRootWithCopiedArrayValue
+      - type: getDynamicValueProperty
+        source: updatedRootWithCopiedArrayValue
+        propertyName: Branch
+        to: readBranchValue
+        valueType: DynamicValue
+      - type: getDynamicValueProperty
+        source: readBranchValue
+        propertyName: Leaf
+        to: readLeafValue
+        valueType: DynamicValue
+      - type: getDynamicValueProperty
+        source: readLeafValue
+        propertyName: Title
+        to: readTitle
+        valueType: String
+      - type: getDynamicValueProperty
+        source: readLeafValue
+        propertyName: Count
+        to: readCount
+        valueType: Int32
+      - type: getDynamicValueProperty
+        source: readLeafValue
+        propertyName: Amount
+        to: readAmount
+        valueType: Double
+      - type: getDynamicValueProperty
+        source: readLeafValue
+        propertyName: Enabled
+        to: readEnabled
+        valueType: Boolean
+      - type: getDynamicValueProperty
+        source: readLeafValue
+        propertyName: DueDate
+        to: readDueDate
+        valueType: DateTime
+      - type: getDynamicValueProperty
+        source: readLeafValue
+        propertyName: Url
+        to: readUrl
+        valueType: String
+      - type: getDynamicValueProperty
+        source: readLeafValue
+        propertyName: Lookup
+        to: readLookupLikeValue
+        valueType: DynamicValue
+      - type: getDynamicValueProperty
+        source: readLookupLikeValue
+        propertyName: LookupId
+        to: readLookupId
+        valueType: Int32
+      - type: getDynamicValueProperty
+        source: readLookupLikeValue
+        propertyName: LookupTitle
+        to: readLookupTitle
+        valueType: String
+      - type: getDynamicValueProperty
+        source: updatedRootWithCopiedArrayValue
+        propertyName: Branch/Leaf/Title
+        to: readSlashTitle
+        valueType: String
+      - type: getDynamicValueProperty
+        source: updatedRootWithCopiedArrayValue
+        propertyName: Branch/Leaf/Count
+        to: readSlashCount
+        valueType: Int32
+      - type: getDynamicValueProperty
+        source: updatedRootWithCopiedArrayValue
+        propertyName: Branch/Leaf/Enabled
+        to: readSlashEnabled
+        valueType: Boolean
+      - type: getDynamicValueProperty
+        source: updatedRootWithCopiedArrayValue
+        propertyName: Branch/Items(0)/Title
+        to: readFirstItemTitle
+        valueType: String
+      - type: getDynamicValueProperty
+        source: updatedRootWithCopiedArrayValue
+        propertyName: Branch/Items(1)/Status
+        to: readSecondItemStatus
+        valueType: String
+      - type: getDynamicValueProperty
+        source: itemsValue
+        propertyName: (0)
+        to: readFirstItemValue
+        valueType: DynamicValue
+      - type: getDynamicValueProperty
+        source: updatedRootWithCopiedArrayValue
+        propertyName: Branch/Items(0)/Tags/(1)
+        to: readFirstItemSecondTag
+        valueType: String
+      - type: getDynamicValueProperty
+        source: updatedRootWithCopiedArrayValue
+        propertyName: Audit
+        to: readAuditValue
+        valueType: DynamicValue
+      - type: getDynamicValueProperty
+        source: readAuditValue
+        propertyName: User
+        to: readAuditUser
+        valueType: String
+      - type: assign
+        to: hasAudit
+        value:
+          type: containsDynamicValueProperty
+          source:
+            variable: updatedRootWithCopiedArrayValue
+          propertyName: Audit
+      - type: assign
+        to: isAuditEmpty
+        value:
+          type: isEmptyDynamicValue
+          source:
+            variable: readAuditValue
+      - type: assign
+        to: firstItemHistorySummary
+        value:
+          type: concatString
+          values:
+            - 'First item via inline array path: '
+            -
+              type: getDynamicValueProperty
+              source:
+                variable: itemsValue
+              propertyName: (0)/Title
+              valueType: String
+      - type: if
+        condition:
+          type: equals
+          valueType: String
+          left:
+            type: getDynamicValueProperty
+            source:
+              variable: updatedRootWithCopiedArrayValue
+            propertyName: Branch/Items(0)/Status
+            valueType: String
+          right: Ready
+        then:
+          - type: assign
+            to: isFirstItemReady
+            value: true
+          - type: writeHistory
+            message:
+              variable: firstItemHistorySummary
+            status: Deep DynamicValue array inline condition passed
+        else:
+          - type: assign
+            to: isFirstItemReady
+            value: false
+          - type: writeHistory
+            message: Deep DynamicValue array inline condition did not match
+            status: Deep DynamicValue array inline condition skipped
+      - type: countDynamicValueItems
+        source: readLeafValue
+        to: readLeafItemCount
+      - type: writeHistory
+        message:
+          type: concatString
+          values:
+            - 'deepworkflowexample validated: '
+            -
+              type: getDynamicValueProperty
+              source:
+                variable: updatedRootWithCopiedArrayValue
+              propertyName: Branch/Leaf/Title
+              valueType: String
+            - ' count='
+            -
+              type: toString
+              value:
+                variable: readSlashCount
+                valueType: Int32
+            - ' enabled='
+            -
+              type: toString
+              value:
+                variable: readSlashEnabled
+                valueType: Boolean
+            - ' lookup='
+            - variable: readLookupTitle
+            - ' firstItem='
+            - variable: readFirstItemTitle
+            - ' secondStatus='
+            - variable: readSecondItemStatus

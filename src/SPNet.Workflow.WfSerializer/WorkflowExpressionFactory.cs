@@ -167,6 +167,7 @@ namespace SPNet.Workflow.WfSerializer
             if (type == "addtodate") return CreateDateOffsetExpression(expression, resultType, valueExpressionTypes.AddToDate);
             if (type == "subtractfromdate") return CreateDateOffsetExpression(expression, resultType, valueExpressionTypes.SubtractFromDate);
             if (type == "dateinrange") return CreateDateInRangeExpression(expression, resultType);
+            if (type == "getdynamicvalueproperty" || type == "getdictionaryitem" || type == "getdictionaryvalue" || type == "getresponseproperty") return CreateGetDynamicValuePropertyExpression(expression, resultType);
             if (type == "containsdynamicvalueproperty" || type == "containsdictionaryproperty") return CreateContainsDynamicValuePropertyExpression(expression, resultType);
             if (type == "isemptydynamicvalue" || type == "isemptydictionary") return CreateIsEmptyDynamicValueExpression(expression, resultType);
             if (type == "parsedate" || type == "parseutcdate" || type == "parseSpDate".ToLowerInvariant()) return CreateParseDateExpression(expression, resultType);
@@ -297,6 +298,17 @@ namespace SPNet.Workflow.WfSerializer
             return contains;
         }
 
+        private object CreateGetDynamicValuePropertyExpression(ExpressionYaml expression, Type resultType)
+        {
+            if (valueExpressionTypes.GetDynamicValueProperty == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
+            if (!HasExpression(expression.Source)) throw new InvalidOperationException(expression.Type + " expression requires 'source'.");
+            var lookupType = valueExpressionTypes.GetDynamicValueProperty.IsGenericTypeDefinition ? valueExpressionTypes.GetDynamicValueProperty.MakeGenericType(resultType) : valueExpressionTypes.GetDynamicValueProperty;
+            var lookup = ActivityReflectionWriter.Create(lookupType);
+            ActivityReflectionWriter.SetProperty(lookup, "Source", ToInArgument(expression.Source ?? new ExpressionYaml(), valueExpressionTypes.DynamicValue));
+            ActivityReflectionWriter.SetProperty(lookup, "PropertyName", ToInArgument<string>(string.IsNullOrWhiteSpace(expression.PropertyName) ? new ExpressionYaml { Literal = Convert.ToString(expression.Literal ?? string.Empty) ?? string.Empty } : new ExpressionYaml { Literal = expression.PropertyName }));
+            return lookup;
+        }
+
         private object CreateCreateTimeSpanExpression(ExpressionYaml expression, Type resultType)
         {
             if (valueExpressionTypes.CreateTimeSpan == null) throw new InvalidOperationException(expression.Type + " is not supported by the local Microsoft.Activities proxy assembly.");
@@ -412,7 +424,20 @@ namespace SPNet.Workflow.WfSerializer
 
         private static object CreateToStringObjectArgument(ExpressionYaml expression)
         {
-            if (!string.IsNullOrWhiteSpace(expression.Variable)) return new InArgument<double>(new ArgumentValue<double>(expression.Variable));
+            if (!string.IsNullOrWhiteSpace(expression.Variable))
+            {
+                var valueType = (expression.ValueType ?? string.Empty).Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+                if (valueType == "boolean" || valueType == "bool") return new InArgument<bool>(new ArgumentValue<bool>(expression.Variable));
+                if (valueType == "int32" || valueType == "int" || valueType == "integer") return new InArgument<int>(new ArgumentValue<int>(expression.Variable));
+                if (valueType == "datetime" || valueType == "date") return new InArgument<DateTime>(new ArgumentValue<DateTime>(expression.Variable));
+                if (valueType == "guid") return new InArgument<Guid>(new ArgumentValue<Guid>(expression.Variable));
+                if (valueType == "string" || valueType == "text") return new InArgument<string>(new ArgumentValue<string>(expression.Variable));
+                return new InArgument<double>(new ArgumentValue<double>(expression.Variable));
+            }
+            if (expression.Literal is bool boolValue) return new InArgument<bool>(boolValue);
+            if (expression.Literal is int intValue) return new InArgument<int>(intValue);
+            if (expression.Literal is DateTime dateTimeValue) return new InArgument<DateTime>(dateTimeValue);
+            if (expression.Literal is Guid guidValue) return new InArgument<Guid>(guidValue);
             if (expression.Literal is string) return new InArgument<string>(Convert.ToString(expression.Literal));
             return new InArgument<double>(Convert.ToDouble(expression.Literal ?? 0d));
         }

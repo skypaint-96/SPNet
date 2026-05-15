@@ -34,8 +34,10 @@ namespace SPNet.Workflow.WfSerializer
         public static SpNetToolConfig Load(string path)
         {
             var defaults = File.Exists(Path.Combine("config", "spnet.defaults.yml")) ? Path.Combine("config", "spnet.defaults.yml") : string.Empty;
+            var local = string.IsNullOrWhiteSpace(path) && File.Exists(Path.Combine("config", "spnet.local.yml")) ? Path.Combine("config", "spnet.local.yml") : string.Empty;
             var config = new SpNetToolConfig();
             if (!string.IsNullOrWhiteSpace(defaults)) config.Merge(Read(defaults));
+            if (!string.IsNullOrWhiteSpace(local)) config.Merge(Read(local));
             if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) config.Merge(Read(path));
             return config;
         }
@@ -121,7 +123,7 @@ namespace SPNet.Workflow.WfSerializer
         public void Save(string path)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? Environment.CurrentDirectory);
-            var serializer = new SerializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).WithTypeConverter(new WorkflowActionYamlTypeConverter()).WithTypeConverter(new ExpressionYamlTypeConverter()).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull).Build();
+            var serializer = new SerializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).WithTypeConverter(new WorkflowActionYamlTypeConverter()).WithTypeConverter(new ExpressionYamlTypeConverter()).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitDefaults).Build();
             File.WriteAllText(path, serializer.Serialize(this));
         }
 
@@ -141,8 +143,39 @@ namespace SPNet.Workflow.WfSerializer
             if (!string.Equals(SchemaVersion, "spnet.workflow/v1", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unsupported schemaVersion: " + SchemaVersion);
             if (string.IsNullOrWhiteSpace(EffectiveDisplayName)) throw new InvalidOperationException("Workflow name is required.");
             if (Stages == null || Stages.Count == 0) throw new InvalidOperationException("At least one stage is required.");
+            ValidateStages();
             ValidateNamesAndParameters();
             foreach (var action in Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>())) action.Validate();
+        }
+
+        private void ValidateStages()
+        {
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var stage in Stages ?? new List<StageYaml>())
+            {
+                stage.Validate();
+                if (!string.IsNullOrWhiteSpace(stage.Id) && !ids.Add(stage.Id)) throw new InvalidOperationException("Duplicate stage id: " + stage.Id);
+                if (!string.IsNullOrWhiteSpace(stage.Name)) names.Add(stage.Name);
+            }
+
+            foreach (var stage in Stages ?? new List<StageYaml>())
+            {
+                var transition = stage.Transition;
+                if (transition == null || !transition.IsSpecified) continue;
+                foreach (var branch in transition.Branches ?? new List<StageTransitionBranchYaml>()) ValidateStageTarget(stage, branch.Goto);
+                ValidateStageTarget(stage, transition.Default.Goto);
+            }
+        }
+
+        private void ValidateStageTarget(StageYaml owner, string target)
+        {
+            if (string.IsNullOrWhiteSpace(target)) throw new InvalidOperationException("Stage transition on '" + owner.Name + "' requires a non-empty goto target.");
+            if (string.Equals(target, "end", StringComparison.OrdinalIgnoreCase)) return;
+            var idMatches = Stages.Count(s => string.Equals(s.Id, target, StringComparison.OrdinalIgnoreCase));
+            var nameMatches = Stages.Count(s => string.Equals(s.Name, target, StringComparison.OrdinalIgnoreCase));
+            if (idMatches == 0 && nameMatches == 0) throw new InvalidOperationException("Stage transition on '" + owner.Name + "' references unknown goto target: " + target);
+            if (idMatches + nameMatches > 1) throw new InvalidOperationException("Stage transition on '" + owner.Name + "' references ambiguous goto target: " + target + ". Prefer a unique stage id.");
         }
 
         private void ValidateNamesAndParameters()
@@ -222,7 +255,59 @@ namespace SPNet.Workflow.WfSerializer
     }
 
     public sealed class ChoiceYaml { public string Value { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; }
-    public sealed class StageYaml { public string Name { get; set; } = "Stage"; public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>(); }
+    public sealed class StageYaml
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = "Stage";
+        public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>();
+        public StageTransitionYaml Transition { get; set; } = new StageTransitionYaml();
+        public bool ShouldSerializeTransition() => Transition?.IsSpecified == true;
+
+        public void Validate()
+        {
+            if (string.IsNullOrWhiteSpace(Name)) throw new InvalidOperationException("Stage name is required.");
+            Transition?.Validate(Name);
+        }
+    }
+
+    public sealed class StageTransitionYaml
+    {
+        public List<StageTransitionBranchYaml> Branches { get; set; } = new List<StageTransitionBranchYaml>();
+        public StageTransitionGotoYaml Default { get; set; } = new StageTransitionGotoYaml();
+        public string Goto { get; set; } = string.Empty;
+        public bool IsSpecified => (Branches != null && Branches.Count > 0) || !string.IsNullOrWhiteSpace(Default?.Goto) || !string.IsNullOrWhiteSpace(Goto);
+
+        public void Validate(string stageName)
+        {
+            foreach (var branch in Branches ?? new List<StageTransitionBranchYaml>()) branch.Validate(stageName);
+            if (!string.IsNullOrWhiteSpace(Goto) && !string.IsNullOrWhiteSpace(Default?.Goto)) throw new InvalidOperationException("Stage transition on '" + stageName + "' cannot specify both transition.goto and transition.default.goto.");
+            if (IsSpecified && Branches != null && Branches.Count > 0 && string.IsNullOrWhiteSpace(Default?.Goto) && string.IsNullOrWhiteSpace(Goto)) throw new InvalidOperationException("Stage transition on '" + stageName + "' with branches requires transition.default.goto or transition.goto.");
+            if (!string.IsNullOrWhiteSpace(Goto)) Default = new StageTransitionGotoYaml { Goto = Goto };
+            if (IsSpecified) Default.Validate(stageName);
+        }
+    }
+
+    public sealed class StageTransitionBranchYaml
+    {
+        public ComparisonExpressionYaml Condition { get; set; } = new ComparisonExpressionYaml();
+        public string Goto { get; set; } = string.Empty;
+
+        public void Validate(string stageName)
+        {
+            Condition.Validate("stage transition on '" + stageName + "'");
+            if (string.IsNullOrWhiteSpace(Goto)) throw new InvalidOperationException("Stage transition branch on '" + stageName + "' requires goto.");
+        }
+    }
+
+    public sealed class StageTransitionGotoYaml
+    {
+        public string Goto { get; set; } = string.Empty;
+
+        public void Validate(string stageName)
+        {
+            if (string.IsNullOrWhiteSpace(Goto)) throw new InvalidOperationException("Stage transition default on '" + stageName + "' requires goto.");
+        }
+    }
 
     public sealed class WorkflowParameterYamlTypeConverter : IYamlTypeConverter
     {
@@ -668,6 +753,8 @@ namespace SPNet.Workflow.WfSerializer
         public CallHttpWebServiceActionYaml() { Type = "callHttpWebService"; }
         public ExpressionYaml Address { get; set; } = new ExpressionYaml();
         public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "HTTPGET" };
+        public string RequestContent { get; set; } = string.Empty;
+        public string RequestHeaders { get; set; } = string.Empty;
         public string ResponseStatusCodeTo { get; set; } = string.Empty;
         public string ResponseContentTo { get; set; } = string.Empty;
         public string ResponseHeadersTo { get; set; } = string.Empty;
@@ -890,7 +977,7 @@ namespace SPNet.Workflow.WfSerializer
             Register(factories, y => new DeleteListItemActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml() }, "deleteListItem");
             Register(factories, y => new LookupListItemStringPropertyActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml(), FieldName = y.FieldName ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupListItemStringProperty", "lookupSPListItemStringProperty");
             Register(factories, y => new LookupListItemIntPropertyActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml(), FieldName = y.FieldName ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupListItemIntProperty", "lookupSPListItemIntProperty");
-            Register(factories, y => new CallHttpWebServiceActionYaml { Type = y.Type ?? string.Empty, Address = y.Address ?? new ExpressionYaml(), RequestType = y.RequestType ?? new ExpressionYaml { Literal = "GET" }, ResponseStatusCodeTo = y.ResponseStatusCodeTo ?? y.StatusCodeTo ?? string.Empty, ResponseContentTo = y.ResponseContentTo ?? y.ContentTo ?? string.Empty, ResponseHeadersTo = y.ResponseHeadersTo ?? y.HeadersTo ?? string.Empty }, "callHttpWebService", "callHttp", "http");
+            Register(factories, y => new CallHttpWebServiceActionYaml { Type = y.Type ?? string.Empty, Address = y.Address ?? new ExpressionYaml(), RequestType = y.RequestType ?? new ExpressionYaml { Literal = "GET" }, RequestContent = y.RequestContent ?? y.RequestBody ?? y.BodyVariable ?? string.Empty, RequestHeaders = y.RequestHeaders ?? y.RequestHeader ?? y.HeadersVariable ?? string.Empty, ResponseStatusCodeTo = y.ResponseStatusCodeTo ?? y.StatusCodeTo ?? string.Empty, ResponseContentTo = y.ResponseContentTo ?? y.ContentTo ?? string.Empty, ResponseHeadersTo = y.ResponseHeadersTo ?? y.HeadersTo ?? string.Empty }, "callHttpWebService", "callHttp", "http");
             Register(factories, y => new SendEmailActionYaml { Type = y.Type ?? string.Empty, To = y.To ?? new ExpressionYaml(), Cc = y.Cc ?? new ExpressionYaml { Literal = string.Empty }, Subject = y.Subject ?? new ExpressionYaml { Literal = string.Empty }, Body = y.Body ?? y.BodyExpression ?? new ExpressionYaml { Literal = string.Empty } }, "sendEmail", "email");
             Register(factories, y => new SingleTaskActionYaml { Type = y.Type ?? string.Empty, AssignedTo = y.AssignedTo ?? new ExpressionYaml(), Title = y.Title ?? new ExpressionYaml(), Body = y.TaskBody ?? y.BodyExpression ?? y.Body ?? new ExpressionYaml { Literal = string.Empty }, DueDate = y.DueDate ?? new ExpressionYaml(), AssignmentEmailSubject = y.AssignmentEmailSubject ?? new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" }, AssignmentEmailBody = y.AssignmentEmailBody ?? new ExpressionYaml(), WaitForTaskCompletion = y.WaitForTaskCompletion, WaiveAssignmentEmail = y.WaiveAssignmentEmail, WaiveCancelationEmail = y.WaiveCancelationEmail, ContentTypeId = y.ContentTypeId ?? string.Empty, OutcomeFieldName = y.OutcomeFieldName ?? string.Empty, CompletedStatus = y.CompletedStatus ?? string.Empty, TaskIdTo = y.TaskIdTo ?? string.Empty, OutcomeTo = y.OutcomeTo ?? string.Empty }, "singleTask", "task");
             Register(factories, y => new GetDynamicValuePropertyActionYaml { Type = y.Type ?? string.Empty, Source = y.Source ?? y.From ?? string.Empty, PropertyName = y.PropertyName ?? y.Key ?? new ExpressionYaml(), To = ReadString(y.To), ValueType = y.ValueType ?? string.Empty }, "getDynamicValueProperty", "getDictionaryItem", "getDictionaryValue", "getResponseProperty");
@@ -1018,7 +1105,7 @@ namespace SPNet.Workflow.WfSerializer
             }
             else if (value is CallHttpWebServiceActionYaml callHttp)
             {
-                WriteScalar(emitter, "type", callHttp.Type); WriteObject(emitter, serializer, "address", callHttp.Address); WriteObject(emitter, serializer, "requestType", callHttp.RequestType); WriteScalar(emitter, "responseStatusCodeTo", callHttp.ResponseStatusCodeTo); WriteScalar(emitter, "responseContentTo", callHttp.ResponseContentTo); WriteScalar(emitter, "responseHeadersTo", callHttp.ResponseHeadersTo);
+                WriteScalar(emitter, "type", callHttp.Type); WriteObject(emitter, serializer, "address", callHttp.Address); WriteObject(emitter, serializer, "requestType", callHttp.RequestType); WriteScalar(emitter, "requestContent", callHttp.RequestContent); WriteScalar(emitter, "requestHeaders", callHttp.RequestHeaders); WriteScalar(emitter, "responseStatusCodeTo", callHttp.ResponseStatusCodeTo); WriteScalar(emitter, "responseContentTo", callHttp.ResponseContentTo); WriteScalar(emitter, "responseHeadersTo", callHttp.ResponseHeadersTo);
             }
             else if (value is SendEmailActionYaml email)
             {
@@ -1114,6 +1201,12 @@ namespace SPNet.Workflow.WfSerializer
             public string ItemGuidTo { get; set; } = string.Empty;
             public ExpressionYaml Address { get; set; } = new ExpressionYaml();
             public ExpressionYaml RequestType { get; set; } = new ExpressionYaml { Literal = "HTTPGET" };
+            public string RequestContent { get; set; } = string.Empty;
+            public string RequestBody { get; set; } = string.Empty;
+            public string BodyVariable { get; set; } = string.Empty;
+            public string RequestHeaders { get; set; } = string.Empty;
+            public string RequestHeader { get; set; } = string.Empty;
+            public string HeadersVariable { get; set; } = string.Empty;
             public ExpressionYaml ListId { get; set; } = new ExpressionYaml();
             public string ResponseStatusCodeTo { get; set; } = string.Empty;
             public string ResponseContentTo { get; set; } = string.Empty;
