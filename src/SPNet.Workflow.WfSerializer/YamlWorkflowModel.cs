@@ -34,8 +34,10 @@ namespace SPNet.Workflow.WfSerializer
         public static SpNetToolConfig Load(string path)
         {
             var defaults = File.Exists(Path.Combine("config", "spnet.defaults.yml")) ? Path.Combine("config", "spnet.defaults.yml") : string.Empty;
+            var local = string.IsNullOrWhiteSpace(path) && File.Exists(Path.Combine("config", "spnet.local.yml")) ? Path.Combine("config", "spnet.local.yml") : string.Empty;
             var config = new SpNetToolConfig();
             if (!string.IsNullOrWhiteSpace(defaults)) config.Merge(Read(defaults));
+            if (!string.IsNullOrWhiteSpace(local)) config.Merge(Read(local));
             if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) config.Merge(Read(path));
             return config;
         }
@@ -121,7 +123,7 @@ namespace SPNet.Workflow.WfSerializer
         public void Save(string path)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? Environment.CurrentDirectory);
-            var serializer = new SerializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).WithTypeConverter(new WorkflowActionYamlTypeConverter()).WithTypeConverter(new ExpressionYamlTypeConverter()).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull).Build();
+            var serializer = new SerializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).WithTypeConverter(new WorkflowActionYamlTypeConverter()).WithTypeConverter(new ExpressionYamlTypeConverter()).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull).ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitDefaults).Build();
             File.WriteAllText(path, serializer.Serialize(this));
         }
 
@@ -259,6 +261,7 @@ namespace SPNet.Workflow.WfSerializer
         public string Name { get; set; } = "Stage";
         public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>();
         public StageTransitionYaml Transition { get; set; } = new StageTransitionYaml();
+        public bool ShouldSerializeTransition() => Transition?.IsSpecified == true;
 
         public void Validate()
         {

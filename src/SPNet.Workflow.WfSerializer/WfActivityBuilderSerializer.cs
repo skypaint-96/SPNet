@@ -206,40 +206,60 @@ namespace SPNet.Workflow.WfSerializer
             if (string.IsNullOrWhiteSpace(cacheFolder)) throw new ArgumentException("SharePoint Designer cache folder is required.", nameof(cacheFolder));
             if (!Directory.Exists(cacheFolder)) throw new DirectoryNotFoundException("Cache folder not found: " + cacheFolder);
 
-            using (new CacheAssemblyResolver(Path.GetFullPath(cacheFolder)))
+            if (TryDeserializeWorkflowXaml(inputXamlPath, cacheFolder, out var builder, out var loaded, out var error))
             {
-                LoadManagedDlls(Path.GetFullPath(cacheFolder));
-                var xaml = PrepareXamlForDeserialization(File.ReadAllText(inputXamlPath));
-                try
+                var report = new StringBuilder();
+                report.AppendLine("LoadedType: " + loaded!.GetType().FullName);
+                if (builder != null)
                 {
+                    report.AppendLine("ActivityBuilder.Name: " + builder.Name);
+                    report.AppendLine("Properties: " + builder.Properties.Count);
+                    foreach (var property in builder.Properties) report.AppendLine("  Property: " + property.Name + " Type=" + property.Type);
+                    report.AppendLine("Implementation:");
+                    AppendActivity(report, builder.Implementation, 1);
+                }
+                else if (loaded is Activity activity)
+                {
+                    report.AppendLine("Activity.DisplayName: " + activity.DisplayName);
+                    AppendActivity(report, activity, 1);
+                }
+                return report.ToString();
+            }
+
+            return InspectWorkflowXamlStructurally(File.ReadAllText(inputXamlPath), new InvalidOperationException(error));
+        }
+
+        internal static bool TryDeserializeWorkflowXaml(string inputXamlPath, string cacheFolder, out ActivityBuilder? builder, out object? loaded, out string error)
+        {
+            builder = null;
+            loaded = null;
+            error = string.Empty;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(inputXamlPath)) throw new ArgumentException("Input XAML path is required.", nameof(inputXamlPath));
+                if (!File.Exists(inputXamlPath)) throw new FileNotFoundException("Input XAML not found: " + inputXamlPath, inputXamlPath);
+                if (string.IsNullOrWhiteSpace(cacheFolder)) throw new ArgumentException("SharePoint Designer cache folder is required.", nameof(cacheFolder));
+                if (!Directory.Exists(cacheFolder)) throw new DirectoryNotFoundException("Cache folder not found: " + cacheFolder);
+
+                var resolvedCacheFolder = Path.GetFullPath(cacheFolder);
+                using (new CacheAssemblyResolver(resolvedCacheFolder))
+                {
+                    LoadManagedDlls(resolvedCacheFolder);
+                    var xaml = PrepareXamlForDeserialization(File.ReadAllText(inputXamlPath));
                     using (var textReader = new StringReader(xaml))
                     using (var reader = new XamlXmlReader(textReader))
                     using (var builderReader = ActivityXamlServices.CreateBuilderReader(reader))
                     {
-                        var loaded = XamlServices.Load(builderReader);
-                        var builder = loaded as ActivityBuilder;
-                        var report = new StringBuilder();
-                        report.AppendLine("LoadedType: " + loaded.GetType().FullName);
-                        if (builder != null)
-                        {
-                            report.AppendLine("ActivityBuilder.Name: " + builder.Name);
-                            report.AppendLine("Properties: " + builder.Properties.Count);
-                            foreach (var property in builder.Properties) report.AppendLine("  Property: " + property.Name + " Type=" + property.Type);
-                            report.AppendLine("Implementation:");
-                            AppendActivity(report, builder.Implementation, 1);
-                        }
-                        else if (loaded is Activity activity)
-                        {
-                            report.AppendLine("Activity.DisplayName: " + activity.DisplayName);
-                            AppendActivity(report, activity, 1);
-                        }
-                        return report.ToString();
+                        loaded = XamlServices.Load(builderReader);
+                        builder = loaded as ActivityBuilder;
+                        return true;
                     }
                 }
-                catch (Exception ex)
-                {
-                    return InspectWorkflowXamlStructurally(File.ReadAllText(inputXamlPath), ex);
-                }
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
             }
         }
 
@@ -326,6 +346,7 @@ namespace SPNet.Workflow.WfSerializer
             EnsureConditionExpressionResultPlaceholders(document);
             EnsureOperandExpressionResultPlaceholders(document);
             EnsureConditionOperandDesignerArgumentShape(document);
+            EnsureSpdEndTransitionCustomAttributes(document);
 
             var firstStageContainer = document.Descendants(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes")
                 .Any(e => e.Descendants(XamlNamespace + "String").Any(s => ((string?)s.Attribute(XamlNamespace + "Key")) == "StageAttribute" && ((string?)s ?? string.Empty).StartsWith("StageContainer-", StringComparison.OrdinalIgnoreCase)));
@@ -422,6 +443,49 @@ namespace SPNet.Workflow.WfSerializer
                     new XElement(XamlNamespace + "String",
                         new XAttribute(XamlNamespace + "Key", "StageAttribute"),
                         stageAttributeValue)));
+
+        private static void EnsureSpdEndTransitionCustomAttributes(XDocument document)
+        {
+            foreach (var flowStep in document.Descendants(ActivitiesNamespace + "FlowStep").Where(s => !HasFlowReference(s, "Next")).ToList())
+            {
+                EnsureCustomDictionaryValue(flowStep, "Next", SpdNextSentinel);
+            }
+
+            foreach (var flowDecision in document.Descendants(ActivitiesNamespace + "FlowDecision").ToList())
+            {
+                if (!HasFlowReference(flowDecision, "True")) EnsureCustomDictionaryValue(flowDecision, "True", SpdNextSentinel);
+                if (!HasFlowReference(flowDecision, "False")) EnsureCustomDictionaryValue(flowDecision, "False", SpdNextSentinel);
+            }
+        }
+
+        private static bool HasFlowReference(XElement owner, string propertyName)
+        {
+            return owner.Attribute(propertyName) != null || owner.Element(owner.Name.Namespace + (owner.Name.LocalName + "." + propertyName)) != null;
+        }
+
+        private static void EnsureCustomDictionaryValue(XElement owner, string key, string value)
+        {
+            var attributes = owner.Elements(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes").FirstOrDefault();
+            if (attributes == null)
+            {
+                attributes = new XElement(AuthoringNamespace + "SPDesignerXamlWriter.CustomAttributes",
+                    new XElement(GenericCollectionsNamespace + "Dictionary",
+                        new XAttribute(XamlNamespace + "TypeArguments", "x:String, x:String")));
+                owner.AddFirst(attributes);
+            }
+
+            var dictionary = attributes.Element(GenericCollectionsNamespace + "Dictionary");
+            if (dictionary == null)
+            {
+                dictionary = new XElement(GenericCollectionsNamespace + "Dictionary",
+                    new XAttribute(XamlNamespace + "TypeArguments", "x:String, x:String"));
+                attributes.Add(dictionary);
+            }
+
+            var existing = dictionary.Elements(XamlNamespace + "String").FirstOrDefault(s => string.Equals((string?)s.Attribute(XamlNamespace + "Key"), key, StringComparison.OrdinalIgnoreCase));
+            if (existing == null) dictionary.Add(new XElement(XamlNamespace + "String", new XAttribute(XamlNamespace + "Key", key), value));
+            else if (string.IsNullOrWhiteSpace(existing.Value)) existing.Value = value;
+        }
 
         private static void RemoveEmptyRootCustomAttributes(XElement root)
         {

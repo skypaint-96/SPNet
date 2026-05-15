@@ -826,6 +826,134 @@ stages:
         }
 
         [TestMethod]
+        public void ExportWorkflowYaml_ReconstructsStageFlowTransitionGraph()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-stage-flow-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-stage-flow-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, CreateStageFlowExampleXaml());
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+
+                var yaml = File.ReadAllText(outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.AreEqual(3, workflow.Stages.Count);
+                CollectionAssert.AreEqual(new[] { "First stage", "Second stage", "Third stage" }, workflow.Stages.Select(s => s.Name).ToArray());
+                StringAssert.Contains(yaml, "branches:");
+                StringAssert.Contains(yaml, "goto: Second stage");
+                StringAssert.Contains(yaml, "goto: end");
+                StringAssert.Contains(yaml, "goto: First stage");
+
+                var first = workflow.Stages[0];
+                Assert.IsTrue(first.Transition.IsSpecified, "First stage should export conditional branches and default target.");
+                Assert.AreEqual(2, first.Transition.Branches.Count);
+                Assert.AreEqual("Second stage", first.Transition.Branches[0].Goto);
+                Assert.AreEqual("end", first.Transition.Branches[1].Goto, "One conditional branch should end the workflow.");
+                Assert.AreEqual("Third stage", first.Transition.Default.Goto);
+
+                Assert.AreEqual("First stage", workflow.Stages[1].Transition.Default.Goto, "Second stage should recurse back to the first stage.");
+                Assert.AreEqual("end", workflow.Stages[2].Transition.Default.Goto, "Third stage should explicitly end the non-linear stage flow.");
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
+        public void ExportWorkflowYaml_UsesObjectModelForDownloadedStageFlowReferences()
+        {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
+            var inputPath = FindRepoFile("artifacts", "stage-flow-example.downloaded.formatted.xaml");
+            var formFieldPath = FindRepoFile("artifacts", "stage-flow-example.downloaded.formatted.xaml.formfield.xml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Downloaded stage-flow-example XAML artifact is not available in this checkout.");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-stage-flow-object-model-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath, File.Exists(formFieldPath) ? formFieldPath : string.Empty, cacheFolder);
+
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("WF object-model flowchart export")), "Expected object-model export path to be used.");
+                Assert.AreEqual(3, workflow.Stages.Count);
+                CollectionAssert.AreEqual(new[] { "Stage 1", "Stage 2", "Stage 3" }, workflow.Stages.Select(s => s.Name).ToArray());
+
+                var first = workflow.Stages[0];
+                Assert.IsTrue(first.Transition.IsSpecified, "Stage 1 should export conditional branches and a default target.");
+                Assert.AreEqual(2, first.Transition.Branches.Count);
+                Assert.AreEqual("Stage 2", first.Transition.Branches[0].Goto, "The xddsf numeric condition should go to Stage 2.");
+                Assert.AreEqual("Stage 3", first.Transition.Branches[1].Goto, "The initiator user condition should go to Stage 3.");
+                Assert.AreEqual("end", first.Transition.Default.Goto, "The false tail of the nested decision should end the workflow.");
+
+                Assert.AreEqual("Stage 1", workflow.Stages[1].Transition.Default.Goto, "Stage 2 should recurse back to Stage 1.");
+                Assert.AreEqual("end", workflow.Stages[2].Transition.Default.Goto, "Stage 3 should explicitly end the workflow.");
+            }
+            finally
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
+        public void ExportWorkflowYaml_ObjectModelPreservesDownloadedStageTransitionDefaultAfterTerminalBranch()
+        {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
+            var inputPath = FindRepoFile("artifacts", "workflow.stage-transitions.roundtrip.downloaded.xaml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Downloaded stage-transition roundtrip XAML artifact is not available in this checkout.");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-stage-transition-object-model-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath, string.Empty, cacheFolder);
+
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("WF object-model flowchart export")), "Expected object-model export path to be used.");
+                Assert.AreEqual(3, workflow.Stages.Count);
+                CollectionAssert.AreEqual(new[] { "First stage", "Second stage", "Third stage" }, workflow.Stages.Select(s => s.Name).ToArray());
+
+                var first = workflow.Stages[0];
+                Assert.IsTrue(first.Transition.IsSpecified, "First stage should export conditional branches and a default target.");
+                Assert.AreEqual(2, first.Transition.Branches.Count);
+                Assert.AreEqual("Second stage", first.Transition.Branches[0].Goto, "The approve branch should go to Second stage.");
+                Assert.AreEqual("end", first.Transition.Branches[1].Goto, "The reject branch should end the workflow.");
+                Assert.AreEqual("Third stage", first.Transition.Default.Goto, "A terminal true branch in the nested decision must not force the false/default tail to end.");
+            }
+            finally
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_OmitsTransitionsForPureLinearFlowchartStages()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-linear-flow-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-linear-flow-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, CreateLinearFlowchartXaml());
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+
+                var yaml = File.ReadAllText(outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.AreEqual(2, workflow.Stages.Count);
+                CollectionAssert.AreEqual(new[] { "Linear first", "Linear second" }, workflow.Stages.Select(s => s.Name).ToArray());
+                Assert.IsFalse(workflow.Stages.Any(s => s.Transition.IsSpecified), "Pure linear stage flows should not emit explicit YAML transitions.");
+                Assert.IsFalse(yaml.Contains("transition:"), "Pure linear stage flow YAML should omit transition blocks.");
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
         public void PrepareXamlForDeserialization_MapsGenericMicrosoftExpressionComparisons()
         {
             var prepared = WfActivityBuilderSerializer.PrepareXamlForDeserializationForTest(@"<Activity x:Class=""ComparisonWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""><While><While.Condition><p:IsLessThan x:TypeArguments=""x:Double""><p:IsLessThan.Left><InArgument x:TypeArguments=""x:Double"">1</InArgument></p:IsLessThan.Left><p:IsLessThan.Right><InArgument x:TypeArguments=""x:Double""><p:Convert x:TypeArguments=""x:Int32, x:Double""><p:Convert.Input><InArgument x:TypeArguments=""x:Int32"">2</InArgument></p:Convert.Input></p:Convert></InArgument></p:IsLessThan.Right></p:IsLessThan></While.Condition></While></Activity>");
@@ -866,10 +994,21 @@ stages:
             return Path.Combine(relativeParts);
         }
 
+        private static string CreateStageFlowExampleXaml() => @"<Activity x:Class=""StageFlowExample.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Flowchart StartNode=""{x:Reference stage1}""><FlowStep x:Name=""stage1"" Next=""{x:Reference approveDecision}""><Sequence DisplayName=""First stage""><local:WriteToHistory Message=""first stage"" /></Sequence></FlowStep><FlowDecision x:Name=""approveDecision"" True=""{x:Reference stage2}"" False=""{x:Reference rejectDecision}""><FlowDecision.Condition><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualString Text=""approve""><p:IsEqualString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""outcome"" /></InArgument></p:IsEqualString.Input></p:IsEqualString></InArgument></FlowDecision.Condition></FlowDecision><FlowDecision x:Name=""rejectDecision"" False=""{x:Reference stage3}""><FlowDecision.Condition><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualString Text=""reject""><p:IsEqualString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""outcome"" /></InArgument></p:IsEqualString.Input></p:IsEqualString></InArgument></FlowDecision.Condition></FlowDecision><FlowStep x:Name=""stage2"" Next=""{x:Reference stage1}""><Sequence DisplayName=""Second stage""><local:WriteToHistory Message=""second stage"" /></Sequence></FlowStep><FlowStep x:Name=""stage3""><Sequence DisplayName=""Third stage""><local:WriteToHistory Message=""third stage"" /></Sequence></FlowStep></Flowchart></Activity>";
+
+        private static string CreateLinearFlowchartXaml() => @"<Activity x:Class=""LinearFlowExample.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Flowchart StartNode=""{x:Reference linear1}""><FlowStep x:Name=""linear1"" Next=""{x:Reference linear2}""><Sequence DisplayName=""Linear first""><local:WriteToHistory Message=""linear first"" /></Sequence></FlowStep><FlowStep x:Name=""linear2""><Sequence DisplayName=""Linear second""><local:WriteToHistory Message=""linear second"" /></Sequence></FlowStep></Flowchart></Activity>";
+
         private static string ReadDesignerId(XElement element)
         {
             return element.Elements().FirstOrDefault(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes")
                 ?.Descendants().FirstOrDefault(e => e.Name.LocalName == "String" && string.Equals((string?)e.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")), "Id", StringComparison.OrdinalIgnoreCase))
+                ?.Value ?? string.Empty;
+        }
+
+        private static string ReadDesignerCustomAttribute(XElement element, string key)
+        {
+            return element.Elements().FirstOrDefault(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes")
+                ?.Descendants().FirstOrDefault(e => e.Name.LocalName == "String" && string.Equals((string?)e.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")), key, StringComparison.OrdinalIgnoreCase))
                 ?.Value ?? string.Empty;
         }
 
@@ -1123,6 +1262,21 @@ stages:
             Assert.IsFalse(normalized.Contains("VisualBasicReference"), "Generated metadata output should not contain raw VisualBasicReference.");
             Assert.IsFalse(normalized.Contains("CSharpValue"), "Generated metadata output should not contain raw CSharpValue.");
             Assert.IsFalse(normalized.Contains("CSharpReference"), "Generated metadata output should not contain raw CSharpReference.");
+        }
+
+        [TestMethod]
+        public void AddSharePointDesignerMetadata_EmitsSpdEndSentinelForTerminalStageTransitions()
+        {
+            var xaml = @"<Activity x:Class=""EndTransitionWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Flowchart StartNode=""{x:Reference stage1}""><FlowStep x:Name=""stage1"" Next=""{x:Reference decision1}""><Sequence DisplayName=""Stage 1""><local:WriteToHistory Message=""first"" /></Sequence></FlowStep><FlowDecision x:Name=""decision1"" False=""{x:Reference stage2}""><FlowDecision.Condition><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualString Text=""end""><p:IsEqualString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""outcome"" /></InArgument></p:IsEqualString.Input></p:IsEqualString></InArgument></FlowDecision.Condition></FlowDecision><FlowStep x:Name=""stage2""><Sequence DisplayName=""Stage 2""><local:WriteToHistory Message=""second"" /></Sequence></FlowStep></Flowchart></Activity>";
+
+            var normalized = WfActivityBuilderSerializer.AddSharePointDesignerMetadata(xaml, "EndTransitionWorkflow");
+            var document = XDocument.Parse(normalized);
+            var terminalFlowStep = document.Descendants().Single(e => e.Name.LocalName == "FlowStep" && (string?)e.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "stage2");
+            var decision = document.Descendants().Single(e => e.Name.LocalName == "FlowDecision");
+
+            Assert.AreEqual("4294967294", ReadDesignerCustomAttribute(terminalFlowStep, "Next"), "Terminal FlowStep nodes require SPD-visible Next=end sentinel metadata.");
+            Assert.AreEqual("4294967294", ReadDesignerCustomAttribute(decision, "True"), "Missing FlowDecision.True end transitions require SPD-visible True=end sentinel metadata.");
+            Assert.AreEqual(string.Empty, ReadDesignerCustomAttribute(decision, "False"), "Non-terminal FlowDecision.False transitions must remain represented by the real WF reference, not sentinel metadata.");
         }
 
         [TestMethod]
