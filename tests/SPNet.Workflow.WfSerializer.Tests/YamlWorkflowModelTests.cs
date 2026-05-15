@@ -420,6 +420,65 @@ stages:
         }
 
         [TestMethod]
+        public void Load_DeepWorkflowExampleDynamicValuesSampleCoversTypedDeepReadsAndWrites()
+        {
+            var workflow = WorkflowYaml.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "workflow.deepworkflowexample-dynamic-values.yml")));
+
+            Assert.AreEqual("deepworkflowexample", workflow.Name);
+            Assert.AreEqual("deepworkflowexample", workflow.Metadata!.DisplayName);
+
+            var actions = workflow.Stages.SelectMany(s => s.Actions).ToList();
+            Assert.AreEqual(5, actions.OfType<BuildDynamicValueActionYaml>().Count());
+            Assert.AreEqual(15, actions.OfType<SetDynamicValuePropertyActionYaml>().Count());
+
+            var leafBuild = actions.OfType<BuildDynamicValueActionYaml>().Single(a => a.To == "leafValue");
+            CollectionAssert.AreEquivalent(
+                new[] { "String", "Int32", "Double", "Boolean", "DateTime", "DynamicValue" },
+                leafBuild.Entries.Select(e => e.ValueType).Distinct().ToArray(),
+                "Leaf payload must demonstrate explicit valueType casts for supported scalar and DynamicValue entries.");
+
+            var writes = actions.OfType<SetDynamicValuePropertyActionYaml>().ToList();
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Leaf" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Audit" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "DueDate" && a.ValueType == "DateTime" && a.Value.Type == "parseDate"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Title" && a.To == "updatedRootWithSlashString" && a.ValueType == "String"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Count" && a.To == "updatedRootWithSlashNumber" && a.ValueType == "Int32" && Convert.ToInt32(a.Value.Literal) == 11));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Enabled" && a.To == "updatedRootWithSlashBoolean" && a.ValueType == "Boolean" && Convert.ToBoolean(a.Value.Literal)));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Items" && a.To == "updatedRootWithItems" && a.ValueType == "DynamicValue" && a.Value.Variable == "itemsValue"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Items(1)/Status" && a.To == "updatedRootWithArraySlashWrite" && a.ValueType == "String" && Convert.ToString(a.Value.Literal) == "Reviewed through parenthesized array index"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/ArrayFirstTitleCopy" && a.To == "updatedRootWithCopiedArrayValue" && a.ValueType == "String" && a.Value.Type == "getDynamicValueProperty" && a.Value.Source!.Variable == "updatedRootWithArraySlashWrite" && a.Value.PropertyName == "Branch/Items(0)/Title"));
+
+            var reads = actions.OfType<GetDynamicValuePropertyActionYaml>().ToList();
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Title" && a.To == "readSlashTitle" && a.ValueType == "String"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Count" && a.To == "readSlashCount" && a.ValueType == "Int32"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Enabled" && a.To == "readSlashEnabled" && a.ValueType == "Boolean"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Items(0)/Title" && a.To == "readFirstItemTitle" && a.ValueType == "String"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Items(1)/Status" && a.To == "readSecondItemStatus" && a.ValueType == "String"));
+            Assert.IsTrue(reads.Any(a => a.Source == "itemsValue" && Convert.ToString(a.PropertyName.Literal) == "(0)" && a.To == "readFirstItemValue" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Items(0)/Tags/(1)" && a.To == "readFirstItemSecondTag" && a.ValueType == "String"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "Count" && a.To == "readCount" && a.ValueType == "Int32"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "Amount" && a.To == "readAmount" && a.ValueType == "Double"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "Enabled" && a.To == "readEnabled" && a.ValueType == "Boolean"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "DueDate" && a.To == "readDueDate" && a.ValueType == "DateTime"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "Lookup" && a.To == "readLookupLikeValue" && a.ValueType == "DynamicValue"));
+
+            Assert.IsTrue(actions.OfType<AssignActionYaml>().Any(a => a.To == "hasAudit" && a.Value.Type == "containsDynamicValueProperty"));
+            Assert.IsTrue(actions.OfType<AssignActionYaml>().Any(a => a.To == "isAuditEmpty" && a.Value.Type == "isEmptyDynamicValue"));
+            Assert.IsTrue(actions.OfType<AssignActionYaml>().Any(a => a.To == "itemsValue" && a.Value.Type == "parseDynamicValue"));
+            Assert.IsTrue(actions.OfType<AssignActionYaml>().Any(a => a.To == "firstItemHistorySummary" && a.Value.Type == "concatString" && a.Value.Values.Any(v => v.Type == "getDynamicValueProperty" && v.Source!.Variable == "itemsValue" && v.PropertyName == "(0)/Title")));
+            var conditional = actions.OfType<IfActionYaml>().Single(a => a.Condition.Left.Type == "getDynamicValueProperty");
+            Assert.AreEqual("Branch/Items(0)/Status", conditional.Condition.Left.PropertyName);
+            Assert.AreEqual("updatedRootWithCopiedArrayValue", conditional.Condition.Left.Source!.Variable);
+            Assert.AreEqual("String", conditional.Condition.Left.ValueType);
+            Assert.IsTrue(conditional.Then.OfType<WriteHistoryActionYaml>().Any(a => a.Message.Variable == "firstItemHistorySummary"), "Conditional branch must use inline array-path output in another realistic history-only context.");
+            Assert.IsTrue(actions.OfType<CountDynamicValueItemsActionYaml>().Any(a => a.Source == "readLeafValue" && a.To == "readLeafItemCount"));
+
+            var history = actions.OfType<WriteHistoryActionYaml>().Single(a => a.Message.Values.Count > 0);
+            Assert.IsTrue(history.Message.Values.Any(v => v.Type == "getDynamicValueProperty" && v.Source!.Variable == "updatedRootWithCopiedArrayValue" && v.PropertyName == "Branch/Leaf/Title" && v.ValueType == "String"), "History output must demonstrate inline slash-path getDynamicValueProperty usage without an intermediate variable.");
+        }
+
+        [TestMethod]
         public void Build_DeepDynamicValuesSampleUsesDynamicValueArgumentForNestedPropertyWrites()
         {
             var cacheFolder = Environment.GetEnvironmentVariable("SPNET_SPD_CACHE");

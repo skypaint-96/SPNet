@@ -52,6 +52,7 @@ param(
     [string]$BackupDirectory,
     [string]$WorkflowNamePrefix,
     [switch]$IncludeSubscriptions,
+    [switch]$DryRun,
     [switch]$Force
 )
 
@@ -228,6 +229,11 @@ function Invoke-SPNetCsomPublisher {
     if ($AuthMode -eq 'CookieHeader' -and [string]::IsNullOrWhiteSpace($PublisherCookieHeader)) { throw '-AuthMode CookieHeader requires -PublisherCookieHeader.' }
     if ($AuthMode -eq 'Credentials' -and [string]::IsNullOrWhiteSpace($PublisherUsername)) { throw '-AuthMode Credentials requires -PublisherUsername.' }
     if ($AuthMode -eq 'WebLogin' -and (-not [string]::IsNullOrWhiteSpace($PublisherCookieHeader) -or -not [string]::IsNullOrWhiteSpace($PublisherUsername))) { Write-Warning 'Explicit publisher auth input was supplied with -AuthMode WebLogin; explicit cookie/credentials will be passed through and WebLogin bootstrap may be skipped.' }
+
+    if ($DryRun) {
+        [Console]::Out.WriteLine('SPNET_RESULT ' + (@{ Action = 'Publish'; Status = 'DryRun'; WorkflowName = $WorkflowName; XamlPath = $XamlPath; MetadataJsonPath = $MetadataJsonPath; TargetType = $TargetType; StartManual = $StartManual; StartOnCreated = $StartOnCreated; StartOnUpdated = $StartOnUpdated; IfExists = $IfExists; PublisherMode = $PublisherMode; PublisherTool = $publisherExe; AuthMode = $AuthMode; LiveAuthenticationPerformed = $false; PublishAttempted = $false } | ConvertTo-Json -Compress -Depth 5))
+        return $true
+    }
 
     if ($AuthMode -eq 'WebLogin' -and [string]::IsNullOrWhiteSpace($PublisherCookieHeader) -and [string]::IsNullOrWhiteSpace($PublisherUsername)) {
         Write-SPNetAuthDiagnostics -Stage 'BeforeBootstrap' -Mode $AuthMode -Detail 'Using PnP WebLogin, then PnP CookieContainer or WinINet cookie handoff for CSOM publisher.'

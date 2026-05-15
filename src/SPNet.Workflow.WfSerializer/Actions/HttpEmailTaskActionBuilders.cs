@@ -94,13 +94,23 @@ namespace SPNet.Workflow.WfSerializer
         private static Argument ToDynamicValuePropertyArgument(ExpressionYaml expression, string valueType, ValueExpressionTypes valueExpressionTypes)
         {
             var normalized = (valueType ?? expression.ValueType ?? string.Empty).Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
-            if (normalized == "dynamicvalue" || normalized == "dictionary") return (Argument)ActivityReflectionWriter.CreateInArgumentReference(valueExpressionTypes.DynamicValue, expression.Variable ?? string.Empty);
+            if (normalized == "dynamicvalue" || normalized == "dictionary")
+            {
+                if (!string.IsNullOrWhiteSpace(expression.Variable)) return (Argument)ActivityReflectionWriter.CreateInArgumentReference(valueExpressionTypes.DynamicValue, expression.Variable ?? string.Empty);
+                return ToTypedDynamicValueInArgument(expression, valueExpressionTypes);
+            }
             if (normalized == "boolean" || normalized == "bool" || expression.Literal is bool) return ToInArgument<bool>(expression, valueExpressionTypes);
             if (normalized == "int32" || normalized == "int" || normalized == "integer" || expression.Literal is int) return ToInArgument<int>(expression, valueExpressionTypes);
             if (normalized == "datetime" || normalized == "date" || expression.Literal is DateTime) return ToInArgument<DateTime>(expression, valueExpressionTypes);
             if (normalized == "guid" || expression.Literal is Guid) return ToInArgument<Guid>(expression, valueExpressionTypes);
             if (normalized == "double" || normalized == "number") return ToInArgument<double>(expression, valueExpressionTypes);
             return ToInArgument<string>(expression, valueExpressionTypes);
+        }
+
+        private static Argument ToTypedDynamicValueInArgument(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
+        {
+            var method = typeof(WfActivityBuilderSerializer).GetMethod("ToInArgument", BindingFlags.NonPublic | BindingFlags.Static) ?? throw new InvalidOperationException("ToInArgument method was not found.");
+            return (Argument)(method.MakeGenericMethod(valueExpressionTypes.DynamicValue).Invoke(null, new object[] { expression, valueExpressionTypes }) ?? throw new InvalidOperationException("Could not create DynamicValue InArgument."));
         }
 
         private static Activity BuildCallHttpWebService(CallHttpWebServiceActionYaml action, Type callHttpWebServiceType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes)
