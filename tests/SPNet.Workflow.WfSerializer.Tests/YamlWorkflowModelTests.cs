@@ -420,6 +420,99 @@ stages:
         }
 
         [TestMethod]
+        public void Load_StageTransitionsSamplePreservesConditionalRecursiveAndEndTargets()
+        {
+            var workflow = WorkflowYaml.Load(FindRepoFile("samples", "workflow.stage-transitions.yml"));
+
+            Assert.AreEqual(3, workflow.Stages.Count);
+            CollectionAssert.AreEqual(new[] { "first", "second", "third" }, workflow.Stages.Select(s => s.Id).ToArray());
+
+            var first = workflow.Stages[0];
+            Assert.AreEqual("First stage", first.Name);
+            Assert.IsTrue(first.Transition.IsSpecified);
+            Assert.AreEqual(2, first.Transition.Branches.Count);
+            Assert.AreEqual("second", first.Transition.Branches[0].Goto);
+            Assert.AreEqual("isEqualString", first.Transition.Branches[0].Condition.Type);
+            Assert.AreEqual("outcome", first.Transition.Branches[0].Condition.Left.Variable);
+            Assert.AreEqual("approve", first.Transition.Branches[0].Condition.Right.Literal);
+            Assert.AreEqual("end", first.Transition.Branches[1].Goto);
+            Assert.AreEqual("reject", first.Transition.Branches[1].Condition.Right.Literal);
+            Assert.AreEqual("third", first.Transition.Default.Goto);
+
+            Assert.AreEqual("first", workflow.Stages[1].Transition.Default.Goto, "Second stage should recurse back to the first stage.");
+            Assert.AreEqual("end", workflow.Stages[2].Transition.Default.Goto, "Third stage should end the workflow.");
+        }
+
+        [TestMethod]
+        public void Load_RejectsStageTransitionBranchesWithoutDefaultTarget()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: MissingDefaultTransition
+stages:
+  - id: first
+    name: First stage
+    actions:
+      - type: writeHistory
+        message: hello
+    transition:
+      branches:
+        - condition:
+            type: isEqualString
+            left: approve
+            right: approve
+          goto: end
+"));
+
+            StringAssert.Contains(ex.Message, "requires transition.default.goto or transition.goto");
+        }
+
+        [TestMethod]
+        public void Load_RejectsUnknownStageTransitionTarget()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: UnknownTransitionTarget
+stages:
+  - id: first
+    name: First stage
+    actions:
+      - type: writeHistory
+        message: hello
+    transition:
+      goto: missing-stage
+"));
+
+            StringAssert.Contains(ex.Message, "references unknown goto target: missing-stage");
+        }
+
+        [TestMethod]
+        public void Load_RejectsAmbiguousStageTransitionNameTarget()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: AmbiguousTransitionTarget
+stages:
+  - id: first
+    name: First stage
+    actions:
+      - type: writeHistory
+        message: hello
+    transition:
+      goto: Duplicate stage
+  - id: duplicate-a
+    name: Duplicate stage
+    actions:
+      - type: writeHistory
+        message: second
+  - id: duplicate-b
+    name: Duplicate stage
+    actions:
+      - type: writeHistory
+        message: third
+"));
+
+            StringAssert.Contains(ex.Message, "references ambiguous goto target: Duplicate stage");
+        }
+
+        [TestMethod]
         public void Load_DeepWorkflowExampleDynamicValuesSampleCoversTypedDeepReadsAndWrites()
         {
             var workflow = WorkflowYaml.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "workflow.deepworkflowexample-dynamic-values.yml")));

@@ -8,7 +8,7 @@ namespace SPNet.Workflow.WfSerializer
 {
     public static partial class WfActivityBuilderSerializer
     {
-        private static Activity<bool> BuildBooleanExpression(ComparisonExpressionYaml condition, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes)
+        internal static Activity<bool> BuildBooleanExpression(ComparisonExpressionYaml condition, ValueExpressionTypes valueExpressionTypes, ComparisonExpressionTypes expressionTypes)
         {
             return CreateExpressionFactory(valueExpressionTypes).BuildBooleanExpression(condition, expressionTypes);
         }

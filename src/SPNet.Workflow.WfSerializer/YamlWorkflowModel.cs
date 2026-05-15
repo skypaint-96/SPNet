@@ -141,8 +141,39 @@ namespace SPNet.Workflow.WfSerializer
             if (!string.Equals(SchemaVersion, "spnet.workflow/v1", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unsupported schemaVersion: " + SchemaVersion);
             if (string.IsNullOrWhiteSpace(EffectiveDisplayName)) throw new InvalidOperationException("Workflow name is required.");
             if (Stages == null || Stages.Count == 0) throw new InvalidOperationException("At least one stage is required.");
+            ValidateStages();
             ValidateNamesAndParameters();
             foreach (var action in Stages.SelectMany(s => s.Actions ?? new List<WorkflowActionYaml>())) action.Validate();
+        }
+
+        private void ValidateStages()
+        {
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var stage in Stages ?? new List<StageYaml>())
+            {
+                stage.Validate();
+                if (!string.IsNullOrWhiteSpace(stage.Id) && !ids.Add(stage.Id)) throw new InvalidOperationException("Duplicate stage id: " + stage.Id);
+                if (!string.IsNullOrWhiteSpace(stage.Name)) names.Add(stage.Name);
+            }
+
+            foreach (var stage in Stages ?? new List<StageYaml>())
+            {
+                var transition = stage.Transition;
+                if (transition == null || !transition.IsSpecified) continue;
+                foreach (var branch in transition.Branches ?? new List<StageTransitionBranchYaml>()) ValidateStageTarget(stage, branch.Goto);
+                ValidateStageTarget(stage, transition.Default.Goto);
+            }
+        }
+
+        private void ValidateStageTarget(StageYaml owner, string target)
+        {
+            if (string.IsNullOrWhiteSpace(target)) throw new InvalidOperationException("Stage transition on '" + owner.Name + "' requires a non-empty goto target.");
+            if (string.Equals(target, "end", StringComparison.OrdinalIgnoreCase)) return;
+            var idMatches = Stages.Count(s => string.Equals(s.Id, target, StringComparison.OrdinalIgnoreCase));
+            var nameMatches = Stages.Count(s => string.Equals(s.Name, target, StringComparison.OrdinalIgnoreCase));
+            if (idMatches == 0 && nameMatches == 0) throw new InvalidOperationException("Stage transition on '" + owner.Name + "' references unknown goto target: " + target);
+            if (idMatches + nameMatches > 1) throw new InvalidOperationException("Stage transition on '" + owner.Name + "' references ambiguous goto target: " + target + ". Prefer a unique stage id.");
         }
 
         private void ValidateNamesAndParameters()
@@ -222,7 +253,58 @@ namespace SPNet.Workflow.WfSerializer
     }
 
     public sealed class ChoiceYaml { public string Value { get; set; } = string.Empty; public string DisplayName { get; set; } = string.Empty; }
-    public sealed class StageYaml { public string Name { get; set; } = "Stage"; public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>(); }
+    public sealed class StageYaml
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = "Stage";
+        public List<WorkflowActionYaml> Actions { get; set; } = new List<WorkflowActionYaml>();
+        public StageTransitionYaml Transition { get; set; } = new StageTransitionYaml();
+
+        public void Validate()
+        {
+            if (string.IsNullOrWhiteSpace(Name)) throw new InvalidOperationException("Stage name is required.");
+            Transition?.Validate(Name);
+        }
+    }
+
+    public sealed class StageTransitionYaml
+    {
+        public List<StageTransitionBranchYaml> Branches { get; set; } = new List<StageTransitionBranchYaml>();
+        public StageTransitionGotoYaml Default { get; set; } = new StageTransitionGotoYaml();
+        public string Goto { get; set; } = string.Empty;
+        public bool IsSpecified => (Branches != null && Branches.Count > 0) || !string.IsNullOrWhiteSpace(Default?.Goto) || !string.IsNullOrWhiteSpace(Goto);
+
+        public void Validate(string stageName)
+        {
+            foreach (var branch in Branches ?? new List<StageTransitionBranchYaml>()) branch.Validate(stageName);
+            if (!string.IsNullOrWhiteSpace(Goto) && !string.IsNullOrWhiteSpace(Default?.Goto)) throw new InvalidOperationException("Stage transition on '" + stageName + "' cannot specify both transition.goto and transition.default.goto.");
+            if (IsSpecified && Branches != null && Branches.Count > 0 && string.IsNullOrWhiteSpace(Default?.Goto) && string.IsNullOrWhiteSpace(Goto)) throw new InvalidOperationException("Stage transition on '" + stageName + "' with branches requires transition.default.goto or transition.goto.");
+            if (!string.IsNullOrWhiteSpace(Goto)) Default = new StageTransitionGotoYaml { Goto = Goto };
+            if (IsSpecified) Default.Validate(stageName);
+        }
+    }
+
+    public sealed class StageTransitionBranchYaml
+    {
+        public ComparisonExpressionYaml Condition { get; set; } = new ComparisonExpressionYaml();
+        public string Goto { get; set; } = string.Empty;
+
+        public void Validate(string stageName)
+        {
+            Condition.Validate("stage transition on '" + stageName + "'");
+            if (string.IsNullOrWhiteSpace(Goto)) throw new InvalidOperationException("Stage transition branch on '" + stageName + "' requires goto.");
+        }
+    }
+
+    public sealed class StageTransitionGotoYaml
+    {
+        public string Goto { get; set; } = string.Empty;
+
+        public void Validate(string stageName)
+        {
+            if (string.IsNullOrWhiteSpace(Goto)) throw new InvalidOperationException("Stage transition default on '" + stageName + "' requires goto.");
+        }
+    }
 
     public sealed class WorkflowParameterYamlTypeConverter : IYamlTypeConverter
     {
