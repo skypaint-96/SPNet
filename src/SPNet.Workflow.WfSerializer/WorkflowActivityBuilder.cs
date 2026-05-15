@@ -4,6 +4,7 @@ using System.Activities.Expressions;
 using System.Activities.Statements;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 
 namespace SPNet.Workflow.WfSerializer
 {
@@ -75,17 +76,63 @@ namespace SPNet.Workflow.WfSerializer
         private Flowchart BuildFlowchart(WorkflowYaml workflow, WorkflowActivityBuildContext context)
         {
             var flowchart = new Flowchart();
-            FlowStep? previous = null;
-            foreach (var stageModel in workflow.Stages)
+            var stages = workflow.Stages ?? new List<StageYaml>();
+            var stepsByStage = new Dictionary<StageYaml, FlowStep>();
+            var targetMap = new Dictionary<string, FlowStep>(StringComparer.OrdinalIgnoreCase);
+            foreach (var stageModel in stages)
             {
                 var step = BuildStageStep(stageModel, context);
+                stepsByStage[stageModel] = step;
                 flowchart.Nodes.Add(step);
                 if (flowchart.StartNode == null) flowchart.StartNode = step;
-                if (previous != null) previous.Next = step;
-                previous = step;
+                if (!string.IsNullOrWhiteSpace(stageModel.Id)) targetMap[stageModel.Id] = step;
+                if (!string.IsNullOrWhiteSpace(stageModel.Name) && !targetMap.ContainsKey(stageModel.Name)) targetMap[stageModel.Name] = step;
+            }
+
+            var hasExplicitTransitions = stages.Any(s => s.Transition != null && s.Transition.IsSpecified);
+            for (var i = 0; i < stages.Count; i++)
+            {
+                var stage = stages[i];
+                var step = stepsByStage[stage];
+                var linearNext = i + 1 < stages.Count ? stepsByStage[stages[i + 1]] : null;
+                if (!hasExplicitTransitions || stage.Transition == null || !stage.Transition.IsSpecified)
+                {
+                    step.Next = linearNext;
+                    continue;
+                }
+
+                step.Next = BuildTransitionNode(stage, stage.Transition, targetMap, flowchart, context);
             }
 
             return flowchart;
+        }
+
+        private static FlowNode? BuildTransitionNode(StageYaml stage, StageTransitionYaml transition, IReadOnlyDictionary<string, FlowStep> targetMap, Flowchart flowchart, WorkflowActivityBuildContext context)
+        {
+            FlowNode? next = ResolveTransitionTarget(stage, transition.Default.Goto, targetMap);
+            var branches = transition.Branches ?? new List<StageTransitionBranchYaml>();
+            for (var i = branches.Count - 1; i >= 0; i--)
+            {
+                var branch = branches[i];
+                var decision = new FlowDecision
+                {
+                    DisplayName = (string.IsNullOrWhiteSpace(stage.Name) ? "Stage" : stage.Name) + " transition",
+                    Condition = WfActivityBuilderSerializer.BuildBooleanExpression(branch.Condition, context.ValueExpressionTypes, context.ComparisonExpressionTypes),
+                    True = ResolveTransitionTarget(stage, branch.Goto, targetMap),
+                    False = next
+                };
+                flowchart.Nodes.Add(decision);
+                next = decision;
+            }
+
+            return next;
+        }
+
+        private static FlowNode? ResolveTransitionTarget(StageYaml stage, string target, IReadOnlyDictionary<string, FlowStep> targetMap)
+        {
+            if (string.Equals(target, "end", StringComparison.OrdinalIgnoreCase)) return null;
+            if (targetMap.TryGetValue(target, out var node)) return node;
+            throw new InvalidOperationException("Stage transition on '" + stage.Name + "' references unknown goto target: " + target);
         }
 
         private FlowStep BuildStageStep(StageYaml stageModel, WorkflowActivityBuildContext context)

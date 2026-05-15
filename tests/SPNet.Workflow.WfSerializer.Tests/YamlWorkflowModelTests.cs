@@ -367,6 +367,33 @@ stages:
         }
 
         [TestMethod]
+        public void Load_AllowsHttpPostRequestContentAndHeadersVariables()
+        {
+            var workflow = LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: HttpPostShape
+variables:
+  - name: requestBody
+    type: DynamicValue
+  - name: requestHeaders
+    type: DynamicValue
+stages:
+  - name: Stage 1
+    actions:
+      - type: callHttpWebService
+        address: https://example.invalid/_api/test
+        requestType: POST
+        requestContent: requestBody
+        requestHeaders: requestHeaders
+        responseStatusCodeTo: responseCode
+");
+
+            var action = workflow.Stages.Single().Actions.OfType<CallHttpWebServiceActionYaml>().Single();
+            Assert.AreEqual("requestBody", action.RequestContent);
+            Assert.AreEqual("requestHeaders", action.RequestHeaders);
+            Assert.AreEqual("responseCode", action.ResponseStatusCodeTo);
+        }
+
+        [TestMethod]
         public void Load_DeepDynamicValuesSampleReadsAndWritesThreeNestedLayers()
         {
             var workflow = WorkflowYaml.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "workflow.experimental-deep-dynamic-values.yml")));
@@ -390,6 +417,158 @@ stages:
             CollectionAssert.AreEqual(new[] { "Layer2", "Layer3", "Title", "Layer2/Layer3/Title" }, reads.Select(a => Convert.ToString(a.PropertyName.Literal)).ToArray());
             CollectionAssert.AreEqual(new[] { "readLayer2", "readLayer3", "readBackDeepTitle", "readBackSlashPathTitle" }, reads.Select(a => a.To).ToArray());
             Assert.IsTrue(workflow.Variables.Any(v => v.Name == "readBackSlashPathTitle" && v.Type == "String"), "Slash-path read result must be represented as a string variable in the YAML model.");
+        }
+
+        [TestMethod]
+        public void Load_StageTransitionsSamplePreservesConditionalRecursiveAndEndTargets()
+        {
+            var workflow = WorkflowYaml.Load(FindRepoFile("samples", "workflow.stage-transitions.yml"));
+
+            Assert.AreEqual(3, workflow.Stages.Count);
+            CollectionAssert.AreEqual(new[] { "first", "second", "third" }, workflow.Stages.Select(s => s.Id).ToArray());
+
+            var first = workflow.Stages[0];
+            Assert.AreEqual("First stage", first.Name);
+            Assert.IsTrue(first.Transition.IsSpecified);
+            Assert.AreEqual(2, first.Transition.Branches.Count);
+            Assert.AreEqual("second", first.Transition.Branches[0].Goto);
+            Assert.AreEqual("isEqualString", first.Transition.Branches[0].Condition.Type);
+            Assert.AreEqual("outcome", first.Transition.Branches[0].Condition.Left.Variable);
+            Assert.AreEqual("approve", first.Transition.Branches[0].Condition.Right.Literal);
+            Assert.AreEqual("end", first.Transition.Branches[1].Goto);
+            Assert.AreEqual("reject", first.Transition.Branches[1].Condition.Right.Literal);
+            Assert.AreEqual("third", first.Transition.Default.Goto);
+
+            Assert.AreEqual("first", workflow.Stages[1].Transition.Default.Goto, "Second stage should recurse back to the first stage.");
+            Assert.AreEqual("end", workflow.Stages[2].Transition.Default.Goto, "Third stage should end the workflow.");
+        }
+
+        [TestMethod]
+        public void Load_RejectsStageTransitionBranchesWithoutDefaultTarget()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: MissingDefaultTransition
+stages:
+  - id: first
+    name: First stage
+    actions:
+      - type: writeHistory
+        message: hello
+    transition:
+      branches:
+        - condition:
+            type: isEqualString
+            left: approve
+            right: approve
+          goto: end
+"));
+
+            StringAssert.Contains(ex.Message, "requires transition.default.goto or transition.goto");
+        }
+
+        [TestMethod]
+        public void Load_RejectsUnknownStageTransitionTarget()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: UnknownTransitionTarget
+stages:
+  - id: first
+    name: First stage
+    actions:
+      - type: writeHistory
+        message: hello
+    transition:
+      goto: missing-stage
+"));
+
+            StringAssert.Contains(ex.Message, "references unknown goto target: missing-stage");
+        }
+
+        [TestMethod]
+        public void Load_RejectsAmbiguousStageTransitionNameTarget()
+        {
+            var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(@"schemaVersion: spnet.workflow/v1
+name: AmbiguousTransitionTarget
+stages:
+  - id: first
+    name: First stage
+    actions:
+      - type: writeHistory
+        message: hello
+    transition:
+      goto: Duplicate stage
+  - id: duplicate-a
+    name: Duplicate stage
+    actions:
+      - type: writeHistory
+        message: second
+  - id: duplicate-b
+    name: Duplicate stage
+    actions:
+      - type: writeHistory
+        message: third
+"));
+
+            StringAssert.Contains(ex.Message, "references ambiguous goto target: Duplicate stage");
+        }
+
+        [TestMethod]
+        public void Load_DeepWorkflowExampleDynamicValuesSampleCoversTypedDeepReadsAndWrites()
+        {
+            var workflow = WorkflowYaml.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "workflow.deepworkflowexample-dynamic-values.yml")));
+
+            Assert.AreEqual("deepworkflowexample", workflow.Name);
+            Assert.AreEqual("deepworkflowexample", workflow.Metadata!.DisplayName);
+
+            var actions = workflow.Stages.SelectMany(s => s.Actions).ToList();
+            Assert.AreEqual(5, actions.OfType<BuildDynamicValueActionYaml>().Count());
+            Assert.AreEqual(15, actions.OfType<SetDynamicValuePropertyActionYaml>().Count());
+
+            var leafBuild = actions.OfType<BuildDynamicValueActionYaml>().Single(a => a.To == "leafValue");
+            CollectionAssert.AreEquivalent(
+                new[] { "String", "Int32", "Double", "Boolean", "DateTime", "DynamicValue" },
+                leafBuild.Entries.Select(e => e.ValueType).Distinct().ToArray(),
+                "Leaf payload must demonstrate explicit valueType casts for supported scalar and DynamicValue entries.");
+
+            var writes = actions.OfType<SetDynamicValuePropertyActionYaml>().ToList();
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Leaf" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Audit" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "DueDate" && a.ValueType == "DateTime" && a.Value.Type == "parseDate"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Title" && a.To == "updatedRootWithSlashString" && a.ValueType == "String"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Count" && a.To == "updatedRootWithSlashNumber" && a.ValueType == "Int32" && Convert.ToInt32(a.Value.Literal) == 11));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Enabled" && a.To == "updatedRootWithSlashBoolean" && a.ValueType == "Boolean" && Convert.ToBoolean(a.Value.Literal)));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Items" && a.To == "updatedRootWithItems" && a.ValueType == "DynamicValue" && a.Value.Variable == "itemsValue"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Items(1)/Status" && a.To == "updatedRootWithArraySlashWrite" && a.ValueType == "String" && Convert.ToString(a.Value.Literal) == "Reviewed through parenthesized array index"));
+            Assert.IsTrue(writes.Any(a => Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/ArrayFirstTitleCopy" && a.To == "updatedRootWithCopiedArrayValue" && a.ValueType == "String" && a.Value.Type == "getDynamicValueProperty" && a.Value.Source!.Variable == "updatedRootWithArraySlashWrite" && a.Value.PropertyName == "Branch/Items(0)/Title"));
+
+            var reads = actions.OfType<GetDynamicValuePropertyActionYaml>().ToList();
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Title" && a.To == "readSlashTitle" && a.ValueType == "String"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Count" && a.To == "readSlashCount" && a.ValueType == "Int32"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Leaf/Enabled" && a.To == "readSlashEnabled" && a.ValueType == "Boolean"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Items(0)/Title" && a.To == "readFirstItemTitle" && a.ValueType == "String"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Items(1)/Status" && a.To == "readSecondItemStatus" && a.ValueType == "String"));
+            Assert.IsTrue(reads.Any(a => a.Source == "itemsValue" && Convert.ToString(a.PropertyName.Literal) == "(0)" && a.To == "readFirstItemValue" && a.ValueType == "DynamicValue"));
+            Assert.IsTrue(reads.Any(a => a.Source == "updatedRootWithCopiedArrayValue" && Convert.ToString(a.PropertyName.Literal) == "Branch/Items(0)/Tags/(1)" && a.To == "readFirstItemSecondTag" && a.ValueType == "String"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "Count" && a.To == "readCount" && a.ValueType == "Int32"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "Amount" && a.To == "readAmount" && a.ValueType == "Double"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "Enabled" && a.To == "readEnabled" && a.ValueType == "Boolean"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "DueDate" && a.To == "readDueDate" && a.ValueType == "DateTime"));
+            Assert.IsTrue(reads.Any(a => Convert.ToString(a.PropertyName.Literal) == "Lookup" && a.To == "readLookupLikeValue" && a.ValueType == "DynamicValue"));
+
+            Assert.IsTrue(actions.OfType<AssignActionYaml>().Any(a => a.To == "hasAudit" && a.Value.Type == "containsDynamicValueProperty"));
+            Assert.IsTrue(actions.OfType<AssignActionYaml>().Any(a => a.To == "isAuditEmpty" && a.Value.Type == "isEmptyDynamicValue"));
+            Assert.IsTrue(actions.OfType<AssignActionYaml>().Any(a => a.To == "itemsValue" && a.Value.Type == "parseDynamicValue"));
+            Assert.IsTrue(actions.OfType<AssignActionYaml>().Any(a => a.To == "firstItemHistorySummary" && a.Value.Type == "concatString" && a.Value.Values.Any(v => v.Type == "getDynamicValueProperty" && v.Source!.Variable == "itemsValue" && v.PropertyName == "(0)/Title")));
+            var conditional = actions.OfType<IfActionYaml>().Single(a => a.Condition.Left.Type == "getDynamicValueProperty");
+            Assert.AreEqual("Branch/Items(0)/Status", conditional.Condition.Left.PropertyName);
+            Assert.AreEqual("updatedRootWithCopiedArrayValue", conditional.Condition.Left.Source!.Variable);
+            Assert.AreEqual("String", conditional.Condition.Left.ValueType);
+            Assert.IsTrue(conditional.Then.OfType<WriteHistoryActionYaml>().Any(a => a.Message.Variable == "firstItemHistorySummary"), "Conditional branch must use inline array-path output in another realistic history-only context.");
+            Assert.IsTrue(actions.OfType<CountDynamicValueItemsActionYaml>().Any(a => a.Source == "readLeafValue" && a.To == "readLeafItemCount"));
+
+            var history = actions.OfType<WriteHistoryActionYaml>().Single(a => a.Message.Values.Count > 0);
+            Assert.IsTrue(history.Message.Values.Any(v => v.Type == "getDynamicValueProperty" && v.Source!.Variable == "updatedRootWithCopiedArrayValue" && v.PropertyName == "Branch/Leaf/Title" && v.ValueType == "String"), "History output must demonstrate inline slash-path getDynamicValueProperty usage without an intermediate variable.");
         }
 
         [TestMethod]
@@ -647,6 +826,134 @@ stages:
         }
 
         [TestMethod]
+        public void ExportWorkflowYaml_ReconstructsStageFlowTransitionGraph()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-stage-flow-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-stage-flow-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, CreateStageFlowExampleXaml());
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+
+                var yaml = File.ReadAllText(outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.AreEqual(3, workflow.Stages.Count);
+                CollectionAssert.AreEqual(new[] { "First stage", "Second stage", "Third stage" }, workflow.Stages.Select(s => s.Name).ToArray());
+                StringAssert.Contains(yaml, "branches:");
+                StringAssert.Contains(yaml, "goto: Second stage");
+                StringAssert.Contains(yaml, "goto: end");
+                StringAssert.Contains(yaml, "goto: First stage");
+
+                var first = workflow.Stages[0];
+                Assert.IsTrue(first.Transition.IsSpecified, "First stage should export conditional branches and default target.");
+                Assert.AreEqual(2, first.Transition.Branches.Count);
+                Assert.AreEqual("Second stage", first.Transition.Branches[0].Goto);
+                Assert.AreEqual("end", first.Transition.Branches[1].Goto, "One conditional branch should end the workflow.");
+                Assert.AreEqual("Third stage", first.Transition.Default.Goto);
+
+                Assert.AreEqual("First stage", workflow.Stages[1].Transition.Default.Goto, "Second stage should recurse back to the first stage.");
+                Assert.AreEqual("end", workflow.Stages[2].Transition.Default.Goto, "Third stage should explicitly end the non-linear stage flow.");
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
+        public void ExportWorkflowYaml_UsesObjectModelForDownloadedStageFlowReferences()
+        {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
+            var inputPath = FindRepoFile("artifacts", "stage-flow-example.downloaded.formatted.xaml");
+            var formFieldPath = FindRepoFile("artifacts", "stage-flow-example.downloaded.formatted.xaml.formfield.xml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Downloaded stage-flow-example XAML artifact is not available in this checkout.");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-stage-flow-object-model-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath, File.Exists(formFieldPath) ? formFieldPath : string.Empty, cacheFolder);
+
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("WF object-model flowchart export")), "Expected object-model export path to be used.");
+                Assert.AreEqual(3, workflow.Stages.Count);
+                CollectionAssert.AreEqual(new[] { "Stage 1", "Stage 2", "Stage 3" }, workflow.Stages.Select(s => s.Name).ToArray());
+
+                var first = workflow.Stages[0];
+                Assert.IsTrue(first.Transition.IsSpecified, "Stage 1 should export conditional branches and a default target.");
+                Assert.AreEqual(2, first.Transition.Branches.Count);
+                Assert.AreEqual("Stage 2", first.Transition.Branches[0].Goto, "The xddsf numeric condition should go to Stage 2.");
+                Assert.AreEqual("Stage 3", first.Transition.Branches[1].Goto, "The initiator user condition should go to Stage 3.");
+                Assert.AreEqual("end", first.Transition.Default.Goto, "The false tail of the nested decision should end the workflow.");
+
+                Assert.AreEqual("Stage 1", workflow.Stages[1].Transition.Default.Goto, "Stage 2 should recurse back to Stage 1.");
+                Assert.AreEqual("end", workflow.Stages[2].Transition.Default.Goto, "Stage 3 should explicitly end the workflow.");
+            }
+            finally
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("WebsiteCacheIntegration")]
+        public void ExportWorkflowYaml_ObjectModelPreservesDownloadedStageTransitionDefaultAfterTerminalBranch()
+        {
+            var cacheFolder = GetConfiguredWebsiteCacheOrInconclusive();
+            var inputPath = FindRepoFile("artifacts", "workflow.stage-transitions.roundtrip.downloaded.xaml");
+            if (!File.Exists(inputPath)) Assert.Inconclusive("Downloaded stage-transition roundtrip XAML artifact is not available in this checkout.");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-stage-transition-object-model-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath, string.Empty, cacheFolder);
+
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.IsTrue(workflow.ExportWarnings.Any(w => w.Contains("WF object-model flowchart export")), "Expected object-model export path to be used.");
+                Assert.AreEqual(3, workflow.Stages.Count);
+                CollectionAssert.AreEqual(new[] { "First stage", "Second stage", "Third stage" }, workflow.Stages.Select(s => s.Name).ToArray());
+
+                var first = workflow.Stages[0];
+                Assert.IsTrue(first.Transition.IsSpecified, "First stage should export conditional branches and a default target.");
+                Assert.AreEqual(2, first.Transition.Branches.Count);
+                Assert.AreEqual("Second stage", first.Transition.Branches[0].Goto, "The approve branch should go to Second stage.");
+                Assert.AreEqual("end", first.Transition.Branches[1].Goto, "The reject branch should end the workflow.");
+                Assert.AreEqual("Third stage", first.Transition.Default.Goto, "A terminal true branch in the nested decision must not force the false/default tail to end.");
+            }
+            finally
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
+        public void ExportWorkflowYaml_OmitsTransitionsForPureLinearFlowchartStages()
+        {
+            var inputPath = Path.Combine(Path.GetTempPath(), "spnet-linear-flow-" + Guid.NewGuid().ToString("N") + ".xaml");
+            var outputPath = Path.Combine(Path.GetTempPath(), "spnet-linear-flow-export-" + Guid.NewGuid().ToString("N") + ".yml");
+            File.WriteAllText(inputPath, CreateLinearFlowchartXaml());
+            try
+            {
+                WfActivityBuilderSerializer.ExportWorkflowYaml(inputPath, outputPath);
+
+                var yaml = File.ReadAllText(outputPath);
+                var workflow = WorkflowYaml.Load(outputPath);
+
+                Assert.AreEqual(2, workflow.Stages.Count);
+                CollectionAssert.AreEqual(new[] { "Linear first", "Linear second" }, workflow.Stages.Select(s => s.Name).ToArray());
+                Assert.IsFalse(workflow.Stages.Any(s => s.Transition.IsSpecified), "Pure linear stage flows should not emit explicit YAML transitions.");
+                Assert.IsFalse(yaml.Contains("transition:"), "Pure linear stage flow YAML should omit transition blocks.");
+            }
+            finally
+            {
+                if (File.Exists(inputPath)) File.Delete(inputPath);
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+        }
+
+        [TestMethod]
         public void PrepareXamlForDeserialization_MapsGenericMicrosoftExpressionComparisons()
         {
             var prepared = WfActivityBuilderSerializer.PrepareXamlForDeserializationForTest(@"<Activity x:Class=""ComparisonWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""><While><While.Condition><p:IsLessThan x:TypeArguments=""x:Double""><p:IsLessThan.Left><InArgument x:TypeArguments=""x:Double"">1</InArgument></p:IsLessThan.Left><p:IsLessThan.Right><InArgument x:TypeArguments=""x:Double""><p:Convert x:TypeArguments=""x:Int32, x:Double""><p:Convert.Input><InArgument x:TypeArguments=""x:Int32"">2</InArgument></p:Convert.Input></p:Convert></InArgument></p:IsLessThan.Right></p:IsLessThan></While.Condition></While></Activity>");
@@ -687,10 +994,21 @@ stages:
             return Path.Combine(relativeParts);
         }
 
+        private static string CreateStageFlowExampleXaml() => @"<Activity x:Class=""StageFlowExample.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Flowchart StartNode=""{x:Reference stage1}""><FlowStep x:Name=""stage1"" Next=""{x:Reference approveDecision}""><Sequence DisplayName=""First stage""><local:WriteToHistory Message=""first stage"" /></Sequence></FlowStep><FlowDecision x:Name=""approveDecision"" True=""{x:Reference stage2}"" False=""{x:Reference rejectDecision}""><FlowDecision.Condition><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualString Text=""approve""><p:IsEqualString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""outcome"" /></InArgument></p:IsEqualString.Input></p:IsEqualString></InArgument></FlowDecision.Condition></FlowDecision><FlowDecision x:Name=""rejectDecision"" False=""{x:Reference stage3}""><FlowDecision.Condition><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualString Text=""reject""><p:IsEqualString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""outcome"" /></InArgument></p:IsEqualString.Input></p:IsEqualString></InArgument></FlowDecision.Condition></FlowDecision><FlowStep x:Name=""stage2"" Next=""{x:Reference stage1}""><Sequence DisplayName=""Second stage""><local:WriteToHistory Message=""second stage"" /></Sequence></FlowStep><FlowStep x:Name=""stage3""><Sequence DisplayName=""Third stage""><local:WriteToHistory Message=""third stage"" /></Sequence></FlowStep></Flowchart></Activity>";
+
+        private static string CreateLinearFlowchartXaml() => @"<Activity x:Class=""LinearFlowExample.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Flowchart StartNode=""{x:Reference linear1}""><FlowStep x:Name=""linear1"" Next=""{x:Reference linear2}""><Sequence DisplayName=""Linear first""><local:WriteToHistory Message=""linear first"" /></Sequence></FlowStep><FlowStep x:Name=""linear2""><Sequence DisplayName=""Linear second""><local:WriteToHistory Message=""linear second"" /></Sequence></FlowStep></Flowchart></Activity>";
+
         private static string ReadDesignerId(XElement element)
         {
             return element.Elements().FirstOrDefault(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes")
                 ?.Descendants().FirstOrDefault(e => e.Name.LocalName == "String" && string.Equals((string?)e.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")), "Id", StringComparison.OrdinalIgnoreCase))
+                ?.Value ?? string.Empty;
+        }
+
+        private static string ReadDesignerCustomAttribute(XElement element, string key)
+        {
+            return element.Elements().FirstOrDefault(e => e.Name.LocalName == "SPDesignerXamlWriter.CustomAttributes")
+                ?.Descendants().FirstOrDefault(e => e.Name.LocalName == "String" && string.Equals((string?)e.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")), key, StringComparison.OrdinalIgnoreCase))
                 ?.Value ?? string.Empty;
         }
 
@@ -944,6 +1262,21 @@ stages:
             Assert.IsFalse(normalized.Contains("VisualBasicReference"), "Generated metadata output should not contain raw VisualBasicReference.");
             Assert.IsFalse(normalized.Contains("CSharpValue"), "Generated metadata output should not contain raw CSharpValue.");
             Assert.IsFalse(normalized.Contains("CSharpReference"), "Generated metadata output should not contain raw CSharpReference.");
+        }
+
+        [TestMethod]
+        public void AddSharePointDesignerMetadata_EmitsSpdEndSentinelForTerminalStageTransitions()
+        {
+            var xaml = @"<Activity x:Class=""EndTransitionWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:local=""clr-namespace:Microsoft.SharePoint.WorkflowServices.Activities""><Flowchart StartNode=""{x:Reference stage1}""><FlowStep x:Name=""stage1"" Next=""{x:Reference decision1}""><Sequence DisplayName=""Stage 1""><local:WriteToHistory Message=""first"" /></Sequence></FlowStep><FlowDecision x:Name=""decision1"" False=""{x:Reference stage2}""><FlowDecision.Condition><InArgument x:TypeArguments=""x:Boolean""><p:IsEqualString Text=""end""><p:IsEqualString.Input><InArgument x:TypeArguments=""x:String""><ArgumentValue x:TypeArguments=""x:String"" ArgumentName=""outcome"" /></InArgument></p:IsEqualString.Input></p:IsEqualString></InArgument></FlowDecision.Condition></FlowDecision><FlowStep x:Name=""stage2""><Sequence DisplayName=""Stage 2""><local:WriteToHistory Message=""second"" /></Sequence></FlowStep></Flowchart></Activity>";
+
+            var normalized = WfActivityBuilderSerializer.AddSharePointDesignerMetadata(xaml, "EndTransitionWorkflow");
+            var document = XDocument.Parse(normalized);
+            var terminalFlowStep = document.Descendants().Single(e => e.Name.LocalName == "FlowStep" && (string?)e.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "stage2");
+            var decision = document.Descendants().Single(e => e.Name.LocalName == "FlowDecision");
+
+            Assert.AreEqual("4294967294", ReadDesignerCustomAttribute(terminalFlowStep, "Next"), "Terminal FlowStep nodes require SPD-visible Next=end sentinel metadata.");
+            Assert.AreEqual("4294967294", ReadDesignerCustomAttribute(decision, "True"), "Missing FlowDecision.True end transitions require SPD-visible True=end sentinel metadata.");
+            Assert.AreEqual(string.Empty, ReadDesignerCustomAttribute(decision, "False"), "Non-terminal FlowDecision.False transitions must remain represented by the real WF reference, not sentinel metadata.");
         }
 
         [TestMethod]

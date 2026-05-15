@@ -1,0 +1,80 @@
+schemaVersion: spnet.workflow/v1
+name: SPNet Stage Flow Concepts Test
+technicalName: SPNetStageFlowConceptsTest.MTW
+description: Non-production workflow sample for validating SharePoint Designer stage flow transition concepts.
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: Site
+variables:
+- name: stageDecision
+  type: String
+stages:
+- id: intake
+  name: Intake stage
+  actions:
+  - type: writeHistory
+    message: Stage flow concepts test entered Intake stage.
+  transition:
+    branches:
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: stageDecision
+        right:
+          literal: review
+      goto: review
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: stageDecision
+        right:
+          literal: stop
+      goto: end
+    default:
+      goto: remediation
+- id: review
+  name: Review stage
+  actions:
+  - type: writeHistory
+    message: Stage flow concepts test entered Review stage.
+  transition:
+    branches:
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: stageDecision
+        right:
+          literal: rework
+      goto: remediation
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: stageDecision
+        right:
+          literal: complete
+      goto: complete
+    default:
+      goto: complete
+- id: remediation
+  name: Remediation stage
+  actions:
+  - type: writeHistory
+    message: Stage flow concepts test entered Remediation stage and loops back to Intake.
+  transition:
+    default:
+      goto: intake
+- id: complete
+  name: Complete stage
+  actions:
+  - type: writeHistory
+    message: Stage flow concepts test entered Complete terminal stage.
+  transition:
+    default:
+      goto: end

@@ -1,0 +1,47 @@
+schemaVersion: spnet.workflow/v1
+name: stage flow example
+variables:
+- name: outcome
+  type: String
+stages:
+- id: first
+  name: First stage
+  actions:
+  - type: writeHistory
+    message: In the first stage
+  transition:
+    branches:
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: outcome
+        right:
+          literal: approve
+      goto: second
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: outcome
+        right:
+          literal: reject
+      goto: end
+    default:
+      goto: third
+- id: second
+  name: Second stage
+  actions:
+  - type: writeHistory
+    message: In the second stage
+  transition:
+    default:
+      goto: first
+- id: third
+  name: Third stage
+  actions:
+  - type: writeHistory
+    message: In the third stage
+  transition:
+    default:
+      goto: end

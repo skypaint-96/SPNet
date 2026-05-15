@@ -1,0 +1,296 @@
+# Function-like stage workflow concept sample.
+# This intentionally models reusable functions with static stage transitions rather
+# than a call stack: caller stages build the shared DynamicValue `functionparams`,
+# choose a static function stage, function stages validate required parameters,
+# write shared DynamicValue `funcitonreturnvalue`, then transition through a static
+# return selector stage. The misspelled `funcitonreturnvalue` name is deliberate
+# to match the current design-review terminology being tested.
+schemaVersion: spnet.workflow/v1
+name: SPNet Stage Function Concepts Test
+technicalName: SPNetStageFunctionConceptsTest.MTW
+description: Non-production workflow sample for validating function-like stage concepts with DynamicValue dictionaries and stage transitions.
+start:
+  manual: true
+  autoStartCreate: false
+  autoStartChange: false
+target:
+  type: Site
+variables:
+- name: functionparams
+  type: DynamicValue
+- name: funcitonreturnvalue
+  type: DynamicValue
+- name: returnStage
+  type: String
+- name: hasTitleParam
+  type: Boolean
+- name: hasPrefixParam
+  type: Boolean
+- name: hasNumberParam
+  type: Boolean
+- name: titleParam
+  type: String
+- name: prefixParam
+  type: String
+- name: numberParam
+  type: Double
+- name: formattedResult
+  type: String
+- name: callerOneResult
+  type: String
+- name: callerTwoResult
+  type: String
+stages:
+- id: callerOne
+  name: Caller one builds params for formatTitle function
+  actions:
+  - type: writeHistory
+    message: Caller one sets shared functionparams and static returnStage.
+  - type: buildDynamicValue
+    to: functionparams
+    entries:
+    - key: Title
+      value: Alpha request
+    - key: Prefix
+      value: CALLER1
+    - key: Number
+      value: 100
+      valueType: Int32
+  - type: assign
+    to: returnStage
+    value: returnToCallerOne
+  transition:
+    default:
+      goto: functionFormatTitle
+- id: functionFormatTitle
+  name: Function formatTitle validates params and returns dictionary
+  actions:
+  - type: assign
+    to: hasTitleParam
+    value:
+      type: containsDynamicValueProperty
+      source:
+        variable: functionparams
+      propertyName: Title
+  - type: assign
+    to: hasPrefixParam
+    value:
+      type: containsDynamicValueProperty
+      source:
+        variable: functionparams
+      propertyName: Prefix
+  - type: if
+    condition:
+      type: and
+      leftCondition:
+        type: isEqual
+        valueType: Boolean
+        left:
+          variable: hasTitleParam
+        right:
+          literal: true
+      rightCondition:
+        type: isEqual
+        valueType: Boolean
+        left:
+          variable: hasPrefixParam
+        right:
+          literal: true
+    then:
+    - type: getDynamicValueProperty
+      source: functionparams
+      propertyName: Title
+      to: titleParam
+      valueType: String
+    - type: getDynamicValueProperty
+      source: functionparams
+      propertyName: Prefix
+      to: prefixParam
+      valueType: String
+    - type: assign
+      to: formattedResult
+      value:
+        type: formatString
+        literal: '{0}: {1}'
+        values:
+        - variable: prefixParam
+        - variable: titleParam
+    - type: buildDynamicValue
+      to: funcitonreturnvalue
+      entries:
+      - key: Ok
+        value: true
+        valueType: Boolean
+      - key: Function
+        value: formatTitle
+      - key: ReturnValue
+        value:
+          variable: formattedResult
+        valueType: String
+    else:
+    - type: buildDynamicValue
+      to: funcitonreturnvalue
+      entries:
+      - key: Ok
+        value: false
+        valueType: Boolean
+      - key: Function
+        value: formatTitle
+      - key: Error
+        value: Missing required Title or Prefix parameter.
+  transition:
+    branches:
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: returnStage
+        right:
+          literal: returnToCallerOne
+      goto: returnToCallerOne
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: returnStage
+        right:
+          literal: returnToCallerTwo
+      goto: returnToCallerTwo
+    default:
+      goto: workflowComplete
+- id: returnToCallerOne
+  name: Static return selector back to caller one continuation
+  actions:
+  - type: getDynamicValueProperty
+    source: funcitonreturnvalue
+    propertyName: ReturnValue
+    to: callerOneResult
+    valueType: String
+  - type: writeHistory
+    message:
+      type: formatString
+      literal: 'Caller one observed function return: {0}'
+      values:
+      - variable: callerOneResult
+  transition:
+    default:
+      goto: callerTwo
+- id: callerTwo
+  name: Caller two builds params for incrementNumber function
+  actions:
+  - type: writeHistory
+    message: Caller two reuses shared functionparams and sets a different static returnStage.
+  - type: buildDynamicValue
+    to: functionparams
+    entries:
+    - key: Number
+      value: 41.0
+      valueType: Double
+  - type: assign
+    to: returnStage
+    value: returnToCallerTwo
+  transition:
+    default:
+      goto: functionIncrementNumber
+- id: functionIncrementNumber
+  name: Function incrementNumber validates params and returns dictionary
+  actions:
+  - type: assign
+    to: hasNumberParam
+    value:
+      type: containsDynamicValueProperty
+      source:
+        variable: functionparams
+      propertyName: Number
+  - type: if
+    condition:
+      type: isEqual
+      valueType: Boolean
+      left:
+        variable: hasNumberParam
+      right:
+        literal: true
+    then:
+    - type: getDynamicValueProperty
+      source: functionparams
+      propertyName: Number
+      to: numberParam
+      valueType: Double
+    - type: calc
+      lValue:
+        variable: numberParam
+      operator: Add
+      rValue:
+        literal: 1
+      to: numberParam
+    - type: buildDynamicValue
+      to: funcitonreturnvalue
+      entries:
+      - key: Ok
+        value: true
+        valueType: Boolean
+      - key: Function
+        value: incrementNumber
+      - key: ReturnValue
+        value:
+          type: toString
+          value:
+            variable: numberParam
+            valueType: Double
+        valueType: String
+    else:
+    - type: buildDynamicValue
+      to: funcitonreturnvalue
+      entries:
+      - key: Ok
+        value: false
+        valueType: Boolean
+      - key: Function
+        value: incrementNumber
+      - key: Error
+        value: Missing required Number parameter.
+  transition:
+    branches:
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: returnStage
+        right:
+          literal: returnToCallerTwo
+      goto: returnToCallerTwo
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: returnStage
+        right:
+          literal: returnToCallerOne
+      goto: returnToCallerOne
+    default:
+      goto: workflowComplete
+- id: returnToCallerTwo
+  name: Static return selector back to caller two continuation
+  actions:
+  - type: getDynamicValueProperty
+    source: funcitonreturnvalue
+    propertyName: ReturnValue
+    to: callerTwoResult
+    valueType: String
+  - type: writeHistory
+    message:
+      type: formatString
+      literal: 'Caller two observed function return: {0}'
+      values:
+      - variable: callerTwoResult
+  transition:
+    default:
+      goto: workflowComplete
+- id: workflowComplete
+  name: Complete
+  actions:
+  - type: writeHistory
+    message: Function-like stage workflow concept sample completed.
+  transition:
+    default:
+      goto: end

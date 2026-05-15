@@ -94,7 +94,11 @@ namespace SPNet.Workflow.WfSerializer
         private static Argument ToDynamicValuePropertyArgument(ExpressionYaml expression, string valueType, ValueExpressionTypes valueExpressionTypes)
         {
             var normalized = (valueType ?? expression.ValueType ?? string.Empty).Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
-            if (normalized == "dynamicvalue" || normalized == "dictionary") return (Argument)ActivityReflectionWriter.CreateInArgumentReference(valueExpressionTypes.DynamicValue, expression.Variable ?? string.Empty);
+            if (normalized == "dynamicvalue" || normalized == "dictionary")
+            {
+                if (!string.IsNullOrWhiteSpace(expression.Variable)) return (Argument)ActivityReflectionWriter.CreateInArgumentReference(valueExpressionTypes.DynamicValue, expression.Variable ?? string.Empty);
+                return ToTypedDynamicValueInArgument(expression, valueExpressionTypes);
+            }
             if (normalized == "boolean" || normalized == "bool" || expression.Literal is bool) return ToInArgument<bool>(expression, valueExpressionTypes);
             if (normalized == "int32" || normalized == "int" || normalized == "integer" || expression.Literal is int) return ToInArgument<int>(expression, valueExpressionTypes);
             if (normalized == "datetime" || normalized == "date" || expression.Literal is DateTime) return ToInArgument<DateTime>(expression, valueExpressionTypes);
@@ -103,13 +107,19 @@ namespace SPNet.Workflow.WfSerializer
             return ToInArgument<string>(expression, valueExpressionTypes);
         }
 
+        private static Argument ToTypedDynamicValueInArgument(ExpressionYaml expression, ValueExpressionTypes valueExpressionTypes)
+        {
+            var method = typeof(WfActivityBuilderSerializer).GetMethod("ToInArgument", BindingFlags.NonPublic | BindingFlags.Static) ?? throw new InvalidOperationException("ToInArgument method was not found.");
+            return (Argument)(method.MakeGenericMethod(valueExpressionTypes.DynamicValue).Invoke(null, new object[] { expression, valueExpressionTypes }) ?? throw new InvalidOperationException("Could not create DynamicValue InArgument."));
+        }
+
         private static Activity BuildCallHttpWebService(CallHttpWebServiceActionYaml action, Type callHttpWebServiceType, Type dynamicValueType, ValueExpressionTypes valueExpressionTypes)
         {
             var call = ActivityReflectionWriter.Create(callHttpWebServiceType);
             ActivityReflectionWriter.SetProperty(call, "Address", ToInArgument<string>(action.Address, valueExpressionTypes));
             ActivityReflectionWriter.SetProperty(call, "RequestType", ToInArgument<string>(NormalizeHttpRequestType(action.RequestType), valueExpressionTypes));
-            ActivityReflectionWriter.SetDynamicInArgumentReferenceIfWritable(call, "RequestContent", dynamicValueType, SpdEmptyDynamicValueArgumentName);
-            ActivityReflectionWriter.SetDynamicInArgumentReferenceIfWritable(call, "RequestHeaders", dynamicValueType, SpdRequestHeadersArgumentName);
+            ActivityReflectionWriter.SetDynamicInArgumentReferenceIfWritable(call, "RequestContent", dynamicValueType, string.IsNullOrWhiteSpace(action.RequestContent) ? SpdEmptyDynamicValueArgumentName : action.RequestContent);
+            ActivityReflectionWriter.SetDynamicInArgumentReferenceIfWritable(call, "RequestHeaders", dynamicValueType, string.IsNullOrWhiteSpace(action.RequestHeaders) ? SpdRequestHeadersArgumentName : action.RequestHeaders);
             if (!string.IsNullOrWhiteSpace(action.ResponseStatusCodeTo)) ActivityReflectionWriter.SetProperty(call, "ResponseStatusCode", new OutArgument<string>(new ArgumentReference<string>(action.ResponseStatusCodeTo)));
             if (!string.IsNullOrWhiteSpace(action.ResponseContentTo)) ActivityReflectionWriter.SetProperty(call, "ResponseContent", ActivityReflectionWriter.CreateOutArgument(dynamicValueType, action.ResponseContentTo));
             if (!string.IsNullOrWhiteSpace(action.ResponseHeadersTo)) ActivityReflectionWriter.SetProperty(call, "ResponseHeaders", ActivityReflectionWriter.CreateOutArgument(dynamicValueType, action.ResponseHeadersTo));

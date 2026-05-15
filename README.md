@@ -6,7 +6,7 @@ This is intentionally not the old broad YAML conversion pipeline. The YAML schem
 
 Generated SharePoint workflow XAML must not contain raw WF language expression activities such as `VisualBasicValue`, `VisualBasicReference`, `CSharpValue`, or `CSharpReference`. Those activities require VB/C# expression compilation, and SharePoint Workflow Manager validation rejects them for published workflows (for example, raw `Microsoft.CSharp.Activities.CSharpValue<TResult>` fails as an invalid type). SPNet therefore emits structured SharePoint/Workflow Manager-safe activity nodes, primarily SharePoint proxy activities and `Microsoft.Activities.Expressions` proxy expression activities. Export/import compatibility may still recognize raw VB/C# expression text from legacy or downloaded XAML so it can produce diagnostic YAML, but that compatibility path is not an endorsed output format.
 
-See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md). For the deep nested `DynamicValue` build/write/read pattern and slash-path validation notes, see [docs/deep-dynamic-values.md](docs/deep-dynamic-values.md).
+See the action support matrix for the current implementation, alias, validation, sample, test, export, and risk status: [docs/action-support-matrix.md](docs/action-support-matrix.md). For stage-transition authoring, publish, and round-trip guidance, see [docs/stage-transitions.md](docs/stage-transitions.md). For the deep nested `DynamicValue` build/write/read pattern and slash-path validation notes, see [docs/deep-dynamic-values.md](docs/deep-dynamic-values.md). Stage transitions and `DynamicValue` dictionaries can also be combined to model function-like stages; see [samples/workflow.stage-functions.yml](samples/workflow.stage-functions.yml) for the validated pattern using `functionparams`, `funcitonreturnvalue`, and static `returnStage` branches.
 
 ## Release framing and production guidance
 
@@ -147,7 +147,7 @@ Supported top-level fields:
 - `target`: legacy top-level `type` and optional `listTitle` metadata for publish tooling. Canonical metadata uses `metadata.target.type` and `metadata.target.listTitle`.
 - `parameters`: legacy top-level initiation form parameters. Canonical metadata uses `metadata.initiation.formFields`. Use either map-style YAML keyed by parameter name or list-style items with explicit `name`. Supported field types are `Text`, `Choice`, `Note`, `URL`, `UserMulti` (WF `String`), `Boolean` (WF `Boolean`), `Number` (WF `Double`), and `DateTime` (WF `DateTime`). Metadata properties include `formType`, `displayName`, `description`, `direction`, `default`, `choices`, `format`, `baseType`, `maxLength`, `numLines`, `sortable`, `richTextMode`, `list`, `showField`, `mult`, `userSelectionMode`, and `userSelectionScope`. Parameter names must not duplicate variables, expressions may read parameters by name, and assignment actions may not target parameters.
 - `variables`: typed variables currently mapped to WF dynamic activity properties; `Double`/`Number`, `String`, `Boolean`/`Bool`, `Int32`/`Int`/`Integer`, `Guid`, and `DateTime`/`Date` are supported.
-- `stages`: one or more stages, each with supported actions.
+- `stages`: one or more stages, each with supported actions and optional explicit stage transitions.
 
 When YAML is built, SPNet emits public WF `InArgument<T>` declarations for effective initiation fields and writes a deterministic `*.xaml.metadata.json` sidecar. That JSON is generated from effective YAML metadata/defaults after applying the canonical `metadata` block and legacy aliases (`name`, `technicalName`, top-level `start`, top-level `target`, and `parameters`). It is the primary publish contract and contains display name, technical name, description, target, start options, initiation settings, and form fields. The normal round trip is YAML -> XAML + metadata JSON -> SharePoint publish with metadata JSON -> download XAML + metadata JSON. A legacy `*.xaml.formfield.xml` sidecar may still be generated for compatibility/inspection when form fields are present, and downloaded workflows may preserve it, but FormField XML is no longer the normal YAML publish input. Use `-FormFieldXmlPath` only as an explicit deprecated fallback when metadata JSON is unavailable.
 
@@ -202,13 +202,53 @@ Supported actions:
 - `deleteListItem`: emits SharePoint `DeleteListItem`, with `listId` plus `itemId` and/or `itemGuid`. Delete is supported by the proxy metadata but intentionally omitted from the safe list lifecycle sample.
 - `lookupListItemStringProperty` / `lookupSPListItemStringProperty`: supported only as a nested string expression inside another visible action, normally `assign` / `setVariable`. It emits SharePoint `LookupSPListItemStringProperty`, with `listId` (defaults to `type: getCurrentListId`), `itemId` and/or `itemGuid`, and `fieldName` or `propertyName`. Top-level list item lookup actions are rejected because SharePoint Designer can render them as invisible actions and crash when properties are opened.
 - `lookupListItemIntProperty` / `lookupSPListItemIntProperty`: YAML shape and Int32 `to` validation are present, but the tested PMteamblog WebsiteCache proxy assembly does not contain `LookupSPListItemIntProperty`; using it with that cache fails fast at build time and is documented as unsupported for that environment.
-- `callHttpWebService` / `callHttp` / `http`: emits SharePoint `CallHTTPWebService` with `address`, `requestType`, and any response targets: `responseStatusCodeTo`, `responseContentTo`, and `responseHeadersTo`. Literal methods accept `GET`, `POST`, `PUT`, `DELETE` and `HTTPGET`, `HTTPPOST`, `HTTPPUT`, `HTTPDELETE`; aliases are normalized to the `HTTP*` values SharePoint Designer expects.
+- `callHttpWebService` / `callHttp` / `http`: emits SharePoint `CallHTTPWebService` with `address`, `requestType`, optional `requestContent` / `requestHeaders` `DynamicValue` variable names, and any response targets: `responseStatusCodeTo`, `responseContentTo`, and `responseHeadersTo`. Literal methods accept `GET`, `POST`, `PUT`, `DELETE` and `HTTPGET`, `HTTPPOST`, `HTTPPUT`, `HTTPDELETE`; aliases are normalized to the `HTTP*` values SharePoint Designer expects.
 - `sendEmail` / `email`: emits SharePoint `Email` with `to`, `cc`, `subject`, and `body`. These fields accept scalar literal shorthand or full expression mappings. Recipients are always wrapped in the SPD-compatible `ExpandInitFormUsers` + `BuildCollection` shape; literal recipient lists are split on `;` and `,`, while variable and `formatString` recipients are emitted as a single dynamic `BuildCollection` item. `subject` and `body` support literals, variables, workflow-context/list-item lookups, `toString`, and `formatString`; `body` may be an HTML string composed with variables/lookups. Use safe placeholder recipients such as `spnet-workflow-test@example.invalid` in samples and validation. Attachments, from/reply-to, BCC, importance, and task-notification coupling are not implemented.
 - `singleTask` / `task`: emits bounded SharePoint `SingleTask` only, based on the `ExampleWF2` reference. Minimal YAML is `assignedTo`, `title`, optional `taskBody`, optional `dueDate`, `taskIdTo`, and `outcomeTo`. Defaults intentionally waive assignment/cancelation emails in samples to avoid accidental real notifications; do not live-publish task workflows until assignees and notification settings are reviewed.
 - `lookupRestPropertyName` / `lookupSPListItemPropertyNameInREST`: emits SharePoint `LookupSPListItemPropertyNameInREST` with `listId`, `propertyName`, and `to`.
 - `getDynamicValueProperty` / `getDictionaryItem` / `getDictionaryValue` / `getResponseProperty`: extracts a string property from a `DynamicValue` HTTP response variable, with `source`, `propertyName`, and `to`.
 
 The external YAML shape is intentionally stable. Internally, action YAML is deserialized into a discriminated action hierarchy (`calc`, `writeHistory`, `setStatus`, and assignment actions) so action-specific validation and WF activity construction stay scoped to the supported action type instead of one broad property bag.
+
+Stage transition schema:
+
+- `stage.id`: optional stable transition target. Prefer unique IDs over names for authored non-linear workflows.
+- `stage.transition.branches`: ordered conditional branches. Each branch has a structured Boolean `condition` and a `goto` target.
+- `stage.transition.default.goto`: fallback stage target when no branch matches.
+- `stage.transition.goto`: shorthand for a default-only transition; do not combine with `transition.default.goto`.
+- `goto: end`: terminal target. Generated XAML emits SharePoint Designer-visible stage-flow metadata and uses the SPD end sentinel `4294967294`.
+
+Stage transition example:
+
+```yaml
+- id: intake
+  name: Intake stage
+  actions:
+  - type: writeHistory
+    message: Entered intake
+  transition:
+    branches:
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: stageDecision
+        right:
+          literal: review
+      goto: review
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: stageDecision
+        right:
+          literal: stop
+      goto: end
+    default:
+      goto: remediation
+```
+
+Explicit stage transitions are built as WF `System.Activities.Statements.Flowchart` graphs with `FlowStep` stage nodes and chained `FlowDecision` branch nodes. If no explicit transitions are specified anywhere, stages remain linear in YAML order. Reference samples are `samples/workflow.stage-transitions.yml` and `samples/workflow.stage-flow-concepts.yml`; detailed usage guidance is in `docs/stage-transitions.md`.
 
 Supported expressions:
 
@@ -413,7 +453,69 @@ HTTP/web service example:
   responseHeadersTo: httpResponseHeaders
 ```
 
-HTTP response content and headers are emitted as SharePoint Designer proxy `DynamicValue` variables at build time; they do not need to be declared in YAML, and declaring arbitrary `DynamicValue` variables is intentionally rejected. `RequestContent` and `RequestHeaders` are initialized to empty `DynamicValue` references so Designer can render the HTTP action. This HTTP shape was publish-validated against PMteamblog and opens with the expected display in SharePoint Designer. Known caveat: using top-level lookup actions can still leave an invisible previous action in Designer; keep lookup activities nested inside expressions such as the `CurrentWebUrl` URL construction above.
+HTTP response content and headers are emitted as SharePoint Designer proxy `DynamicValue` variables at build time when named by `responseContentTo` and `responseHeadersTo`; they do not need to be predeclared. If `requestContent` or `requestHeaders` are omitted, the generated action uses the standard empty request-content dictionary and standard request-header dictionary placeholders so Designer can render the HTTP action. For `POST` / `PUT`, build explicit request-body and request-header dictionaries with `buildDynamicValue`, declare them as `DynamicValue` variables, and point `requestContent` / `requestHeaders` at those variable names.
+
+HTTP POST with request headers and body example:
+
+```yaml
+variables:
+  - name: requestHeaders
+    type: DynamicValue
+  - name: requestBody
+    type: DynamicValue
+  - name: nestedPayload
+    type: DynamicValue
+  - name: httpStatusCode
+    type: String
+stages:
+  - name: HTTP POST call
+    actions:
+      - type: buildDynamicValue
+        to: requestHeaders
+        entries:
+          - key: Accept
+            value: application/json
+          - key: Content-Type
+            value: application/json
+      - type: buildDynamicValue
+        to: nestedPayload
+        entries:
+          - key: fdgfd
+            value: dfgfd
+      - type: buildDynamicValue
+        to: requestBody
+        entries:
+          - key: prop1
+            value: sdfas
+          - key: Prop2
+            value: egsdfg
+          - key: Prop3
+            value:
+              variable: nestedPayload
+            valueType: DynamicValue
+          - key: Prop4
+            value:
+              toString:
+                variable: nestedPayload
+      - type: callHttpWebService
+        address: http://example.com
+        requestType: POST
+        requestContent: requestBody
+        requestHeaders: requestHeaders
+        responseStatusCodeTo: httpStatusCode
+        responseContentTo: responseContent
+        responseHeadersTo: responseHeaders
+```
+
+Guidance for HTTP request dictionaries:
+
+- `requestHeaders` and `requestContent` are variable names, not inline objects. Build the dictionaries first with `buildDynamicValue`.
+- Header keys should match the target service's expected HTTP header names, for example `Accept` and `Content-Type`.
+- Body entries support scalar values and nested `DynamicValue` values. When an entry value is another dictionary variable, set `valueType: DynamicValue`; otherwise it will serialize as a string/scalar value.
+- Keep request/response bodies small and predictable. SharePoint Workflow Manager persists `DynamicValue` state and can be sensitive to large payloads, arrays, unexpected primitive/null values, and slow external services.
+- The full sample is `samples/workflow.http-post.yml`. The downloaded `httpposttest` workflow exported to `artifacts/httpposttest.exported.yml` demonstrates the same shape with `requestContent: reqB`, `requestHeaders: reqH`, and `requestType: HTTPPOST`.
+
+This HTTP shape was publish-validated against PMteamblog and opens with the expected display in SharePoint Designer. Known caveat: using top-level lookup actions can still leave an invisible previous action in Designer; keep lookup activities nested inside expressions such as the `CurrentWebUrl` URL construction above.
 
 DynamicValue extraction example:
 
@@ -459,7 +561,9 @@ Do not use cleanup against production names such as `New Leave Request`. If a pu
 - `config/spnet.local.yml` is ignored and should contain workstation-specific paths.
 - `SPNET_SPD_CACHE` can provide the WebsiteCache folder without a local config file.
 
-The serializer requires a SharePoint Designer WebsiteCache folder containing the SharePoint and Microsoft Activities proxy assemblies, including `Microsoft.SharePoint.WorkflowServices.Activities.Proxy.dll` and `Microsoft.Activities.Proxy.dll`. This requirement applies to local build, export, and inspection of WF activity trees. The CSOM publisher does not use WebsiteCache; it only needs built XAML plus SharePoint CSOM authentication.
+The serializer auto-loads committed defaults from `config/spnet.defaults.yml`, auto-loads `config/spnet.local.yml` when it exists and `--config` is omitted, and then applies an explicit `--config` path when supplied. Cache lookup order is explicit `--cache-folder` / `--cache`, then `spdCacheFolder` from merged config, then `SPNET_SPD_CACHE`.
+
+The serializer requires a SharePoint Designer WebsiteCache folder containing the SharePoint and Microsoft Activities proxy assemblies, including `Microsoft.SharePoint.WorkflowServices.Activities.Proxy.dll` and `Microsoft.Activities.Proxy.dll`. This requirement applies to local build, cache-enabled export, and inspection of WF activity trees. Cache-enabled export is preferred for non-linear stage workflows because it can deserialize the `System.Activities.Statements` object model and reconstruct `Flowchart` / `FlowStep` / `FlowDecision` transitions from object references. The CSOM publisher does not use WebsiteCache; it only needs built XAML plus SharePoint CSOM authentication.
 
 External dependencies are not packaged: SharePoint Designer WebsiteCache DLLs, Office install paths, SharePoint auth/session state, and workflow IDs remain environment/config driven.
 
@@ -474,7 +578,7 @@ External dependencies are not packaged: SharePoint Designer WebsiteCache DLLs, O
 
 ## Validation
 
-The YAML-first baseline has been validated end-to-end in SharePoint Designer with `YamlFirstSmoke`: the workflow opens in Designer, the stage/action structure is visible, and Designer `Check for Errors` reports no errors. HTTP actions, DynamicValue property extraction, current-item list field updates, local list smoke generation, read-only list workflow listing, and CSOM list publishing have also been validated. Conditional workflow round-tripping was validated with `ExampleConditionals` artifacts and the live `ExampleConditionalsRoundTripPreserveIds4` workflow: nested `and`/`or`/`not`, string/Boolean/DateTime/DynamicValue comparisons, `parseDate`, `parseDynamicValue`, SharePoint-local-to-UTC date normalization, and Designer `Id` preservation opened in SharePoint Designer with RHS operand values visible. List lifecycle create/update has been runtime-validated with `SPNetYamlListLifecycleManual-20260509-1535` on `TestList`: Designer showed misleading red boxes and incomplete variable-picker/action-builder rendering for the created item ID, but `Check for Errors` passed and runtime execution created an item and updated that new item's title via the returned ID. Generated artifacts are intentionally ignored by Git; keep only `artifacts/.gitkeep` committed in the workspace.
+The YAML-first baseline has been validated end-to-end in SharePoint Designer with `YamlFirstSmoke`: the workflow opens in Designer, the stage/action structure is visible, and Designer `Check for Errors` reports no errors. HTTP actions, DynamicValue property extraction, current-item list field updates, local list smoke generation, read-only list workflow listing, and CSOM list publishing have also been validated. Conditional workflow round-tripping was validated with `ExampleConditionals` artifacts and the live `ExampleConditionalsRoundTripPreserveIds4` workflow: nested `and`/`or`/`not`, string/Boolean/DateTime/DynamicValue comparisons, `parseDate`, `parseDynamicValue`, SharePoint-local-to-UTC date normalization, and Designer `Id` preservation opened in SharePoint Designer with RHS operand values visible. Stage-transition workflows have been validated with generated/downloaded stage-flow artifacts such as `artifacts/SPNetStageFlowConceptsTest.xaml`, `artifacts/SPNetStageFlowConceptsTest.exported.yml`, `artifacts/SPNetStageFlowConceptsTest.downloaded.xaml`, and `artifacts/SPNetStageFlowConceptsTest.downloaded.exported.yml`, confirming non-linear `FlowStep` / `FlowDecision` stage graphs and `goto: end` export behavior. List lifecycle create/update has been runtime-validated with `SPNetYamlListLifecycleManual-20260509-1535` on `TestList`: Designer showed misleading red boxes and incomplete variable-picker/action-builder rendering for the created item ID, but `Check for Errors` passed and runtime execution created an item and updated that new item's title via the returned ID. Generated artifacts are intentionally ignored by Git; keep only `artifacts/.gitkeep` committed in the workspace.
 
 Publishing validation has also confirmed that raw VB/C# WF language expression activities are not acceptable output: a probe containing raw `Microsoft.CSharp.Activities.CSharpValue<TResult>` failed Workflow Manager validation with an invalid-type error, and earlier raw `VisualBasicValue<T>` string-action builders were rejected until replaced with `Microsoft.Activities.Expressions` structured proxy expression nodes. Keep this as a hard guardrail for generated XAML.
 
@@ -499,6 +603,7 @@ Live publish validation requires SharePoint auth/session support and pinned Shar
 ## Known limitations
 
 - YAML support is intentionally limited to logs/status/comments, assignment, structured conditional control flow, current item `setField`, HTTP calls, bounded `sendEmail`, bounded `singleTask`, REST property-name lookup, workflow context/current list/current item expressions, and DynamicValue string property extraction.
+- Explicit stage transitions are supported for stage-to-stage branches, default transitions, loops, and `goto: end`, but large/non-obvious transition graphs should be avoided because Designer readability and Workflow Manager limits remain practical constraints.
 - `DynamicValue` variables are generated only for HTTP response targets; arbitrary YAML-declared `DynamicValue` variables and general dictionary mutation actions are deferred.
 - Top-level lookup actions are rejected because SharePoint Designer can render them as blank/crashing actions; use nested lookup expressions inside assignment or action arguments. This includes list item property lookups such as `lookupListItemStringProperty`.
 - The CSOM publisher does not overwrite, delete, or migrate existing live workflows; `if-exists` currently fails on name conflicts.
