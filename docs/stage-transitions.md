@@ -72,6 +72,129 @@ Reference samples:
 
 - `samples/workflow.stage-transitions.yml`: compact branch, loop, and terminal-stage sample.
 - `samples/workflow.stage-flow-concepts.yml`: publish-oriented site workflow sample with manual start metadata.
+- `samples/workflow.stage-functions.yml`: function-like stage-call sample using stable stage IDs plus shared `DynamicValue` parameter and return dictionaries.
+
+## Function-like stage calls
+
+Stage IDs and explicit transitions can model a simple function-call pattern inside one SharePoint workflow. The pattern is static rather than dynamic: callers transition to known function stages by `stage.id`, and function stages transition back to known continuation stages through conditional branches.
+
+Use this pattern when you want to reuse a stage body as a named operation and keep the workflow in SharePoint Designer-compatible stage flow:
+
+1. Declare shared workflow variables for call state:
+   - `functionparams` as `DynamicValue` for the active call's input dictionary.
+   - `funcitonreturnvalue` as `DynamicValue` for the active call's return dictionary. The sample keeps this spelling to match the original concept under test.
+   - `returnStage` as `String` when a function stage can return to more than one static continuation.
+2. Caller stages build `functionparams` with `buildDynamicValue`, set `returnStage`, then transition to a function stage by ID.
+3. Function stages validate required parameters with `containsDynamicValueProperty` before reading them with `getDynamicValueProperty`.
+4. Function stages build `funcitonreturnvalue` with explicit typed entries, then branch back to allowed continuation stages by testing `returnStage`.
+5. Continuation stages read `funcitonreturnvalue`, branch on return values, or call another function stage.
+
+Minimal shape:
+
+```yaml
+variables:
+- name: functionparams
+  type: DynamicValue
+- name: funcitonreturnvalue
+  type: DynamicValue
+- name: returnStage
+  type: String
+- name: hasTitleParam
+  type: Boolean
+- name: titleParam
+  type: String
+- name: callerResult
+  type: String
+stages:
+- id: caller
+  name: Caller builds params
+  actions:
+  - type: buildDynamicValue
+    to: functionparams
+    entries:
+    - key: Title
+      value: Alpha request
+      valueType: String
+  - type: assign
+    to: returnStage
+    value: afterFunction
+  transition:
+    default:
+      goto: fn-format-title
+- id: fn-format-title
+  name: Function format title
+  actions:
+  - type: assign
+    to: hasTitleParam
+    value:
+      type: containsDynamicValueProperty
+      source:
+        variable: functionparams
+      propertyName: Title
+  - type: if
+    condition:
+      type: isEqual
+      valueType: Boolean
+      left:
+        variable: hasTitleParam
+      right: true
+    then:
+    - type: getDynamicValueProperty
+      source: functionparams
+      propertyName: Title
+      to: titleParam
+      valueType: String
+    - type: buildDynamicValue
+      to: funcitonreturnvalue
+      entries:
+      - key: Ok
+        value: true
+        valueType: Boolean
+      - key: ReturnValue
+        value:
+          variable: titleParam
+        valueType: String
+    else:
+    - type: buildDynamicValue
+      to: funcitonreturnvalue
+      entries:
+      - key: Ok
+        value: false
+        valueType: Boolean
+      - key: Error
+        value: Missing required Title parameter.
+        valueType: String
+  transition:
+    branches:
+    - condition:
+        type: isEqualString
+        valueType: String
+        left:
+          variable: returnStage
+        right: afterFunction
+      goto: after-function
+    default:
+      goto: end
+- id: after-function
+  name: Caller reads return value
+  actions:
+  - type: getDynamicValueProperty
+    source: funcitonreturnvalue
+    propertyName: ReturnValue
+    to: callerResult
+    valueType: String
+  transition:
+    default:
+      goto: end
+```
+
+Authoring guidance from the validated sample:
+
+- Use return dictionary keys such as `ReturnValue`, `Ok`, and `Error`. Avoid a key named `Result`; SharePoint Workflow Manager validation can collide with activity runtime arguments also named `Result`.
+- Keep numeric calculations type-aligned. The `calc` activity uses `Double` arguments, so variables used as `calc` inputs/outputs should be `Double`; convert to `String` with `toString` before writing into a string return entry.
+- Use one outstanding call at a time. This pattern does not implement a call stack, dynamic dispatch, recursion, or concurrent calls.
+- Prefer static continuation branches over dynamic stage names. Stage transition targets are resolved at build time.
+- Validate the generated workflow in SharePoint Designer because `DynamicValue` operations are Microsoft activity nodes and may be sensitive to the target Workflow Manager version.
 
 ## Build, publish, and validation workflow
 

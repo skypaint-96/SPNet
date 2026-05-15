@@ -347,6 +347,36 @@ Inline `getDynamicValueProperty` can also be used in these additional contexts d
 
 When inline `getDynamicValueProperty` feeds a typed location, keep `valueType` aligned with the target argument type. For example, use `valueType: String` for string comparisons, history concatenation, and string-valued `setDynamicValueProperty` assignments.
 
+## Function-like stage call dictionaries
+
+DynamicValue dictionaries can also be used with explicit stage transitions to model function-like stage calls. The validated sample is [`samples/workflow.stage-functions.yml`](../samples/workflow.stage-functions.yml), which publishes as `SPNet Stage Function Concepts Test` in non-production validation.
+
+The pattern uses shared dictionaries instead of per-function arguments:
+
+- `functionparams` (`DynamicValue`) contains the active function call's input parameters.
+- `funcitonreturnvalue` (`DynamicValue`) contains the active function call's return payload. The sample intentionally preserves this spelling from the original concept.
+- `returnStage` (`String`) identifies which static continuation branch a function stage should take after setting its return dictionary.
+
+Caller stages build `functionparams`, set `returnStage`, and transition to a function stage by stable `stage.id`. Function stages validate keys with `containsDynamicValueProperty`, read them with `getDynamicValueProperty`, build `funcitonreturnvalue`, and transition back to one of the allowed continuation stages. See [`docs/stage-transitions.md`](stage-transitions.md) for the stage-flow side of this pattern.
+
+Important authoring rules from validation:
+
+- Validate keys before reads. A missing `DynamicValue` property can fail at runtime if read directly.
+- Use typed `valueType` fields consistently. `calc` emits `Double` arguments, so use `Double` variables for numeric calculations and convert to `String` with `toString` when returning formatted scalar values.
+- Avoid dictionary keys named `Result` in function return payloads. SharePoint Workflow Manager validation can report duplicate environment names because Microsoft dynamic-value activities also expose runtime arguments named `Result`. Use keys such as `ReturnValue`, `Ok`, `Error`, and `Function` instead.
+- This is static dispatch, not a true call stack. Only one active `functionparams` / `funcitonreturnvalue` pair is available unless the workflow explicitly saves and restores additional dictionaries.
+- Keep stage IDs unique and branch back to explicit continuation stages; dynamic stage names are not resolved at runtime.
+
+Local and publish validation should include build, object-model inspect, publish, download, and cache-enabled export:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Build -Workflow .\samples\workflow.stage-functions.yml -XamlPath .\artifacts\workflow.stage-functions.xaml -Config .\config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Inspect -XamlPath .\artifacts\workflow.stage-functions.xaml -Config .\config\spnet.local.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Publish -Workflow .\samples\workflow.stage-functions.yml -XamlPath .\artifacts\workflow.stage-functions.xaml -WorkflowName "SPNet Stage Function Concepts Test" -TargetType Site -IfExists Fail -AuthMode WebLogin
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Download -WorkflowName "SPNet Stage Function Concepts Test" -Out .\artifacts\SPNetStageFunctionConceptsTest.downloaded.xaml -Config .\config\spnet.local.yml
+dotnet run --project .\src\SPNet.Workflow.WfSerializer\SPNet.Workflow.WfSerializer.csproj -- export --xaml .\artifacts\SPNetStageFunctionConceptsTest.downloaded.xaml --out .\artifacts\SPNetStageFunctionConceptsTest.downloaded.objectmodel.exported.yml --config .\config\spnet.local.yml
+```
+
 ## Validation commands
 
 Use the focused regression tests for this sample:
