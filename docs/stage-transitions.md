@@ -1,5 +1,7 @@
 # Stage transitions and round-trip guidance
 
+Related docs: [documentation index](index.md), [workflow authoring guide](workflow-authoring.md), [action support matrix](action-support-matrix.md), and [deep DynamicValue validation](deep-dynamic-values.md).
+
 SPNet supports explicit SharePoint Designer-style stage flow for `spnet.workflow/v1` YAML. Stage transitions are built as real Windows Workflow Foundation `System.Activities.Statements` object-model graphs: stages become `FlowStep` nodes, conditional transitions become chained `FlowDecision` nodes, and terminal branches become the Designer-compatible end sentinel during XAML serialization.
 
 Use this feature when a workflow needs to branch between named stages, loop back to an earlier stage, skip forward, or end from a branch without relying on implicit linear stage order.

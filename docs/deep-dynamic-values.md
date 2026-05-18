@@ -1,5 +1,7 @@
 # Deep DynamicValue build/write/read validation
 
+Related docs: [documentation index](index.md), [workflow authoring guide](workflow-authoring.md), [action support matrix](action-support-matrix.md), and [stage transitions](stage-transitions.md).
+
 This note documents the validated pattern for authoring nested `DynamicValue` payloads in SPNet YAML, serializing them to SharePoint-compatible XAML, and reading/writing deeply nested values back with either step-by-step operations or a single slash-path operation.
 
 The small reference sample is [`samples/workflow.experimental-deep-dynamic-values.yml`](../samples/workflow.experimental-deep-dynamic-values.yml). The complex `deepworkflowexample` sample is [`samples/workflow.deepworkflowexample-dynamic-values.yml`](../samples/workflow.deepworkflowexample-dynamic-values.yml). The regression coverage is in [`tests/SPNet.Workflow.WfSerializer.Tests/YamlWorkflowModelTests.cs`](../tests/SPNet.Workflow.WfSerializer.Tests/YamlWorkflowModelTests.cs).
@@ -357,7 +359,7 @@ The pattern uses shared dictionaries instead of per-function arguments:
 - `funcitonreturnvalue` (`DynamicValue`) contains the active function call's return payload. The sample intentionally preserves this spelling from the original concept.
 - `returnStage` (`String`) identifies which static continuation branch a function stage should take after setting its return dictionary.
 
-Caller stages build `functionparams`, set `returnStage`, and transition to a function stage by stable `stage.id`. Function stages validate keys with `containsDynamicValueProperty`, read them with `getDynamicValueProperty`, build `funcitonreturnvalue`, and transition back to one of the allowed continuation stages. See [`docs/stage-transitions.md`](stage-transitions.md) for the stage-flow side of this pattern.
+Caller stages build `functionparams`, set `returnStage`, and transition to a function stage by stable `stage.id`. Function stages validate keys with `containsDynamicValueProperty`, read them with `getDynamicValueProperty`, build `funcitonreturnvalue`, and transition back to one of the allowed continuation stages. See [stage transitions](stage-transitions.md) for the stage-flow side of this pattern.
 
 Important authoring rules from validation:
 

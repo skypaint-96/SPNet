@@ -1,10 +1,14 @@
+# Feedback implementation plan 2026-05-13
+
+Related docs: [documentation index](index.md), [workflow authoring guide](workflow-authoring.md), [publishing and operations guide](publishing-and-operations.md), and [action support matrix](action-support-matrix.md).
+
 Implementation planning is complete. The feedback should be implemented in two arcs: a stabilisation release first, then authoring-power releases.
 
 ## Stabilisation release
 
 1. **Action classification and release framing** - done
-   - Mark every action as stable, preview, experimental, dev-only, or unsupported in [`docs/action-support-matrix.md`](docs/action-support-matrix.md).
-   - Add production guidance and known limitations to [`README.md`](README.md).
+   - Mark every action as stable, preview, experimental, dev-only, or unsupported in [`action-support-matrix.md`](action-support-matrix.md).
+   - Add production guidance and known limitations to [`README.md`](../README.md).
    - Status: implemented 2026-05-13.
    - Outcome: users can distinguish safe workflows from risky hidden/experimental SharePoint activity usage.
 
@@ -14,7 +18,7 @@ Implementation planning is complete. The feedback should be implemented in two a
    - `build`, `inspect`, and `export` delegate to [`scripts/Invoke-SPNetYamlWorkflow.ps1`](../scripts/Invoke-SPNetYamlWorkflow.ps1) and the existing serializer path; `publish` delegates through the YAML wrapper to [`scripts/Invoke-SPNetWorkflow.ps1`](../scripts/Invoke-SPNetWorkflow.ps1).
    - Existing scripts and direct executables remain compatibility paths, but packaged docs now prefer `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 <command> ...`.
    - Later commands such as doctor, lint, report, true dry-run, list, download, cleanup, and auth preflight remain deferred to their own milestones.
-   - Likely touched areas: [`src/SPNet.Workflow.WfSerializer/Program.cs`](src/SPNet.Workflow.WfSerializer/Program.cs), [`src/SPNet.Workflow.Publisher.Csom/Program.cs`](src/SPNet.Workflow.Publisher.Csom/Program.cs), [`scripts/Invoke-SPNetYamlWorkflow.ps1`](scripts/Invoke-SPNetYamlWorkflow.ps1), [`scripts/Invoke-SPNetWorkflow.ps1`](scripts/Invoke-SPNetWorkflow.ps1), [`scripts/Package-SPNetWorkflow.ps1`](scripts/Package-SPNetWorkflow.ps1).
+   - Likely touched areas: [`src/SPNet.Workflow.WfSerializer/Program.cs`](../src/SPNet.Workflow.WfSerializer/Program.cs), [`src/SPNet.Workflow.Publisher.Csom/Program.cs`](../src/SPNet.Workflow.Publisher.Csom/Program.cs), [`scripts/Invoke-SPNetYamlWorkflow.ps1`](../scripts/Invoke-SPNetYamlWorkflow.ps1), [`scripts/Invoke-SPNetWorkflow.ps1`](../scripts/Invoke-SPNetWorkflow.ps1), [`scripts/Package-SPNetWorkflow.ps1`](../scripts/Package-SPNetWorkflow.ps1).
    - Status: implemented 2026-05-13 for scoped milestone 2.
    - Outcome: packaged users have one obvious command path instead of wrapper/direct-executable confusion.
 
@@ -72,7 +76,7 @@ Implementation planning is complete. The feedback should be implemented in two a
 
 10. **Docs, samples, and CI hardening**
    - Rewrite quickstart around the primary packaged CLI.
-   - Split or clearly label stable vs experimental/dev-only samples in [`samples/`](samples/).
+   - Split or clearly label stable vs experimental/dev-only samples in [`samples/`](../samples/).
    - Add package smoke tests in CI: help, doctor local, lint stable samples, build stable samples, report, and dry-run offline.
    - Outcome: releases prove the packaged workflow, not just source builds.
 
