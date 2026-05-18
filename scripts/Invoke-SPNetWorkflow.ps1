@@ -203,7 +203,7 @@ function Invoke-SPNetCsomPublisher {
             Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-001' -Message 'CSOM publisher executable was not found and no source fallback project exists.' -Path $publisherExe -Hint 'Use a complete SPNet package, build/package from source, or pass -PublisherExePath to a valid SPNet.Workflow.Publisher.Csom.exe.'
         }
         Write-Warning 'Packaged publisher executable was not found; building source fallback. Packaged publish prefers tools\SPNet.Workflow.Publisher.Csom\SPNet.Workflow.Publisher.Csom.exe before source fallback.'
-        dotnet build $publisherProject -v:minimal | Write-Output
+        dotnet build $publisherProject -c Release -v:minimal | Write-Output
         if ($LASTEXITCODE -ne 0) { Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-002' -Message "CSOM publisher build failed with exit code $LASTEXITCODE." -Path $publisherProject -Hint 'Fix the publisher project build or package with prebuilt tools.' }
     }
     if (-not (Test-Path $publisherExe)) { Throw-SpNetWorkflowWrapperError -Code 'SPNET-PUBLISHER-TOOL-003' -Message 'CSOM publisher executable was not found after build.' -Path $publisherExe -Hint 'Check build output and target framework net48, or pass -PublisherExePath.' }

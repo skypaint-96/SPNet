@@ -640,7 +640,11 @@ function Invoke-SPNetYamlWrapperAction {
     $parameters = @{ Action = $Action }
     Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('workflow', 'workflow-yaml') -ParameterName 'Workflow'
     Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('xaml', 'xaml-path', 'out-xaml') -ParameterName 'XamlPath'
-    Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('out', 'output', 'output-yaml') -ParameterName 'Out'
+    if ($Action -eq 'Build') {
+        Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('out', 'output', 'output-yaml') -ParameterName 'XamlPath'
+    } else {
+        Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('out', 'output', 'output-yaml') -ParameterName 'Out'
+    }
     Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('config') -ParameterName 'Config'
     Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('cache-folder', 'cache') -ParameterName 'CacheFolder'
     Add-SPNetArgumentValue -Target $parameters -Source $Options -Names @('site-url', 'siteurl') -ParameterName 'SiteUrl'
