@@ -14,6 +14,9 @@ Explicit metadata JSON sidecar to use for Publish. If omitted, Publish requires 
 
 .PARAMETER FormFieldXmlPath
 Deprecated for Publish. Passed only as an explicit fallback when metadata JSON cannot supply initiation form fields. For Export, this can still point at a legacy/downloaded FormField XML sidecar for compatibility inspection.
+
+.PARAMETER IfExists
+Publish conflict policy passed through to the live publisher. Fail is the default create behavior and checks before creating anything, Update is an explicit update path, and CreateNew intentionally creates a unique same-base-name workflow when needed.
 #>
 param(
     [ValidateSet('Build','Export','Inspect','Publish','Download','List','Cleanup','ValidateConfig')]
@@ -35,7 +38,7 @@ param(
     [object]$StartOnUpdated = $null,
     [string]$StatusColumn = '',
     [ValidateSet('Update', 'CreateNew', 'Fail')]
-    [string]$IfExists = 'Update',
+    [string]$IfExists = 'Fail',
     [ValidateSet('WebLogin','CookieHeader','WindowsDefault','Credentials')]
     [string]$AuthMode = 'WebLogin',
     [string]$PublisherExePath = '',

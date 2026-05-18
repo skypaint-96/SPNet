@@ -539,7 +539,7 @@ For YAML-authored workflows, `*.xaml.metadata.json` is the expected metadata inp
 
 Packaged publishing should use `scripts\spnet-workflow.ps1 publish` or the retained wrappers rather than direct executable calls. The wrapper is the authentication/bootstrap boundary: `WebLogin` obtains browser/PnP cookies and hands them to the CSOM publisher, `CookieHeader` passes an explicit cookie header, `WindowsDefault` leaves the publisher on default network credentials, and `Credentials` passes username/password/domain. The wrapper emits `SPNET_AUTH` and `SPNET_PUBLISHER_TOOL` diagnostics showing the selected auth/bootstrap path and whether the package-relative publisher executable or a source fallback was used. Direct `SPNet.Workflow.Publisher.Csom.exe` invocation does not bootstrap WebLogin/WinINet cookies and is advanced/unsupported unless all required cookies or credentials are supplied explicitly.
 
-Publishing currently uses an intentionally conservative `--if-exists Fail` policy. If a workflow definition with the requested name already exists, local tooling reports the conflict instead of overwriting or deleting live SharePoint content.
+Publishing defaults to create semantics. `scripts\spnet-workflow.ps1 publish` and the wrappers fail before creating anything when a same-name workflow already exists, with an error advising the user to run the explicit update path or delete then create. `scripts\spnet-workflow.ps1 update` is the explicit replace path; internally it uses the `Update` conflict policy to replace a single existing same-name workflow by deleting its subscriptions/definition before creating the new definition/subscription. `CreateNew` intentionally publishes alongside an existing workflow by adding a unique suffix when the requested name is already present. If a newly-created definition/subscription fails during later publish or subscription creation, the CSOM publisher and legacy fallback path attempt best-effort rollback cleanup to avoid orphan definitions.
 
 Use read-only listing before any cleanup:
 
@@ -553,7 +553,7 @@ Cleanup is guarded and refuses to run unless `-Force` is supplied. Prefix cleanu
 .\scripts\Invoke-SPNetYamlWorkflow.ps1 -Action Cleanup -SiteUrl https://tenant/sites/site -WorkflowNamePrefix SPNetYamlHttpSmoke -Force
 ```
 
-Do not use cleanup against production names such as `New Leave Request`. If a publish fails after saving a definition but before subscription creation, the publish result reports `PartialDefinitionSaved` or `PartialDefinitionPublished` plus the definition ID when available; run `List` by the exact test name or prefix first, then clean only the confirmed test artifacts.
+Do not use cleanup against production names such as `New Leave Request`. If a publish failure reports rollback cleanup warnings or a partial status, run `List` by the exact test name or prefix first, then clean only the confirmed test artifacts.
 
 ## Configuration and WebsiteCache requirement
 
@@ -606,7 +606,7 @@ Live publish validation requires SharePoint auth/session support and pinned Shar
 - Explicit stage transitions are supported for stage-to-stage branches, default transitions, loops, and `goto: end`, but large/non-obvious transition graphs should be avoided because Designer readability and Workflow Manager limits remain practical constraints.
 - `DynamicValue` variables are generated only for HTTP response targets; arbitrary YAML-declared `DynamicValue` variables and general dictionary mutation actions are deferred.
 - Top-level lookup actions are rejected because SharePoint Designer can render them as blank/crashing actions; use nested lookup expressions inside assignment or action arguments. This includes list item property lookups such as `lookupListItemStringProperty`.
-- The CSOM publisher does not overwrite, delete, or migrate existing live workflows; `if-exists` currently fails on name conflicts.
+- The CSOM publisher implements the explicit update path as delete/recreate; it does not migrate running instances or preserve old subscriptions beyond recreating the requested publish subscription. Normal publish/create commands fail before create when a same-name workflow exists. Use `CreateNew` only for intentional side-by-side publishes.
 - Site/list publishing is validated for current SharePoint WorkflowServices scenarios, but Email/task workflows should remain local/golden validated only unless intentionally reviewed for safe recipients, assignees, and side effects. Broader task/process/list-item CRUD actions remain deferred until safe XAML shapes are captured and validated.
 - The support surface is classified in [docs/action-support-matrix.md](docs/action-support-matrix.md). Stable actions are the production baseline; preview actions require target-site validation; experimental/dev-only actions are not production defaults.
 - Large workflows, broad loops, many variables/properties, large HTTP/DynamicValue payloads, and repeated whole-body string manipulation can hit Workflow Manager validation, persistence, rendering, or runtime limits even when local YAML-to-XAML build succeeds.

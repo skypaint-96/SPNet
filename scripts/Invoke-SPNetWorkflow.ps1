@@ -17,6 +17,9 @@ Deprecated Publish fallback. Used only when metadata JSON does not provide initi
 
 .PARAMETER AuthMode
 Authentication/bootstrap mode for Publish. WebLogin is the default and uses the wrapper to obtain PnP/WinINet cookies for the CSOM publisher. CookieHeader passes an explicit cookie header, WindowsDefault uses default Windows credentials, and Credentials passes username/password/domain. Direct CSOM publisher invocation does not perform WebLogin/cookie bootstrap and is advanced unless explicit cookies or credentials are supplied.
+
+.PARAMETER IfExists
+Publish conflict policy. Fail is the default create behavior and checks for an existing name before creating anything. Update is an explicit update path that replaces a single existing same-name workflow by delete/recreate. CreateNew intentionally publishes alongside an existing workflow by adding a unique suffix when needed. Newly-created definitions/subscriptions are best-effort rolled back if later publish/subscription steps fail.
 #>
 [CmdletBinding()]
 param(
@@ -40,7 +43,7 @@ param(
     [object]$StartOnUpdated = $false,
     [string]$StatusColumn,
     [ValidateSet('Update', 'CreateNew', 'Fail')]
-    [string]$IfExists = 'Update',
+    [string]$IfExists = 'Fail',
     [ValidateSet('Legacy', 'Csom')]
     [string]$PublisherMode = 'Csom',
     [string]$PublisherExePath,
@@ -190,7 +193,6 @@ function Invoke-SPNetCsomPublisher {
     if ([string]::IsNullOrWhiteSpace($XamlPath)) { throw '-XamlPath is required for Publish.' }
     if ([string]::IsNullOrWhiteSpace($WorkflowName)) { throw '-WorkflowName is required for Publish.' }
     if ($TargetType -eq 'Auto') { throw '-TargetType Site or -TargetType List is required when -PublisherMode Csom.' }
-    if ($IfExists -ne 'Fail') { throw '-PublisherMode Csom currently supports only -IfExists Fail.' }
 
     $publisherInfo = Get-SPNetPublisherToolInfo -ExplicitPath $PublisherExePath
     $publisherProject = $publisherInfo.ProjectPath
@@ -214,7 +216,7 @@ function Invoke-SPNetCsomPublisher {
         '--start-manual', ([string][bool]$StartManual).ToLowerInvariant(),
         '--start-created', ([string][bool]$StartOnCreated).ToLowerInvariant(),
         '--start-updated', ([string][bool]$StartOnUpdated).ToLowerInvariant(),
-        '--if-exists', 'Fail'
+        '--if-exists', $IfExists
     )
     if (-not [string]::IsNullOrWhiteSpace($MetadataJsonPath)) { $publisherArgs += @('--metadata-json', $MetadataJsonPath) }
     elseif (-not [string]::IsNullOrWhiteSpace($FormFieldXmlPath)) {
@@ -335,6 +337,14 @@ function Get-SPNetWorkflowDefinitionsByName {
         Write-Verbose ('Unable to enumerate existing workflow definitions by DisplayName; continuing as no match for new workflow name: ' + $_.Exception.Message)
         return @()
     }
+}
+
+function New-SPNetUniqueWorkflowName {
+    param([string]$RequestedName, [object[]]$Definitions)
+    if ([string]::IsNullOrWhiteSpace($RequestedName)) { throw 'Workflow name is required.' }
+    $existingNames = @($Definitions | Where-Object { $_ } | ForEach-Object { [string]$_.DisplayName })
+    if ($existingNames -notcontains $RequestedName) { return $RequestedName }
+    return ($RequestedName + ' ' + (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 }
 
 function Get-SPNetFormFieldXmlPath {
@@ -606,6 +616,26 @@ function Remove-SPNetWorkflowDefinitionAndSubscriptions {
     $subscriptions
 }
 
+function Clear-SPNetPartialWorkflowPublication {
+    param([Nullable[Guid]]$DefinitionId, [Nullable[Guid]]$SubscriptionId)
+    if ($SubscriptionId.HasValue -and $SubscriptionId.Value -ne [Guid]::Empty) {
+        try {
+            $subscriptionService.DeleteSubscription($SubscriptionId.Value)
+            $context.ExecuteQuery()
+        } catch {
+            Write-Warning ('Best-effort rollback cleanup could not delete subscription ' + $SubscriptionId.Value + ': ' + $_.Exception.Message)
+        }
+    }
+    if ($DefinitionId.HasValue -and $DefinitionId.Value -ne [Guid]::Empty) {
+        try {
+            $definitionInfo = [pscustomobject]@{ Id = $DefinitionId.Value }
+            [void](Remove-SPNetWorkflowDefinitionAndSubscriptions -DefinitionInfo $definitionInfo)
+        } catch {
+            Write-Warning ('Best-effort rollback cleanup could not delete definition ' + $DefinitionId.Value + ': ' + $_.Exception.Message)
+        }
+    }
+}
+
 function Get-SPNetTargetList {
     param([string]$ListIdentity)
     if ([string]::IsNullOrWhiteSpace($ListIdentity)) { throw '-TargetListTitle is required for list workflow publication.' }
@@ -779,10 +809,20 @@ if ([string]::IsNullOrWhiteSpace($formFieldXml) -and -not [string]::IsNullOrWhit
     $effectiveFormFieldXmlPath = Get-SPNetFormFieldXmlPath -XamlFilePath $null -ExplicitFormFieldXmlPath $FormFieldXmlPath
     $formFieldXml = Get-SPNetNormalizedFormFieldXml -Path $effectiveFormFieldXmlPath
 }
-$existingDefinitions = Get-SPNetWorkflowDefinitionsByName -Name $WorkflowName
+$requestedWorkflowName = $WorkflowName
+$allDefinitionsForCreateNew = @()
+if ($IfExists -eq 'CreateNew') {
+    $definitionCollectionForCreateNew = $deploymentService.EnumerateDefinitions($true)
+    $context.Load($definitionCollectionForCreateNew)
+    $context.ExecuteQuery()
+    $allDefinitionsForCreateNew = @($definitionCollectionForCreateNew)
+    $WorkflowName = New-SPNetUniqueWorkflowName -RequestedName $requestedWorkflowName -Definitions $allDefinitionsForCreateNew
+}
+$existingDefinitions = if ($IfExists -eq 'CreateNew') { @($allDefinitionsForCreateNew | Where-Object { $_ -and $_.DisplayName -eq $requestedWorkflowName }) } else { Get-SPNetWorkflowDefinitionsByName -Name $WorkflowName }
 if ($existingDefinitions.Count -gt 0 -and $IfExists -eq 'Fail') {
-    Write-SPNetResult @{ Action = 'Publish'; WorkflowName = $WorkflowName; ExistingDefinitionIds = @($existingDefinitions | ForEach-Object { $_.Id.ToString() }); Status = 'FailedBeforeCreate'; ErrorCode = 'WorkflowExists'; ErrorMessage = "Workflow '$WorkflowName' already exists." }
-    throw "Workflow '$WorkflowName' already exists. Use -IfExists Update or -IfExists CreateNew."
+    $workflowExistsMessage = "Workflow '$WorkflowName' already exists. Use the explicit update command/path to replace it, or delete the existing workflow and then create it again. Use -IfExists CreateNew only when you intentionally want a side-by-side workflow with a unique suffix."
+    Write-SPNetResult @{ Action = 'Publish'; WorkflowName = $WorkflowName; ExistingDefinitionIds = @($existingDefinitions | ForEach-Object { $_.Id.ToString() }); Status = 'FailedBeforeCreate'; ErrorCode = 'WorkflowExists'; ErrorMessage = $workflowExistsMessage }
+    throw $workflowExistsMessage
 }
 if ($existingDefinitions.Count -gt 0 -and $IfExists -eq 'Update') {
     if ($existingDefinitions.Count -gt 1) {
@@ -851,6 +891,7 @@ try {
     $context.ExecuteQuery()
 } catch {
     $partial = @{ Action = 'Publish'; WorkflowName = $WorkflowName; DefinitionId = if ($definitionId) { $definitionId.ToString() } else { $null }; TargetType = $effectiveTargetType; Status = if ($definitionId) { 'PartialDefinitionSaved' } else { 'FailedBeforeCreate' }; ErrorCode = $_.Exception.GetType().Name; ErrorMessage = $_.Exception.Message }
+    if ($definitionId) { Clear-SPNetPartialWorkflowPublication -DefinitionId $definitionId -SubscriptionId $subscriptionId; $partial.RollbackAttempted = $true }
     Write-SPNetResult $partial
     throw
 }
@@ -878,7 +919,8 @@ try {
     $context.ExecuteQuery()
     $subscriptionId = $subscriptionResult.Value
 } catch {
-    Write-SPNetResult @{ Action = 'Publish'; WorkflowName = $WorkflowName; DefinitionId = $definitionId.ToString(); SubscriptionId = $null; TargetType = $effectiveTargetType; Status = 'PartialDefinitionPublished'; ErrorCode = $_.Exception.GetType().Name; ErrorMessage = $_.Exception.Message }
+    Clear-SPNetPartialWorkflowPublication -DefinitionId $definitionId -SubscriptionId $subscriptionId
+    Write-SPNetResult @{ Action = 'Publish'; WorkflowName = $WorkflowName; RequestedWorkflowName = $requestedWorkflowName; DefinitionId = $definitionId.ToString(); SubscriptionId = $null; TargetType = $effectiveTargetType; Status = 'PartialDefinitionPublishedRolledBack'; ErrorCode = $_.Exception.GetType().Name; ErrorMessage = $_.Exception.Message; RollbackAttempted = $true }
     throw
 }
-Write-SPNetResult @{ Action = 'Publish'; WorkflowName = $WorkflowName; DefinitionId = $definitionId.ToString(); SubscriptionId = $subscriptionId.ToString(); OldDefinitionId = $script:spnetOldDefinitionId; OldSubscriptionId = $script:spnetOldSubscriptionId; BackupPath = $script:spnetBackupPath; TargetType = $effectiveTargetType; StartManual = $StartManual; StartOnCreated = $StartOnCreated; StartOnUpdated = $StartOnUpdated; StatusColumn = if ($effectiveTargetType -eq 'List') { $subscription.StatusFieldName } else { $null }; HasFormField = -not [string]::IsNullOrWhiteSpace($formFieldXml); FormFieldXmlPath = $effectiveFormFieldXmlPath; Status = if ($script:spnetOldDefinitionId) { 'UpdatedByBackupDeleteRecreate' } else { 'Published' } }
+Write-SPNetResult @{ Action = 'Publish'; WorkflowName = $WorkflowName; RequestedWorkflowName = $requestedWorkflowName; IfExists = $IfExists; DefinitionId = $definitionId.ToString(); SubscriptionId = $subscriptionId.ToString(); OldDefinitionId = $script:spnetOldDefinitionId; OldSubscriptionId = $script:spnetOldSubscriptionId; BackupPath = $script:spnetBackupPath; TargetType = $effectiveTargetType; StartManual = $StartManual; StartOnCreated = $StartOnCreated; StartOnUpdated = $StartOnUpdated; StatusColumn = if ($effectiveTargetType -eq 'List') { $subscription.StatusFieldName } else { $null }; HasFormField = -not [string]::IsNullOrWhiteSpace($formFieldXml); FormFieldXmlPath = $effectiveFormFieldXmlPath; Status = if ($script:spnetOldDefinitionId) { 'UpdatedByBackupDeleteRecreate' } else { 'Published' } }

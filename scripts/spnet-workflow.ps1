@@ -72,7 +72,8 @@ Commands:
   build      Build YAML to SharePoint Designer-compatible XAML and metadata JSON.
   inspect    Inspect generated or downloaded XAML.
   export     Export generated or downloaded XAML back to YAML.
-  publish    Build and/or publish a YAML-authored workflow through the publish wrapper.
+  publish    Create a YAML-authored workflow through the publish wrapper; fails if the workflow already exists.
+  update     Explicitly replace an existing same-name workflow through the publish wrapper.
   auth-test  Run local auth/publisher readiness checks without connecting to SharePoint.
   doctor     Run local source/package integrity checks without SharePoint connectivity.
 
@@ -81,6 +82,7 @@ Source-tree examples:
   .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
   .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
   .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
+  .\scripts\spnet-workflow.ps1 update --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
   .\scripts\spnet-workflow.ps1 auth-test --site-url https://tenant.sharepoint.com/sites/site --auth-mode WebLogin
   .\scripts\spnet-workflow.ps1 doctor
 
@@ -166,7 +168,7 @@ Usage:
   .\scripts\spnet-workflow.ps1 publish --workflow <workflow.yml> --xaml <workflow.xaml> --site-url <url> --workflow-name <name> [options]
   .\scripts\spnet-workflow.ps1 publish --no-build --xaml <workflow.xaml> --site-url <url> --workflow-name <name> [options]
 
-Delegates to Invoke-SPNetYamlWorkflow.ps1 -Action Publish, which delegates live SharePoint publishing to Invoke-SPNetWorkflow.ps1.
+Creates a workflow through Invoke-SPNetYamlWorkflow.ps1 -Action Publish, which delegates live SharePoint publishing to Invoke-SPNetWorkflow.ps1. If a workflow with the effective name already exists, publish fails before creating anything and advises using the explicit update command/path or deleting before creating.
 
 Common options:
   --config <path>                 Config file; default config\spnet.local.yml.
@@ -177,9 +179,9 @@ Common options:
   --start-manual true|false       Manual start option.
   --start-created true|false      Item-created start option.
   --start-updated true|false      Item-updated start option.
-  --if-exists Update|CreateNew|Fail
-  --expected-definition-id <id>   Guarded update expected definition id.
-  --backup-directory <path>       Guarded update backup directory.
+  --if-exists CreateNew|Fail      Default: Fail. Fail checks before create; CreateNew uses a unique suffix when needed. Update remains available for compatibility but normal create/publish usage should use the explicit update command instead.
+  --expected-definition-id <id>   Optional legacy fallback guarded update expected definition id.
+  --backup-directory <path>       Optional legacy fallback guarded update backup directory.
   --dry-run                       Pass through existing dry-run behavior.
   --no-build                      Publish an existing XAML plus metadata JSON.
   --auth-mode WebLogin|CookieHeader|WindowsDefault|Credentials
@@ -202,11 +204,32 @@ Authentication modes:
 Direct publisher warning:
   Direct SPNet.Workflow.Publisher.Csom.exe invocation does not bootstrap WebLogin/WinINet cookies. Use the primary CLI/wrappers unless all required cookies or credentials are supplied explicitly.
 
+Publish safety:
+  CSOM publish rolls back newly-created definitions/subscriptions if later publish or subscription creation fails, preventing orphan definitions from failed publishes.
+
 Example:
   .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
 
 Packaged example:
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow .\samples\workflow.example.yml --xaml .\artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
+
+Relative paths are resolved from the caller's current directory.
+'@
+        }
+        'update' {
+            @'
+Usage:
+  .\scripts\spnet-workflow.ps1 update --workflow <workflow.yml> --xaml <workflow.xaml> --site-url <url> --workflow-name <name> [options]
+  .\scripts\spnet-workflow.ps1 update --no-build --xaml <workflow.xaml> --site-url <url> --workflow-name <name> [options]
+
+Explicitly updates an existing same-name workflow by delegating to the publish path with Update conflict handling. Update replaces one existing same-name workflow by deleting its subscriptions/definition before creating the new definition/subscription. If no existing workflow is found, this path creates the workflow.
+
+Use publish for normal create semantics. Use update only when replacing an existing workflow is intended.
+
+Common options are the same as publish. CSOM publish rolls back newly-created definitions/subscriptions if later publish or subscription creation fails, preventing orphan definitions from failed updates.
+
+Example:
+  .\scripts\spnet-workflow.ps1 update --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url https://tenant.sharepoint.com/sites/site --workflow-name YamlFirstSmoke --target-type Site --dry-run
 
 Relative paths are resolved from the caller's current directory.
 '@
@@ -670,7 +693,7 @@ try {
         return
     }
 
-    $validCommands = @('build', 'inspect', 'export', 'publish', 'auth-test', 'doctor')
+    $validCommands = @('build', 'inspect', 'export', 'publish', 'update', 'auth-test', 'doctor')
     if ($normalizedCommand -notin $validCommands) {
         Throw-SpNetCliError -Code 'SPNET-CLI-COMMAND-001' -Message "Unknown command '$Command'." -Hint "Run .\scripts\spnet-workflow.ps1 help for supported commands: $($validCommands -join ', ')."
     }
@@ -682,6 +705,7 @@ try {
         'inspect' { Invoke-SPNetYamlWrapperAction -Action 'Inspect' -Options $options }
         'export' { Invoke-SPNetYamlWrapperAction -Action 'Export' -Options $options }
         'publish' { Invoke-SPNetYamlWrapperAction -Action 'Publish' -Options $options }
+        'update' { $options['if-exists'] = 'Update'; Invoke-SPNetYamlWrapperAction -Action 'Publish' -Options $options }
         'auth-test' { Invoke-SPNetAuthTest -Options $options }
         'doctor' { Invoke-SPNetDoctor -Options $options }
     }

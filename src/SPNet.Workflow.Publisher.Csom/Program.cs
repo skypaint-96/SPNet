@@ -56,20 +56,20 @@ namespace SPNet.Workflow.Publisher.Csom
                 var deploymentService = manager.GetWorkflowDeploymentService();
                 var subscriptionService = manager.GetWorkflowSubscriptionService();
 
-                EnsureNoExistingDefinition(context, deploymentService, options.WorkflowName, options.IfExists);
+                var plan = PlanWorkflowPublication(context, deploymentService, subscriptionService, EffectiveWorkflowName(options, metadata), options.IfExists);
 
                 if (EffectiveTargetType(options, metadata) == TargetType.List)
                 {
-                    PublishListWorkflow(context, web, deploymentService, subscriptionService, options, metadata, xaml, formFieldXml);
+                    PublishListWorkflow(context, web, deploymentService, subscriptionService, options, metadata, xaml, formFieldXml, plan);
                 }
                 else
                 {
-                    PublishSiteWorkflow(context, web, deploymentService, subscriptionService, options, metadata, xaml, formFieldXml);
+                    PublishSiteWorkflow(context, web, deploymentService, subscriptionService, options, metadata, xaml, formFieldXml, plan);
                 }
             }
         }
 
-        private static void PublishListWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, PublisherWorkflowMetadata metadata, string xaml, string formFieldXml)
+        private static void PublishListWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, PublisherWorkflowMetadata metadata, string xaml, string formFieldXml, WorkflowPublishPlan plan)
         {
             var targetList = GetTargetList(web, options, metadata);
             var workflowHistoryList = web.Lists.GetByTitle("Workflow History");
@@ -81,7 +81,7 @@ namespace SPNet.Workflow.Publisher.Csom
 
             var definition = new WorkflowDefinition(context)
             {
-                DisplayName = EffectiveWorkflowName(options, metadata),
+                DisplayName = plan.WorkflowName,
                 Description = EffectiveDescription(metadata, "SPNet CSOM-published workflow."),
                 Xaml = xaml,
                 RestrictToType = "List",
@@ -89,38 +89,51 @@ namespace SPNet.Workflow.Publisher.Csom
             };
             ApplyWorkflowDefinitionMetadata(definition, metadata, formFieldXml, null);
 
-            var saveResult = deploymentService.SaveDefinition(definition);
-            context.ExecuteQuery();
-            var definitionId = saveResult.Value;
-            EnsureSavedDefinitionMetadata(context, deploymentService, definitionId, metadata, formFieldXml);
-
-            deploymentService.PublishDefinition(definitionId);
-            context.ExecuteQuery();
-
-            var subscription = new WorkflowSubscription(context)
+            Guid definitionId = Guid.Empty;
+            Guid subscriptionId = Guid.Empty;
+            try
             {
-                DefinitionId = definitionId,
-                Name = EffectiveWorkflowName(options, metadata),
-                Enabled = true,
-                EventSourceId = targetList.Id,
-                EventTypes = BuildEventTypes(options, metadata)
-            };
-            SetWorkflowSubscriptionProperty(subscription, "TaskListId", workflowTasksList.Id);
-            SetWorkflowSubscriptionProperty(subscription, "HistoryListId", workflowHistoryList.Id);
+                var saveResult = deploymentService.SaveDefinition(definition);
+                context.ExecuteQuery();
+                definitionId = saveResult.Value;
+                EnsureSavedDefinitionMetadata(context, deploymentService, definitionId, metadata, formFieldXml);
 
-            var subscriptionResult = subscriptionService.PublishSubscriptionForList(subscription, targetList.Id);
-            context.ExecuteQuery();
+                deploymentService.PublishDefinition(definitionId);
+                context.ExecuteQuery();
+
+                var subscription = new WorkflowSubscription(context)
+                {
+                    DefinitionId = definitionId,
+                    Name = plan.WorkflowName,
+                    Enabled = true,
+                    EventSourceId = targetList.Id,
+                    EventTypes = BuildEventTypes(options, metadata)
+                };
+                SetWorkflowSubscriptionProperty(subscription, "TaskListId", workflowTasksList.Id);
+                SetWorkflowSubscriptionProperty(subscription, "HistoryListId", workflowHistoryList.Id);
+
+                var subscriptionResult = subscriptionService.PublishSubscriptionForList(subscription, targetList.Id);
+                context.ExecuteQuery();
+                subscriptionId = subscriptionResult.Value;
+            }
+            catch
+            {
+                CleanupNewPublication(context, deploymentService, subscriptionService, definitionId, subscriptionId);
+                throw;
+            }
 
             WriteResult(new Dictionary<string, object>
             {
                 ["Action"] = "Publish",
                 ["Status"] = "Published",
-                ["WorkflowName"] = EffectiveWorkflowName(options, metadata),
+                ["WorkflowName"] = plan.WorkflowName,
+                ["IfExists"] = options.IfExists.ToString(),
+                ["OldDefinitionId"] = plan.ReplacedDefinitionId == Guid.Empty ? null : plan.ReplacedDefinitionId.ToString(),
                 ["TargetType"] = "List",
                 ["TargetListTitle"] = targetList.Title,
                 ["TargetListId"] = targetList.Id.ToString(),
                 ["DefinitionId"] = definitionId.ToString(),
-                ["SubscriptionId"] = subscriptionResult.Value.ToString(),
+                ["SubscriptionId"] = subscriptionId.ToString(),
                 ["StartManual"] = options.StartManual,
                 ["StartOnCreated"] = options.StartOnCreated,
                 ["StartOnUpdated"] = options.StartOnUpdated,
@@ -129,11 +142,11 @@ namespace SPNet.Workflow.Publisher.Csom
             });
         }
 
-        private static void PublishSiteWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, PublisherWorkflowMetadata metadata, string xaml, string formFieldXml)
+        private static void PublishSiteWorkflow(ClientContext context, Web web, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, PublishOptions options, PublisherWorkflowMetadata metadata, string xaml, string formFieldXml, WorkflowPublishPlan plan)
         {
             var definition = new WorkflowDefinition(context)
             {
-                DisplayName = EffectiveWorkflowName(options, metadata),
+                DisplayName = plan.WorkflowName,
                 Description = EffectiveDescription(metadata, "SPNet CSOM-published site workflow."),
                 Xaml = xaml,
                 RestrictToType = "Site",
@@ -141,34 +154,47 @@ namespace SPNet.Workflow.Publisher.Csom
             };
             ApplyWorkflowDefinitionMetadata(definition, metadata, formFieldXml, null);
 
-            var saveResult = deploymentService.SaveDefinition(definition);
-            context.ExecuteQuery();
-            var definitionId = saveResult.Value;
-            EnsureSavedDefinitionMetadata(context, deploymentService, definitionId, metadata, formFieldXml);
-
-            deploymentService.PublishDefinition(definitionId);
-            context.ExecuteQuery();
-
-            var subscription = new WorkflowSubscription(context)
+            Guid definitionId = Guid.Empty;
+            Guid subscriptionId = Guid.Empty;
+            try
             {
-                DefinitionId = definitionId,
-                Name = EffectiveWorkflowName(options, metadata),
-                Enabled = true,
-                EventSourceId = web.Id,
-                EventTypes = BuildEventTypes(options, metadata)
-            };
+                var saveResult = deploymentService.SaveDefinition(definition);
+                context.ExecuteQuery();
+                definitionId = saveResult.Value;
+                EnsureSavedDefinitionMetadata(context, deploymentService, definitionId, metadata, formFieldXml);
 
-            var subscriptionResult = subscriptionService.PublishSubscription(subscription);
-            context.ExecuteQuery();
+                deploymentService.PublishDefinition(definitionId);
+                context.ExecuteQuery();
+
+                var subscription = new WorkflowSubscription(context)
+                {
+                    DefinitionId = definitionId,
+                    Name = plan.WorkflowName,
+                    Enabled = true,
+                    EventSourceId = web.Id,
+                    EventTypes = BuildEventTypes(options, metadata)
+                };
+
+                var subscriptionResult = subscriptionService.PublishSubscription(subscription);
+                context.ExecuteQuery();
+                subscriptionId = subscriptionResult.Value;
+            }
+            catch
+            {
+                CleanupNewPublication(context, deploymentService, subscriptionService, definitionId, subscriptionId);
+                throw;
+            }
 
             WriteResult(new Dictionary<string, object>
             {
                 ["Action"] = "Publish",
                 ["Status"] = "Published",
-                ["WorkflowName"] = EffectiveWorkflowName(options, metadata),
+                ["WorkflowName"] = plan.WorkflowName,
+                ["IfExists"] = options.IfExists.ToString(),
+                ["OldDefinitionId"] = plan.ReplacedDefinitionId == Guid.Empty ? null : plan.ReplacedDefinitionId.ToString(),
                 ["TargetType"] = "Site",
                 ["DefinitionId"] = definitionId.ToString(),
-                ["SubscriptionId"] = subscriptionResult.Value.ToString(),
+                ["SubscriptionId"] = subscriptionId.ToString(),
                 ["HasFormField"] = !string.IsNullOrWhiteSpace(formFieldXml),
                 ["FormFieldXmlPath"] = options.EffectiveFormFieldXmlPath
             });
@@ -432,14 +458,92 @@ namespace SPNet.Workflow.Publisher.Csom
             throw new MissingMemberException("WorkflowSubscription", name);
         }
 
-        private static void EnsureNoExistingDefinition(ClientContext context, WorkflowDeploymentService deploymentService, string workflowName, IfExistsPolicy ifExists)
+        internal static string CreateUniqueWorkflowName(string requestedName, IEnumerable<string> existingNames)
         {
-            if (ifExists != IfExistsPolicy.Fail) throw new NotSupportedException("Only --if-exists Fail is currently implemented.");
+            if (string.IsNullOrWhiteSpace(requestedName)) throw new ArgumentException("Workflow name is required.", nameof(requestedName));
+            var existing = new HashSet<string>(existingNames ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+            if (!existing.Contains(requestedName)) return requestedName;
+            var suffix = DateTime.UtcNow.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            return requestedName + " " + suffix;
+        }
+
+        private static WorkflowPublishPlan PlanWorkflowPublication(ClientContext context, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, string workflowName, IfExistsPolicy ifExists)
+        {
+            if (string.IsNullOrWhiteSpace(workflowName)) throw new ArgumentException("Workflow name is required.", nameof(workflowName));
             var definitions = deploymentService.EnumerateDefinitions(true);
             context.Load(definitions);
             context.ExecuteQuery();
-            var existing = definitions.Where(d => d != null && string.Equals(d.DisplayName, workflowName, StringComparison.Ordinal)).Select(d => d.Id.ToString()).ToArray();
-            if (existing.Length > 0) throw new InvalidOperationException("Workflow '" + workflowName + "' already exists: " + string.Join(", ", existing));
+            var existingByName = definitions.Where(d => d != null && string.Equals(d.DisplayName, workflowName, StringComparison.Ordinal)).ToArray();
+            if (existingByName.Length == 0) return new WorkflowPublishPlan { WorkflowName = workflowName };
+
+            if (ifExists == IfExistsPolicy.Fail)
+            {
+                var existingIds = existingByName.Select(d => d.Id.ToString()).ToArray();
+                throw new InvalidOperationException("Workflow '" + workflowName + "' already exists: " + string.Join(", ", existingIds) + ". Use the explicit update command/path to replace it, or delete the existing workflow and then create it again.");
+            }
+
+            if (ifExists == IfExistsPolicy.CreateNew)
+            {
+                return new WorkflowPublishPlan { WorkflowName = CreateUniqueWorkflowName(workflowName, definitions.Where(d => d != null).Select(d => d.DisplayName)) };
+            }
+
+            if (ifExists == IfExistsPolicy.Update)
+            {
+                if (existingByName.Length > 1) throw new InvalidOperationException("Multiple workflows named '" + workflowName + "' exist. Refusing update because the target is ambiguous: " + string.Join(", ", existingByName.Select(d => d.Id.ToString()).ToArray()));
+                var existingDefinition = existingByName[0];
+                RemoveWorkflowDefinitionAndSubscriptions(context, deploymentService, subscriptionService, existingDefinition.Id);
+                return new WorkflowPublishPlan { WorkflowName = workflowName, ReplacedDefinitionId = existingDefinition.Id };
+            }
+
+            throw new NotSupportedException("Unsupported --if-exists policy: " + ifExists);
+        }
+
+        private static void RemoveWorkflowDefinitionAndSubscriptions(ClientContext context, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, Guid definitionId)
+        {
+            if (definitionId == Guid.Empty) return;
+            try
+            {
+                var subscriptions = subscriptionService.EnumerateSubscriptionsByDefinition(definitionId);
+                context.Load(subscriptions);
+                context.ExecuteQuery();
+                foreach (var subscription in subscriptions.Where(s => s != null).ToArray())
+                {
+                    subscriptionService.DeleteSubscription(subscription.Id);
+                    context.ExecuteQuery();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("Best-effort subscription cleanup failed for workflow definition " + definitionId + ": " + ex.Message);
+            }
+
+            deploymentService.DeleteDefinition(definitionId);
+            context.ExecuteQuery();
+        }
+
+        private static void CleanupNewPublication(ClientContext context, WorkflowDeploymentService deploymentService, WorkflowSubscriptionService subscriptionService, Guid definitionId, Guid subscriptionId)
+        {
+            try
+            {
+                if (subscriptionId != Guid.Empty)
+                {
+                    subscriptionService.DeleteSubscription(subscriptionId);
+                    context.ExecuteQuery();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("Best-effort subscription rollback cleanup failed for subscription " + subscriptionId + ": " + ex.Message);
+            }
+
+            try
+            {
+                if (definitionId != Guid.Empty) RemoveWorkflowDefinitionAndSubscriptions(context, deploymentService, subscriptionService, definitionId);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("Best-effort definition rollback cleanup failed for workflow definition " + definitionId + ": " + ex.Message);
+            }
         }
 
         private static void ConfigureAuthentication(ClientContext context, PublishOptions options)
@@ -494,7 +598,13 @@ namespace SPNet.Workflow.Publisher.Csom
     }
 
     internal enum TargetType { Site, List }
-    internal enum IfExistsPolicy { Fail }
+    internal enum IfExistsPolicy { Fail, Update, CreateNew }
+
+    internal sealed class WorkflowPublishPlan
+    {
+        public string WorkflowName { get; set; }
+        public Guid ReplacedDefinitionId { get; set; }
+    }
 
     internal sealed class PublishOptions
     {

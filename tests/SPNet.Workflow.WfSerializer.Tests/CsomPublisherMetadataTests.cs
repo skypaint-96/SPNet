@@ -104,6 +104,37 @@ namespace SPNet.Workflow.WfSerializer.Tests
         }
 
         [TestMethod]
+        public void PublishOptionsParse_DefaultsIfExistsToFail()
+        {
+            var options = CreateOptions();
+
+            Assert.AreEqual(IfExistsPolicy.Fail, options.IfExists);
+        }
+
+        [TestMethod]
+        public void PublishOptionsParse_AcceptsAllIfExistsPolicies()
+        {
+            Assert.AreEqual(IfExistsPolicy.Fail, CreateOptions("Fail").IfExists);
+            Assert.AreEqual(IfExistsPolicy.Update, CreateOptions("Update").IfExists);
+            Assert.AreEqual(IfExistsPolicy.CreateNew, CreateOptions("CreateNew").IfExists);
+        }
+
+        [TestMethod]
+        public void CreateUniqueWorkflowName_ReturnsRequestedNameWhenAvailable()
+        {
+            Assert.AreEqual("Workflow", Program.CreateUniqueWorkflowName("Workflow", new[] { "Other Workflow" }));
+        }
+
+        [TestMethod]
+        public void CreateUniqueWorkflowName_AddsSuffixWhenNameExists()
+        {
+            var uniqueName = Program.CreateUniqueWorkflowName("Workflow", new[] { "Workflow" });
+
+            StringAssert.StartsWith(uniqueName, "Workflow ");
+            Assert.AreNotEqual("Workflow", uniqueName);
+        }
+
+        [TestMethod]
         public void PublisherMetadataJson_BuildsEventTypesAndFormFieldXml()
         {
             var metadata = PublisherWorkflowMetadata.FromJson(@"{""displayName"":""Metadata Workflow"",""start"":{""manual"":false,""onCreated"":true,""onUpdated"":true},""initiation"":{""formFields"":[{""name"":""titleParam"",""type"":""Text"",""displayName"":""Request title"",""default"":""hello""}]}}");
@@ -151,13 +182,15 @@ namespace SPNet.Workflow.WfSerializer.Tests
             Assert.AreEqual("Documents", metadata.Target.ListTitle);
         }
 
-        private static PublishOptions CreateOptions()
+        private static PublishOptions CreateOptions(string ifExists = null)
         {
             var directory = Path.Combine(Path.GetTempPath(), "SPNetPublisherTests", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             var xamlPath = Path.Combine(directory, "workflow.xaml");
             File.WriteAllText(xamlPath, "<Activity />");
-            return PublishOptions.Parse(new[] { "--site-url", "https://sharepoint.example/sites/test", "--workflow-name", "Workflow", "--xaml", xamlPath, "--target-type", "Site" });
+            var args = new System.Collections.Generic.List<string> { "--site-url", "https://sharepoint.example/sites/test", "--workflow-name", "Workflow", "--xaml", xamlPath, "--target-type", "Site" };
+            if (!string.IsNullOrWhiteSpace(ifExists)) args.AddRange(new[] { "--if-exists", ifExists });
+            return PublishOptions.Parse(args.ToArray());
         }
     }
 }
