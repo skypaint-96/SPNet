@@ -81,6 +81,12 @@ namespace SPNet.Workflow.WfSerializer
             public Type? AddToDate { get; }
             public Type? SubtractFromDate { get; }
             public Type? DateInRange { get; }
+
+            public Type GetToStringExpressionType()
+            {
+                if (ToStringExpression.Assembly.GetName().Name != "Microsoft.Activities.Proxy") throw new InvalidOperationException("Microsoft.Activities.Expressions.ToString must be loaded from Microsoft.Activities.Proxy.dll in the SharePoint Designer WebsiteCache.");
+                return ToStringExpression;
+            }
         }
 
         internal sealed class ComparisonExpressionTypes

@@ -100,6 +100,8 @@ namespace SPNet.Workflow.WfSerializer.Tests
         [DataRow("lookupSPListItemStringProperty")]
         [DataRow("lookupListItemIntProperty")]
         [DataRow("lookupSPListItemIntProperty")]
+        [DataRow("lookupListItemDateTimeProperty")]
+        [DataRow("lookupSPListItemDateTimeProperty")]
         public void Load_RejectsUnsafeTopLevelLookupActions(string actionType)
         {
             var ex = Assert.ThrowsException<InvalidOperationException>(() => LoadYaml(CreateWorkflowYaml(CreateActionYaml(actionType))));
@@ -132,10 +134,26 @@ namespace SPNet.Workflow.WfSerializer.Tests
             type: getCurrentListId
           itemId:
             literal: 1
-          fieldName: Title"));
+          fieldName: Title
+      - type: assign
+        to: currentWebUrl
+        value:
+          toString:
+            type: lookupSPListItemDateTimeProperty
+            listId:
+              type: getCurrentListId
+            itemId: 1
+            fieldName: Modified
+          format: yyyy-MM-ddTHH:mm:ssZ
+          cultureName: null"));
 
-            Assert.AreEqual(4, workflow.Stages[0].Actions.Count);
+            Assert.AreEqual(5, workflow.Stages[0].Actions.Count);
             Assert.IsTrue(workflow.Stages[0].Actions.TrueForAll(a => a is AssignActionYaml));
+            var formattedDate = workflow.Stages[0].Actions.OfType<AssignActionYaml>().Last().Value;
+            Assert.AreEqual("yyyy-MM-ddTHH:mm:ssZ", formattedDate.Format);
+            Assert.IsNull(formattedDate.CultureName);
+            Assert.AreEqual("lookupSPListItemDateTimeProperty", formattedDate.ToString!.Type);
+            Assert.AreEqual("Modified", formattedDate.ToString.FieldName);
         }
 
         [TestMethod]
@@ -263,10 +281,18 @@ stages:
           type: isEmptyDynamicValue
           source:
             variable: payload
+      - type: assign
+        to: textValue
+        value:
+          toString:
+            variable: dateValue
+            valueType: DateTime
+          format: yyyy-MM-ddTHH:mm:ssZ
+          cultureName: ""{x:Null}""
 ");
 
             var assignments = workflow.Stages.Single().Actions.OfType<AssignActionYaml>().ToList();
-            Assert.AreEqual(16, assignments.Count);
+            Assert.AreEqual(17, assignments.Count);
             Assert.AreEqual("concatString", assignments[0].Value.Type);
             Assert.AreEqual("toUpperCase", assignments[0].Value.Values[1].Type);
             Assert.AreEqual("stringLength", assignments[1].Value.Type);
@@ -287,6 +313,10 @@ stages:
             Assert.AreEqual("containsDynamicValueProperty", assignments[14].Value.Type);
             Assert.AreEqual("payload", assignments[14].Value.Source!.Variable);
             Assert.AreEqual("isEmptyDynamicValue", assignments[15].Value.Type);
+            Assert.AreEqual("dateValue", assignments[16].Value.ToString!.Variable);
+            Assert.AreEqual("DateTime", assignments[16].Value.ToString.ValueType);
+            Assert.AreEqual("yyyy-MM-ddTHH:mm:ssZ", assignments[16].Value.Format);
+            Assert.AreEqual("{x:Null}", assignments[16].Value.CultureName);
         }
 
         [DataTestMethod]
@@ -1941,6 +1971,14 @@ stages:
           type: isEmptyDynamicValue
           source:
             variable: payload
+      - type: assign
+        to: textValue
+        value:
+          toString:
+            variable: dateValue
+            valueType: DateTime
+          format: yyyy-MM-ddTHH:mm:ssZ
+          cultureName: null
 ");
 
             try
@@ -1963,6 +2001,9 @@ stages:
                 StringAssert.Contains(xaml, "ConcatString");
                 StringAssert.Contains(xaml, "CurrentDate");
                 StringAssert.Contains(xaml, "NewGuid");
+                StringAssert.Contains(xaml, "ToString");
+                StringAssert.Contains(xaml, "clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy");
+                StringAssert.Contains(xaml, "Format=\"yyyy-MM-ddTHH:mm:ssZ\"");
                 StringAssert.Contains(xaml, "ContainsDynamicValueProperty");
                 StringAssert.Contains(xaml, "IsEmptyDynamicValue");
             }

@@ -153,6 +153,7 @@ namespace SPNet.Workflow.WfSerializer
             if (LookupSPListItemInt32Property != null) types["LookupSPListItemInt32Property"] = LookupSPListItemInt32Property;
             if (LookupSPListItemDateTimeProperty != null) types["LookupSPListItemDateTimeProperty"] = LookupSPListItemDateTimeProperty;
             if (LookupSPListItemGuid != null) types["LookupSPListItemGuid"] = LookupSPListItemGuid;
+            types["ToString"] = ToStringExpression;
             if (CountDynamicValueItems != null) types["CountDynamicValueItems"] = CountDynamicValueItems;
             if (BuildDynamicValue != null) types["BuildDynamicValue"] = BuildDynamicValue;
             if (SetDynamicValueProperty != null) types["SetDynamicValueProperty"] = SetDynamicValueProperty;

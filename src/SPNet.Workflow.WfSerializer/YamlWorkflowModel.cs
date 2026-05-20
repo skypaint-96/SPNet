@@ -1358,6 +1358,10 @@ namespace SPNet.Workflow.WfSerializer
         public ExpressionYaml? End { get; set; }
         /// <summary>Gets or sets optional CLR/XAML type metadata used when an object-valued field expression must preserve a non-string type.</summary>
         public string ValueType { get; set; } = string.Empty;
+        /// <summary>Gets or sets an optional format string for Microsoft.Activities.Expressions ToString expressions.</summary>
+        public string Format { get; set; } = string.Empty;
+        /// <summary>Gets or sets an optional culture name for Microsoft.Activities.Expressions ToString expressions; null maps to XAML {x:Null}.</summary>
+        public string? CultureName { get; set; }
         /// <summary>Gets or sets the optional SharePoint Designer custom attribute Id for expression activities.</summary>
         public string DesignerId { get; set; } = string.Empty;
         /// <summary>Gets or sets a nested expression to convert to string.</summary>
@@ -1377,7 +1381,7 @@ namespace SPNet.Workflow.WfSerializer
             }
 
             return rootDeserializer(typeof(ExpressionYamlSurrogate)) is ExpressionYamlSurrogate s
-                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), Pattern = s.Pattern, Replacement = s.Replacement, SearchValue = s.SearchValue, OldValue = s.OldValue, NewValue = s.NewValue, Find = s.Find, ReplaceWith = s.ReplaceWith, StartIndex = s.StartIndex, Length = s.Length, Source = s.Source, Input = s.Input, TimeSpan = s.TimeSpan, Days = s.Days, Hours = s.Hours, Minutes = s.Minutes, Seconds = s.Seconds, Start = s.Start, End = s.End, ValueType = s.ValueType ?? string.Empty, DesignerId = s.DesignerId ?? string.Empty, ToString = s.ToString }
+                ? new ExpressionYaml { Literal = s.Literal, Variable = s.Variable ?? string.Empty, Type = s.Type ?? string.Empty, PropertyName = s.PropertyName ?? string.Empty, FieldName = s.FieldName ?? string.Empty, ListId = s.ListId, ItemId = s.ItemId, ItemGuid = s.ItemGuid, Value = s.Value, Values = s.Values ?? new List<ExpressionYaml>(), Pattern = s.Pattern, Replacement = s.Replacement, SearchValue = s.SearchValue, OldValue = s.OldValue, NewValue = s.NewValue, Find = s.Find, ReplaceWith = s.ReplaceWith, StartIndex = s.StartIndex, Length = s.Length, Source = s.Source, Input = s.Input, TimeSpan = s.TimeSpan, Days = s.Days, Hours = s.Hours, Minutes = s.Minutes, Seconds = s.Seconds, Start = s.Start, End = s.End, ValueType = s.ValueType ?? string.Empty, Format = s.Format ?? string.Empty, CultureName = s.CultureName, DesignerId = s.DesignerId ?? string.Empty, ToString = s.ToString }
                 : new ExpressionYaml();
         }
 
@@ -1420,6 +1424,8 @@ namespace SPNet.Workflow.WfSerializer
             if (expression.Start != null) WriteObject(emitter, serializer, "start", expression.Start);
             if (expression.End != null) WriteObject(emitter, serializer, "end", expression.End);
             if (!string.IsNullOrWhiteSpace(expression.ValueType)) WriteScalar(emitter, "valueType", expression.ValueType);
+            if (!string.IsNullOrWhiteSpace(expression.Format)) WriteScalar(emitter, "format", expression.Format);
+            if (expression.CultureName != null) WriteObject(emitter, serializer, "cultureName", expression.CultureName);
             if (!string.IsNullOrWhiteSpace(expression.DesignerId)) WriteScalar(emitter, "designerId", expression.DesignerId);
             if (expression.ToString != null) WriteObject(emitter, serializer, "toString", expression.ToString);
             emitter.Emit(new MappingEnd());
@@ -1455,6 +1461,8 @@ namespace SPNet.Workflow.WfSerializer
             expression.Start == null &&
             expression.End == null &&
             string.IsNullOrWhiteSpace(expression.ValueType) &&
+            string.IsNullOrWhiteSpace(expression.Format) &&
+            expression.CultureName == null &&
             string.IsNullOrWhiteSpace(expression.DesignerId) &&
             expression.ToString == null;
 
@@ -1501,6 +1509,8 @@ namespace SPNet.Workflow.WfSerializer
             public ExpressionYaml? Start { get; set; }
             public ExpressionYaml? End { get; set; }
             public string ValueType { get; set; } = string.Empty;
+            public string Format { get; set; } = string.Empty;
+            public string? CultureName { get; set; }
             public string DesignerId { get; set; } = string.Empty;
             public new ExpressionYaml? ToString { get; set; }
         }

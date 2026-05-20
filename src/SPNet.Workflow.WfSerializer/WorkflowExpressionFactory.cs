@@ -50,8 +50,10 @@ namespace SPNet.Workflow.WfSerializer
             if (expression.Literal is string literal && string.Equals(literal, "<exported expression>", StringComparison.OrdinalIgnoreCase)) return new InArgument<T>((T)Convert.ChangeType(DefaultLiteral(typeof(T)), typeof(T)));
             if (expression.ToString != null)
             {
-                var toString = ActivityReflectionWriter.Create(valueExpressionTypes.ToStringExpression);
+                var toString = ActivityReflectionWriter.Create(valueExpressionTypes.GetToStringExpressionType());
                 ActivityReflectionWriter.SetProperty(toString, "Object", CreateToStringObjectArgument(expression.ToString));
+                if (!string.IsNullOrWhiteSpace(expression.Format)) ActivityReflectionWriter.SetPropertyIfWritable(toString, "Format", new InArgument<string>(expression.Format));
+                if (expression.CultureName != null) ActivityReflectionWriter.SetPropertyIfWritable(toString, "CultureName", CreateOptionalStringInArgument(expression.CultureName));
                 return (InArgument<T>)ActivityReflectionWriter.CreateInArgument(typeof(T), toString);
             }
             var expressionActivity = CreateLookupExpressionActivity(expression, typeof(T));
@@ -429,7 +431,7 @@ namespace SPNet.Workflow.WfSerializer
             return formatString;
         }
 
-        private static object CreateToStringObjectArgument(ExpressionYaml expression)
+        private object CreateToStringObjectArgument(ExpressionYaml expression)
         {
             if (!string.IsNullOrWhiteSpace(expression.Variable))
             {
@@ -441,6 +443,12 @@ namespace SPNet.Workflow.WfSerializer
                 if (valueType == "string" || valueType == "text") return new InArgument<string>(new ArgumentValue<string>(expression.Variable));
                 return new InArgument<double>(new ArgumentValue<double>(expression.Variable));
             }
+            var type = (expression.Type ?? string.Empty).Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+            if (type == "lookuplistitemdatetimeproperty" || type == "lookupsplistitemdatetimeproperty" || type == "currentdate" || type == "parsedate" || type == "parseutcdate" || type == "parsespdate") return ToInArgument<DateTime>(expression);
+            if (type == "lookuplistitemintproperty" || type == "lookupsplistitemintproperty" || type == "lookupsplistitemint32property" || type == "stringlength" || type == "lengthstring" || type == "indexofstring" || type == "indexof") return ToInArgument<int>(expression);
+            if (type == "lookuplistitemguid" || type == "lookupsplistitemguid" || type == "getcurrentlistid" || type == "getcurrentitemguid" || type == "newguid" || type == "parseguid") return ToInArgument<Guid>(expression);
+            if (type == "lookupworkflowcontext" || type == "lookupcontextproperty" || type == "lookuplistitemstringproperty" || type == "lookupsplistitemstringproperty" || type.EndsWith("string", StringComparison.Ordinal) || type == "replace" || type == "trim" || type == "tolower" || type == "lowercase" || type == "toupper" || type == "uppercase" || type == "concat") return ToInArgument<string>(expression);
+            if (type == "parseboolean" || type == "parsebool" || type.EndsWith("dynamicvalueproperty", StringComparison.Ordinal) || type.StartsWith("is", StringComparison.Ordinal) || type.StartsWith("contains", StringComparison.Ordinal) || type.StartsWith("starts", StringComparison.Ordinal) || type.StartsWith("ends", StringComparison.Ordinal)) return ToInArgument<bool>(expression);
             if (expression.Literal is bool boolValue) return new InArgument<bool>(boolValue);
             if (expression.Literal is int intValue) return new InArgument<int>(intValue);
             if (expression.Literal is DateTime dateTimeValue) return new InArgument<DateTime>(dateTimeValue);
@@ -448,6 +456,8 @@ namespace SPNet.Workflow.WfSerializer
             if (expression.Literal is string) return new InArgument<string>(Convert.ToString(expression.Literal));
             return new InArgument<double>(Convert.ToDouble(expression.Literal ?? 0d));
         }
+
+        private static InArgument<string> CreateOptionalStringInArgument(string value) => string.Equals(value, "null", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "{x:Null}", StringComparison.OrdinalIgnoreCase) ? new InArgument<string>((string?)null) : new InArgument<string>(value);
 
         private static object DefaultLiteral(Type type) => type == typeof(string) ? string.Empty : type == typeof(bool) ? false : 0d;
 
