@@ -18,7 +18,7 @@ This index is the quickest way to choose the right SPNet document. The root [REA
 
 | Entry point | Use for |
 | --- | --- |
-| [`scripts/spnet-workflow.ps1`](../scripts/spnet-workflow.ps1) | Primary packaged command for `help`, `build`, `inspect`, `export`, `publish`, `update`, `auth-test`, and `doctor`. |
+| [`scripts/spnet-workflow.ps1`](../scripts/spnet-workflow.ps1) | Primary packaged command for `help`, `create`, `build`, `inspect`, `export`, `publish`, `update`, `auth-test`, and `doctor`. Use `create <workflow.yml> <config.yml>` for the inferred build-and-create flow. |
 | [`scripts/Invoke-SPNetYamlWorkflow.ps1`](../scripts/Invoke-SPNetYamlWorkflow.ps1) | Compatibility wrapper and operations not exposed by the primary command, including `ValidateConfig`, `Download`, `List`, and `Cleanup`. |
 | [`scripts/Invoke-SPNetWorkflow.ps1`](../scripts/Invoke-SPNetWorkflow.ps1) | Live SharePoint publish/download/list/cleanup boundary used by the YAML wrapper. |
 | [`scripts/Get-SPNetWorkflowDiagnostics.ps1`](../scripts/Get-SPNetWorkflowDiagnostics.ps1) | Read-only SharePoint workflow diagnostics and download helper. |

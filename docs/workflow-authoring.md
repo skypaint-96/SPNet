@@ -60,6 +60,10 @@ stages:
 
 The legacy `name`, `technicalName`, top-level `start`, top-level `target`, and `parameters` fields remain supported aliases. Prefer canonical `metadata` in new workflows when authoring publish metadata.
 
+The `spnet-workflow create <workflow.yml> <config.yml>` command uses the same metadata when inferring publish inputs. It infers the workflow name from `metadata.displayName`, then `name`, then the workflow filename stem. It infers target type from `metadata.target.type`, then top-level `target.type`, then defaults to `Site`. When the effective target type is `List`, provide `metadata.target.listTitle`, top-level `target.listTitle`, or the command-line `--target-list-title` option.
+
+Create defaults its generated XAML artifact to `artifacts/<workflow-file-stem>.xaml`, emits an `SPNET_PLAN` line, and delegates to the existing YAML publish path with `--if-exists Fail`. `--dry-run` and `--preflight` are safe first steps, but live SharePoint validation and YAML-level Workflow Manager type diagnostics are planned rather than fully implemented in this slice.
+
 ## Parameters and variables
 
 Initiation form fields can be written as map-style YAML keyed by parameter name or list-style items with explicit `name`. Supported field types include `Text`, `Choice`, `Note`, `URL`, `UserMulti`, `Boolean`, `Number`, and `DateTime`. Supported metadata properties include `formType`, `displayName`, `description`, `direction`, `default`, `choices`, `format`, `baseType`, `maxLength`, `numLines`, `sortable`, `richTextMode`, `list`, `showField`, `mult`, `userSelectionMode`, and `userSelectionScope`.

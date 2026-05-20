@@ -12,7 +12,7 @@ Prefer the primary packaged command for normal usage:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 help
 ```
 
-Primary command subcommands are `help`, `build`, `inspect`, `export`, `publish`, `update`, `auth-test`, and `doctor`.
+Primary command subcommands are `help`, `create`, `build`, `inspect`, `export`, `publish`, `update`, `auth-test`, and `doctor`.
 
 Retained wrappers remain available for compatibility and for operations not currently exposed by the primary command:
 
@@ -95,6 +95,47 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1
 ```
 
 Export is diagnostic rather than a guaranteed full round trip. Cache-enabled export is preferred for non-linear stage workflows because it can deserialize the WF object model and reconstruct `Flowchart`, `FlowStep`, and `FlowDecision` references.
+
+## Create command ergonomics
+
+Use `create` when you want one command to build YAML and create the workflow with predictable inferred defaults:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 create samples\workflow.example.yml config\spnet.local.yml --site-url 'https://tenant.sharepoint.com/sites/site' --dry-run
+```
+
+The positional form is:
+
+```text
+spnet-workflow create <workflow.yml> <config.yml>
+```
+
+`config.yml` is optional when default config discovery is sufficient. The named-option form is equivalent:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 create --workflow samples\workflow.example.yml --config config\spnet.local.yml --site-url 'https://tenant.sharepoint.com/sites/site' --dry-run
+```
+
+Create always builds from YAML and refuses `--no-build`. It delegates to the existing `Invoke-SPNetYamlWorkflow.ps1 -Action Publish` path and sets `--if-exists Fail`, so an existing same-name workflow fails before creating anything. Use `update` only when replacing an existing same-name workflow is intended.
+
+Inference and override rules:
+
+| Value | Default/inference order | Override |
+| --- | --- | --- |
+| XAML artifact path | `artifacts/<workflow-file-stem>.xaml` | `--xaml`, `--out`, or equivalent XAML output option |
+| Workflow name | YAML `metadata.displayName`, then YAML `name`, then workflow filename stem | `--workflow-name` or `--name` |
+| Target type | YAML `metadata.target.type`, then YAML `target.type`, then `Site` | `--target-type Site|List` |
+| Target list title | YAML `metadata.target.listTitle`, then YAML `target.listTitle` | `--target-list-title` |
+
+When the effective target type is `List`, a list title is required. Supply `--target-list-title <title>` or add `metadata.target.listTitle` / `target.listTitle` to the workflow YAML.
+
+Every create invocation writes an `SPNET_PLAN` line before delegating. The plan includes the resolved workflow path, config path, inferred XAML path and metadata JSON path, workflow name and source, site URL, target type and source, list title and source when present, `IfExists=Fail`, `DryRun`, `LiveDiagnosticsImplemented=false`, and a publish retry command.
+
+`--dry-run` builds artifacts and emits the publish plan without authenticating or publishing. `--preflight` is currently an alias for the same script-layer dry-run/preflight behavior. In this first command-ergonomics slice, dry-run/preflight does not perform live SharePoint diagnostics and reports `LiveDiagnosticsImplemented=false` explicitly.
+
+If create fails after the plan is emitted, retry from the reported values after correcting the root cause. The command prints retry guidance including the inferred artifact path, workflow name, target type, target list when present, and a publish retry command that uses the generated XAML with `--if-exists Fail`.
+
+Advanced live SharePoint validation and YAML-level Workflow Manager type diagnostics are planned, but they are not fully implemented in this first slice. Continue to use the existing validation practices below: inspect/export locally, dry-run/preflight, publish only to non-production first, open in SharePoint Designer, run `Check for Errors`, and verify runtime behavior.
 
 ## Metadata sidecars
 

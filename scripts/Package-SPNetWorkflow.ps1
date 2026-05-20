@@ -128,7 +128,7 @@ try {
         createdUtc = (Get-Date).ToUniversalTime().ToString('o')
         configuration = $Configuration
         primaryCommand = 'scripts\spnet-workflow.ps1'
-        supportedCommands = @('help', 'build', 'inspect', 'export', 'publish', 'doctor')
+        supportedCommands = @('help', 'create', 'build', 'inspect', 'export', 'publish', 'update', 'auth-test', 'doctor')
         expectedScripts = @(
             'scripts\spnet-workflow.ps1',
             'scripts\Invoke-SPNetYamlWorkflow.ps1',

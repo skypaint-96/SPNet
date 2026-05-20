@@ -69,6 +69,7 @@ Usage:
 
 Commands:
   help       Show top-level help or subcommand help.
+  create     Build YAML and create a workflow in one inferred, create-safe flow.
   build      Build YAML to SharePoint Designer-compatible XAML and metadata JSON.
   inspect    Inspect generated or downloaded XAML.
   export     Export generated or downloaded XAML back to YAML.
@@ -78,6 +79,8 @@ Commands:
   doctor     Run local source/package integrity checks without SharePoint connectivity.
 
 Source-tree examples:
+  .\scripts\spnet-workflow.ps1 create samples\workflow.example.yml config\spnet.local.yml --site-url https://tenant.sharepoint.com/sites/site --dry-run
+  .\scripts\spnet-workflow.ps1 create --workflow samples\workflow.example.yml --site-url https://tenant.sharepoint.com/sites/site --target-type List --target-list-title Requests
   .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
   .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
   .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml
@@ -114,6 +117,32 @@ function Write-SPNetWorkflowSubcommandHelp {
     param([Parameter(Mandatory = $true)][string]$Name)
 
     switch ($Name.ToLowerInvariant()) {
+        'create' {
+            @'
+Usage:
+  .\scripts\spnet-workflow.ps1 create <workflow.yml> [config.yml] --site-url <url> [options]
+  .\scripts\spnet-workflow.ps1 create --workflow <workflow.yml> [--config <spnet.local.yml>] --site-url <url> [options]
+
+Builds a YAML workflow, infers the XAML artifact path, workflow name, and target metadata, then delegates to Invoke-SPNetYamlWorkflow.ps1 -Action Publish with create-safe --if-exists Fail semantics.
+
+Inference and overrides:
+  --xaml <path> or --out <path>      Explicit XAML artifact path. Default: artifacts\<workflow-file-stem>.xaml.
+  --workflow-name <name> or --name   Explicit workflow name. Default: YAML metadata.displayName, then YAML name, then workflow file stem.
+  --target-type Site|List            Explicit target type. Default: YAML metadata.target.type, then YAML target.type, then Site.
+  --target-list-title <title>        Required when the effective target type is List unless supplied by YAML metadata.target.listTitle or target.listTitle.
+  --dry-run                          Build artifacts and emit the publish plan without authenticating or publishing.
+  --preflight                        Alias for script-layer dry-run/preflight; no live SharePoint diagnostics are performed yet.
+
+Create always builds from YAML and refuses --no-build. Existing publish/update commands are unchanged for compatibility and advanced explicit-XAML flows.
+
+Examples:
+  .\scripts\spnet-workflow.ps1 create samples\workflow.example.yml config\spnet.local.yml --site-url https://tenant.sharepoint.com/sites/site --dry-run
+  .\scripts\spnet-workflow.ps1 create --workflow samples\workflow.list-actions.yml --site-url https://tenant.sharepoint.com/sites/site --target-type List --target-list-title Requests
+  .\scripts\spnet-workflow.ps1 create --workflow samples\workflow.example.yml --site-url https://tenant.sharepoint.com/sites/site --xaml artifacts\Custom.xaml --name CustomWorkflow
+
+Relative paths are resolved from the caller's current directory.
+'@
+        }
         'build' {
             @'
 Usage:
@@ -547,7 +576,7 @@ function ConvertFrom-SPNetCliArguments {
         }
         if ($arg.StartsWith('-')) {
             $name = ($arg -replace '^-+', '').ToLowerInvariant()
-            if ($name -in @('help', 'h', '?', 'json', 'dry-run', 'dryrun', 'no-build', 'nobuild', 'force', 'include-subscriptions', 'includesubscriptions')) {
+            if ($name -in @('help', 'h', '?', 'json', 'dry-run', 'dryrun', 'preflight', 'no-build', 'nobuild', 'force', 'include-subscriptions', 'includesubscriptions')) {
                 $parsed[$name] = $true
                 continue
             }
@@ -562,6 +591,194 @@ function ConvertFrom-SPNetCliArguments {
     }
     $parsed['__positionals'] = @($positionals)
     return $parsed
+}
+
+function Get-SPNetOptionValue {
+    param([hashtable]$Options, [string[]]$Names, [string]$Default = '')
+
+    foreach ($name in $Names) {
+        if ($Options.ContainsKey($name)) { return [string]$Options[$name] }
+    }
+    return $Default
+}
+
+function Set-SPNetOptionValueIfMissing {
+    param([hashtable]$Options, [string]$Name, [string]$Value)
+
+    if (-not [string]::IsNullOrWhiteSpace($Value) -and -not $Options.ContainsKey($Name)) { $Options[$Name] = $Value }
+}
+
+function ConvertTo-SPNetArtifactSafeName {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $safe = $Value
+    foreach ($invalid in [IO.Path]::GetInvalidFileNameChars()) { $safe = $safe.Replace([string]$invalid, '-') }
+    $safe = ($safe -replace '\s+', '-').Trim('.', '-', ' ')
+    if ([string]::IsNullOrWhiteSpace($safe)) { return 'workflow' }
+    return $safe
+}
+
+function Get-SPNetYamlInference {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $result = [ordered]@{
+        name = ''
+        metadataDisplayName = ''
+        targetType = ''
+        metadataTargetType = ''
+        targetListTitle = ''
+        metadataTargetListTitle = ''
+    }
+    if (-not (Test-Path $Path -PathType Leaf)) { return [pscustomobject]$result }
+
+    $sectionStack = New-Object System.Collections.Generic.List[string]
+    foreach ($line in Get-Content -Path $Path) {
+        $raw = [string]$line
+        if ($raw -match '^\s*(#|$)') { continue }
+        if ($raw -notmatch '^(\s*)([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$') { continue }
+        $indent = $matches[1].Length
+        $key = $matches[2]
+        $value = $matches[3]
+        if ($value -match '^(.*?)(\s+#.*)?$') { $value = $matches[1] }
+        $value = $value.Trim().Trim('''', '"')
+        $level = [Math]::Floor($indent / 2)
+        while ($sectionStack.Count -gt $level) { $sectionStack.RemoveAt($sectionStack.Count - 1) }
+        $pathParts = @($sectionStack.ToArray()) + @($key)
+        $yamlPath = ($pathParts -join '.')
+
+        if ($yamlPath -eq 'name' -and -not [string]::IsNullOrWhiteSpace($value)) { $result.name = $value }
+        elseif ($yamlPath -eq 'metadata.displayName' -and -not [string]::IsNullOrWhiteSpace($value)) { $result.metadataDisplayName = $value }
+        elseif ($yamlPath -eq 'target.type' -and -not [string]::IsNullOrWhiteSpace($value)) { $result.targetType = $value }
+        elseif ($yamlPath -eq 'metadata.target.type' -and -not [string]::IsNullOrWhiteSpace($value)) { $result.metadataTargetType = $value }
+        elseif ($yamlPath -eq 'target.listTitle' -and -not [string]::IsNullOrWhiteSpace($value)) { $result.targetListTitle = $value }
+        elseif ($yamlPath -eq 'metadata.target.listTitle' -and -not [string]::IsNullOrWhiteSpace($value)) { $result.metadataTargetListTitle = $value }
+
+        if ([string]::IsNullOrWhiteSpace($value)) { $sectionStack.Add($key) }
+    }
+
+    return [pscustomobject]$result
+}
+
+function Join-SPNetCliCommand {
+    param([string[]]$Parts)
+
+    return (($Parts | ForEach-Object {
+        $part = [string]$_
+        if ($part -match '[\s"'']') { '"' + ($part -replace '"', '\"') + '"' } else { $part }
+    }) -join ' ')
+}
+
+function Get-SPNetCreateRetryCommand {
+    param([hashtable]$Plan)
+
+    $parts = @('.\scripts\spnet-workflow.ps1', 'publish', '--workflow', $Plan.WorkflowPath, '--xaml', $Plan.XamlPath, '--site-url', $Plan.SiteUrl, '--workflow-name', $Plan.WorkflowName, '--target-type', $Plan.TargetType)
+    if (-not [string]::IsNullOrWhiteSpace([string]$Plan.ConfigPath)) { $parts += @('--config', $Plan.ConfigPath) }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Plan.TargetListTitle)) { $parts += @('--target-list-title', $Plan.TargetListTitle) }
+    $parts += @('--if-exists', 'Fail')
+    return Join-SPNetCliCommand -Parts $parts
+}
+
+function Initialize-SPNetCreateOptions {
+    param([hashtable]$Options)
+
+    $positionals = @($Options['__positionals'] | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($positionals.Count -gt 0) { Set-SPNetOptionValueIfMissing -Options $Options -Name 'workflow' -Value ([string]$positionals[0]) }
+    if ($positionals.Count -gt 1) { Set-SPNetOptionValueIfMissing -Options $Options -Name 'config' -Value ([string]$positionals[1]) }
+    if ($positionals.Count -gt 2) { Throw-SpNetCliError -Code 'SPNET-CREATE-ARGS-001' -Message 'Too many positional arguments for create.' -Hint 'Use create <workflow.yml> [config.yml], and pass other values as named options.' }
+    if ($Options.ContainsKey('no-build') -or $Options.ContainsKey('nobuild')) { Throw-SpNetCliError -Code 'SPNET-CREATE-ARGS-002' -Message 'create always builds from YAML and does not support --no-build.' -Hint 'Use publish --no-build for advanced explicit-XAML publishing.' }
+    if ($Options.ContainsKey('preflight')) { $Options['dry-run'] = $true }
+    $Options['if-exists'] = 'Fail'
+    return $Options
+}
+
+function New-SPNetCreatePlan {
+    param([hashtable]$Options)
+
+    $workflow = Get-SPNetOptionValue -Options $Options -Names @('workflow', 'workflow-yaml')
+    if ([string]::IsNullOrWhiteSpace($workflow)) { Throw-SpNetCliError -Code 'SPNET-CREATE-WORKFLOW-001' -Message 'create requires a workflow YAML path.' -Hint 'Pass create <workflow.yml> or --workflow <workflow.yml>.' }
+    $siteUrl = Get-SPNetOptionValue -Options $Options -Names @('site-url', 'siteurl')
+    if ([string]::IsNullOrWhiteSpace($siteUrl)) { Throw-SpNetCliError -Code 'SPNET-CREATE-SITE-001' -Message 'create requires --site-url.' -Hint 'Pass --site-url https://tenant.sharepoint.com/sites/site. Dry-run/preflight still records the intended site URL but does not authenticate.' }
+
+    $inference = Get-SPNetYamlInference -Path $workflow
+    $workflowStem = [IO.Path]::GetFileNameWithoutExtension($workflow)
+    $workflowName = Get-SPNetOptionValue -Options $Options -Names @('workflow-name', 'workflowname', 'name')
+    $workflowNameSource = 'option'
+    if ([string]::IsNullOrWhiteSpace($workflowName)) {
+        if (-not [string]::IsNullOrWhiteSpace($inference.metadataDisplayName)) { $workflowName = $inference.metadataDisplayName; $workflowNameSource = 'yaml:metadata.displayName' }
+        elseif (-not [string]::IsNullOrWhiteSpace($inference.name)) { $workflowName = $inference.name; $workflowNameSource = 'yaml:name' }
+        else { $workflowName = $workflowStem; $workflowNameSource = 'workflow filename' }
+    }
+
+    $xamlPath = Get-SPNetOptionValue -Options $Options -Names @('xaml', 'xaml-path', 'out-xaml', 'out', 'output')
+    $xamlPathSource = 'option'
+    if ([string]::IsNullOrWhiteSpace($xamlPath)) {
+        $xamlPath = Join-Path (Join-Path (Get-Location) 'artifacts') ((ConvertTo-SPNetArtifactSafeName -Value $workflowStem) + '.xaml')
+        $xamlPathSource = 'workflow filename'
+        $Options['xaml'] = $xamlPath
+    }
+
+    $targetType = Get-SPNetOptionValue -Options $Options -Names @('target-type', 'targettype')
+    $targetTypeSource = 'option'
+    if ([string]::IsNullOrWhiteSpace($targetType)) {
+        if (-not [string]::IsNullOrWhiteSpace($inference.metadataTargetType)) { $targetType = $inference.metadataTargetType; $targetTypeSource = 'yaml:metadata.target.type' }
+        elseif (-not [string]::IsNullOrWhiteSpace($inference.targetType)) { $targetType = $inference.targetType; $targetTypeSource = 'yaml:target.type' }
+        else { $targetType = 'Site'; $targetTypeSource = 'default:Site' }
+        $Options['target-type'] = $targetType
+    }
+    if ($targetType -notin @('Site', 'List')) { Throw-SpNetCliError -Code 'SPNET-CREATE-TARGET-001' -Message "Unsupported create target type '$targetType'." -Hint 'Use --target-type Site or --target-type List.' }
+
+    $targetListTitle = Get-SPNetOptionValue -Options $Options -Names @('target-list-title', 'targetlisttitle')
+    $targetListSource = 'option'
+    if ([string]::IsNullOrWhiteSpace($targetListTitle)) {
+        if (-not [string]::IsNullOrWhiteSpace($inference.metadataTargetListTitle)) { $targetListTitle = $inference.metadataTargetListTitle; $targetListSource = 'yaml:metadata.target.listTitle' }
+        elseif (-not [string]::IsNullOrWhiteSpace($inference.targetListTitle)) { $targetListTitle = $inference.targetListTitle; $targetListSource = 'yaml:target.listTitle' }
+        else { $targetListSource = '' }
+        if (-not [string]::IsNullOrWhiteSpace($targetListTitle)) { $Options['target-list-title'] = $targetListTitle }
+    }
+    if ($targetType -eq 'List' -and [string]::IsNullOrWhiteSpace($targetListTitle)) { Throw-SpNetCliError -Code 'SPNET-CREATE-TARGET-002' -Message 'create target is List but no target list was supplied or inferred.' -Hint 'Pass --target-list-title <title>, or add target.listTitle / metadata.target.listTitle to the workflow YAML.' }
+
+    if ([string]::IsNullOrWhiteSpace((Get-SPNetOptionValue -Options $Options -Names @('workflow-name', 'workflowname', 'name')))) { $Options['workflow-name'] = $workflowName }
+    $metadataJsonPath = Get-SPNetOptionValue -Options $Options -Names @('metadata-json', 'metadatajson', 'metadata-json-path')
+    if ([string]::IsNullOrWhiteSpace($metadataJsonPath)) { $metadataJsonPath = $xamlPath + '.metadata.json' }
+
+    $plan = [ordered]@{
+        Action = 'Create'
+        WorkflowPath = $workflow
+        ConfigPath = (Get-SPNetOptionValue -Options $Options -Names @('config'))
+        XamlPath = $xamlPath
+        XamlPathSource = $xamlPathSource
+        MetadataJsonPath = $metadataJsonPath
+        WorkflowName = $workflowName
+        WorkflowNameSource = $workflowNameSource
+        SiteUrl = $siteUrl
+        TargetType = $targetType
+        TargetTypeSource = $targetTypeSource
+        TargetListTitle = $targetListTitle
+        TargetListTitleSource = $targetListSource
+        IfExists = 'Fail'
+        DryRun = [bool]($Options.ContainsKey('dry-run') -or $Options.ContainsKey('dryrun') -or $Options.ContainsKey('preflight'))
+        LiveDiagnosticsImplemented = $false
+    }
+    $plan.PublishRetryCommand = Get-SPNetCreateRetryCommand -Plan $plan
+    return $plan
+}
+
+function Invoke-SPNetCreateCommand {
+    param([hashtable]$Options)
+
+    $plan = New-SPNetCreatePlan -Options $Options
+    Write-Output ('SPNET_PLAN ' + ($plan | ConvertTo-Json -Compress -Depth 5))
+    try {
+        Invoke-SPNetYamlWrapperAction -Action 'Publish' -Options $Options
+    } catch {
+        Write-Host 'SPNet create failure retry guidance:' -ForegroundColor Yellow
+        Write-Host "  inferred artifact path: $($plan.XamlPath)"
+        Write-Host "  workflow name: $($plan.WorkflowName)"
+        Write-Host "  target type: $($plan.TargetType)"
+        if (-not [string]::IsNullOrWhiteSpace([string]$plan.TargetListTitle)) { Write-Host "  target list: $($plan.TargetListTitle)" }
+        Write-Host "  publish retry command: $($plan.PublishRetryCommand)"
+        throw
+    }
 }
 
 function Add-SPNetArgumentValue {
@@ -697,14 +914,17 @@ try {
         return
     }
 
-    $validCommands = @('build', 'inspect', 'export', 'publish', 'update', 'auth-test', 'doctor')
+    $validCommands = @('create', 'build', 'inspect', 'export', 'publish', 'update', 'auth-test', 'doctor')
     if ($normalizedCommand -notin $validCommands) {
         Throw-SpNetCliError -Code 'SPNET-CLI-COMMAND-001' -Message "Unknown command '$Command'." -Hint "Run .\scripts\spnet-workflow.ps1 help for supported commands: $($validCommands -join ', ')."
     }
 
+    if ($normalizedCommand -eq 'create') { $options = Initialize-SPNetCreateOptions -Options $options }
+
     $options = Convert-SPNetUserPathOptions -Options $options -CommandName $normalizedCommand
 
     switch ($normalizedCommand) {
+        'create' { Invoke-SPNetCreateCommand -Options $options }
         'build' { Invoke-SPNetYamlWrapperAction -Action 'Build' -Options $options }
         'inspect' { Invoke-SPNetYamlWrapperAction -Action 'Inspect' -Options $options }
         'export' { Invoke-SPNetYamlWrapperAction -Action 'Export' -Options $options }

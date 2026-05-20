@@ -179,7 +179,10 @@ switch ($Action) {
         if (-not $NoBuild -and -not $PSBoundParameters.ContainsKey('XamlPath')) {
             $XamlPath = Join-Path 'artifacts' (([IO.Path]::GetFileNameWithoutExtension($Workflow)) + '.xaml')
         }
-        if (-not $NoBuild -and $Workflow) { & $tool build --workflow $Workflow --out $XamlPath @common }
+        if (-not $NoBuild -and $Workflow) {
+            & $tool build --workflow $Workflow --out $XamlPath @common
+            if ($LASTEXITCODE -ne 0) { Throw-SpNetWrapperError -Code 'SPNET-YAML-BUILD-001' -Message "Workflow build failed with exit code $LASTEXITCODE." -Path $Workflow -Hint 'Fix the preceding build error before publishing. The create/publish path stops before SharePoint publishing when build fails.' }
+        }
         $effectiveMetadataJsonPath = Get-SPNetWorkflowMetadataJsonPath -XamlFilePath $XamlPath -ExplicitMetadataJsonPath $MetadataJsonPath
         $metadata = Read-SPNetWorkflowMetadataJson -Path $effectiveMetadataJsonPath
         if (-not $WorkflowName) { $WorkflowName = [IO.Path]::GetFileNameWithoutExtension($XamlPath) }

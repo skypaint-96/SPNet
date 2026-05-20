@@ -59,14 +59,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1
 
 Cache-enabled export is preferred for workflows with explicit stage transitions because it can deserialize `Flowchart`, `FlowStep`, and `FlowDecision` object references.
 
-### 5. Run publish readiness checks before live SharePoint work
+### 5. Create or preflight a workflow
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 auth-test --site-url 'https://tenant.sharepoint.com/sites/site' --auth-mode WebLogin
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 publish --workflow samples\workflow.example.yml --xaml artifacts\YamlFirstSmoke.xaml --site-url 'https://tenant.sharepoint.com/sites/site' --workflow-name YamlFirstSmoke --target-type Site --dry-run
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 create samples\workflow.example.yml config\spnet.local.yml --site-url 'https://tenant.sharepoint.com/sites/site' --dry-run
 ```
 
-`auth-test` is local and non-mutating. The publish command defaults to `--auth-mode WebLogin` and resolves the packaged CSOM publisher before source fallback. Remove `--dry-run` only after testing in a non-production SharePoint site.
+`auth-test` is local and non-mutating. The `create` command builds from YAML, infers normal publish inputs, emits an `SPNET_PLAN` JSON line, and delegates to the existing YAML publish path with `--if-exists Fail`. Remove `--dry-run` only after testing in a non-production SharePoint site.
+
+`create <workflow.yml> <config.yml>` defaults the XAML path to `artifacts/<workflow-file-stem>.xaml`. The workflow name defaults to YAML `metadata.displayName`, then YAML `name`, then the workflow filename stem; override it with `--workflow-name` or `--name`. The target type defaults to YAML `metadata.target.type`, then YAML `target.type`, then `Site`; override it with `--target-type Site|List`. List workflows require `--target-list-title` or YAML `metadata.target.listTitle` / `target.listTitle`.
+
+`--preflight` is an alias for script-layer dry-run behavior. In this first command-ergonomics slice, dry-run/preflight reports `LiveDiagnosticsImplemented=false`; advanced live SharePoint validation and YAML-level Workflow Manager type diagnostics are planned but not fully implemented yet.
 
 ## Common command paths
 
@@ -74,7 +78,9 @@ Use `scripts\spnet-workflow.ps1` as the primary packaged command for normal sour
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 help
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 help create
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 help build
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 create samples\workflow.example.yml config\spnet.local.yml --site-url 'https://tenant.sharepoint.com/sites/site' --dry-run
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 build --workflow samples\workflow.example.yml --out artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 inspect --xaml artifacts\YamlFirstSmoke.xaml --config config\spnet.local.yml
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\spnet-workflow.ps1 export --xaml artifacts\YamlFirstSmoke.xaml --out artifacts\YamlFirstSmoke.exported.yml --config config\spnet.local.yml
