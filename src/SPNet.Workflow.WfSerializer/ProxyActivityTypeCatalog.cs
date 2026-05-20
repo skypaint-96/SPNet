@@ -24,6 +24,7 @@ namespace SPNet.Workflow.WfSerializer
             LookupSPListItemStringProperty = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemStringProperty");
             LookupSPListItemIntProperty = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemIntProperty");
             LookupSPListItemInt32Property = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemInt32Property");
+            LookupSPListItemDateTimeProperty = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemDateTimeProperty");
             LookupSPListItemGuid = GetOptionalType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.LookupSPListItemGuid");
             CallHTTPWebService = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.CallHTTPWebService");
             Email = GetRequiredType(sharePointAssembly, "Microsoft.SharePoint.WorkflowServices.Activities.Email");
@@ -80,6 +81,7 @@ namespace SPNet.Workflow.WfSerializer
         public Type LookupSPListItemStringProperty { get; }
         public Type? LookupSPListItemIntProperty { get; }
         public Type? LookupSPListItemInt32Property { get; }
+        public Type? LookupSPListItemDateTimeProperty { get; }
         public Type? LookupSPListItemGuid { get; }
         public Type CallHTTPWebService { get; }
         public Type Email { get; }
@@ -120,7 +122,7 @@ namespace SPNet.Workflow.WfSerializer
         public WfActivityBuilderSerializer.ComparisonExpressionTypes ComparisonExpressionTypes { get; }
 
         public WfActivityBuilderSerializer.ValueExpressionTypes CreateValueExpressionTypes() =>
-            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, ToLowerCaseExpression, ToUpperCaseExpression, StringLengthExpression, ConcatStringExpression, CurrentDateExpression, NewGuidExpression, ParseGuidExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemGuid, GetDynamicValueProperty, BuildDictionary, DynamicValue, ParseDateExpression, ConvertTimeZoneFromSPLocalToUtc, ParseDynamicValueExpression, ContainsDynamicValuePropertyExpression, IsEmptyDynamicValueExpression, CreateTimeSpanExpression, AddToDateExpression, SubtractFromDateExpression, DateInRangeExpression);
+            new WfActivityBuilderSerializer.ValueExpressionTypes(ToStringExpression, ReplaceStringExpression, SubstringExpression, TrimExpression, ToLowerCaseExpression, ToUpperCaseExpression, StringLengthExpression, ConcatStringExpression, CurrentDateExpression, NewGuidExpression, ParseGuidExpression, LookupWorkflowContextProperty, GetCurrentListId, GetCurrentItemGuid, LookupSPListItemStringProperty, LookupSPListItemInt32Property ?? LookupSPListItemIntProperty, LookupSPListItemDateTimeProperty, LookupSPListItemGuid, GetDynamicValueProperty, BuildDictionary, DynamicValue, ParseDateExpression, ConvertTimeZoneFromSPLocalToUtc, ParseDynamicValueExpression, ContainsDynamicValuePropertyExpression, IsEmptyDynamicValueExpression, CreateTimeSpanExpression, AddToDateExpression, SubtractFromDateExpression, DateInRangeExpression);
 
         public Dictionary<string, Type> CreateBuildContextTypes()
         {
@@ -149,6 +151,7 @@ namespace SPNet.Workflow.WfSerializer
             };
             if (LookupSPListItemIntProperty != null) types["LookupSPListItemIntProperty"] = LookupSPListItemIntProperty;
             if (LookupSPListItemInt32Property != null) types["LookupSPListItemInt32Property"] = LookupSPListItemInt32Property;
+            if (LookupSPListItemDateTimeProperty != null) types["LookupSPListItemDateTimeProperty"] = LookupSPListItemDateTimeProperty;
             if (LookupSPListItemGuid != null) types["LookupSPListItemGuid"] = LookupSPListItemGuid;
             if (CountDynamicValueItems != null) types["CountDynamicValueItems"] = CountDynamicValueItems;
             if (BuildDynamicValue != null) types["BuildDynamicValue"] = BuildDynamicValue;

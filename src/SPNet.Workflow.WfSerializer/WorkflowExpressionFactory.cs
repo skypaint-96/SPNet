@@ -216,6 +216,13 @@ namespace SPNet.Workflow.WfSerializer
                 return CreateLookupListItemPropertyActivity(expression, valueExpressionTypes.LookupListItemIntProperty);
             }
 
+            if (type == "lookuplistitemdatetimeproperty" || type == "lookupsplistitemdatetimeproperty")
+            {
+                if (valueExpressionTypes.LookupListItemDateTimeProperty == null) throw new InvalidOperationException(expression.Type + " is not supported by the local SharePoint Designer proxy assembly.");
+                if (resultType != typeof(DateTime) && resultType != typeof(object)) throw new InvalidOperationException(expression.Type + " expressions can only be assigned to DateTime/Object arguments.");
+                return CreateLookupListItemPropertyActivity(expression, valueExpressionTypes.LookupListItemDateTimeProperty);
+            }
+
             if (type == "lookuplistitemguid" || type == "lookupsplistitemguid")
             {
                 if (valueExpressionTypes.LookupListItemGuid == null) throw new InvalidOperationException(expression.Type + " is not supported by the local SharePoint Designer proxy assembly.");

@@ -17,7 +17,7 @@ namespace SPNet.Workflow.WfSerializer
         {
             // These are structured Microsoft.Activities proxy expression activities that SharePoint Workflow Manager accepts.
             // Do not replace them with raw VisualBasicValue/VisualBasicReference/CSharpValue/CSharpReference nodes; those require compilation and fail publish validation.
-            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type? toLowerCase, Type? toUpperCase, Type? stringLength, Type? concatString, Type? currentDate, Type? newGuid, Type? parseGuid, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type? lookupListItemIntProperty, Type? lookupListItemGuid, Type? getDynamicValueProperty, Type buildDictionary, Type dynamicValue, Type? parseDate, Type? convertTimeZoneFromSpLocalToUtc, Type? parseDynamicValue, Type? containsDynamicValueProperty, Type? isEmptyDynamicValue, Type? createTimeSpan, Type? addToDate, Type? subtractFromDate, Type? dateInRange)
+            public ValueExpressionTypes(Type toString, Type replaceString, Type substring, Type trim, Type? toLowerCase, Type? toUpperCase, Type? stringLength, Type? concatString, Type? currentDate, Type? newGuid, Type? parseGuid, Type lookupWorkflowContext, Type getCurrentListId, Type getCurrentItemGuid, Type lookupListItemStringProperty, Type? lookupListItemIntProperty, Type? lookupListItemDateTimeProperty, Type? lookupListItemGuid, Type? getDynamicValueProperty, Type buildDictionary, Type dynamicValue, Type? parseDate, Type? convertTimeZoneFromSpLocalToUtc, Type? parseDynamicValue, Type? containsDynamicValueProperty, Type? isEmptyDynamicValue, Type? createTimeSpan, Type? addToDate, Type? subtractFromDate, Type? dateInRange)
             {
                 ToStringExpression = toString;
                 ReplaceStringExpression = replaceString;
@@ -35,6 +35,7 @@ namespace SPNet.Workflow.WfSerializer
                 GetCurrentItemGuid = getCurrentItemGuid;
                 LookupListItemStringProperty = lookupListItemStringProperty;
                 LookupListItemIntProperty = lookupListItemIntProperty;
+                LookupListItemDateTimeProperty = lookupListItemDateTimeProperty;
                 LookupListItemGuid = lookupListItemGuid;
                 GetDynamicValueProperty = getDynamicValueProperty;
                 BuildDictionary = buildDictionary;
@@ -66,6 +67,7 @@ namespace SPNet.Workflow.WfSerializer
             public Type GetCurrentItemGuid { get; }
             public Type LookupListItemStringProperty { get; }
             public Type? LookupListItemIntProperty { get; }
+            public Type? LookupListItemDateTimeProperty { get; }
             public Type? LookupListItemGuid { get; }
             public Type? GetDynamicValueProperty { get; }
             public Type BuildDictionary { get; }

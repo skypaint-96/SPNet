@@ -748,6 +748,17 @@ namespace SPNet.Workflow.WfSerializer
         }
     }
 
+    public sealed class LookupListItemDateTimePropertyActionYaml : LookupListItemPropertyActionYaml
+    {
+        public LookupListItemDateTimePropertyActionYaml() { Type = "lookupListItemDateTimeProperty"; }
+
+        public override void Validate()
+        {
+            base.Validate();
+            throw new InvalidOperationException(Type + " is not SPD-safe as a top-level action. Use an assign/setVariable action with value: { type: lookupListItemDateTimeProperty, listId: { type: getCurrentListId }, itemId: ..., fieldName: ... } instead.");
+        }
+    }
+
     public sealed class CallHttpWebServiceActionYaml : WorkflowActionYaml
     {
         public CallHttpWebServiceActionYaml() { Type = "callHttpWebService"; }
@@ -977,6 +988,7 @@ namespace SPNet.Workflow.WfSerializer
             Register(factories, y => new DeleteListItemActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml() }, "deleteListItem");
             Register(factories, y => new LookupListItemStringPropertyActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml(), FieldName = y.FieldName ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupListItemStringProperty", "lookupSPListItemStringProperty");
             Register(factories, y => new LookupListItemIntPropertyActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml(), FieldName = y.FieldName ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupListItemIntProperty", "lookupSPListItemIntProperty");
+            Register(factories, y => new LookupListItemDateTimePropertyActionYaml { Type = y.Type ?? string.Empty, ListId = y.ListId ?? new ExpressionYaml { Type = "getCurrentListId" }, ItemId = y.ItemId ?? new ExpressionYaml(), ItemGuid = y.ItemGuid ?? new ExpressionYaml(), FieldName = y.FieldName ?? string.Empty, PropertyName = Convert.ToString(y.PropertyName?.Literal) ?? string.Empty, To = ReadString(y.To) }, "lookupListItemDateTimeProperty", "lookupSPListItemDateTimeProperty");
             Register(factories, y => new CallHttpWebServiceActionYaml { Type = y.Type ?? string.Empty, Address = y.Address ?? new ExpressionYaml(), RequestType = y.RequestType ?? new ExpressionYaml { Literal = "GET" }, RequestContent = y.RequestContent ?? y.RequestBody ?? y.BodyVariable ?? string.Empty, RequestHeaders = y.RequestHeaders ?? y.RequestHeader ?? y.HeadersVariable ?? string.Empty, ResponseStatusCodeTo = y.ResponseStatusCodeTo ?? y.StatusCodeTo ?? string.Empty, ResponseContentTo = y.ResponseContentTo ?? y.ContentTo ?? string.Empty, ResponseHeadersTo = y.ResponseHeadersTo ?? y.HeadersTo ?? string.Empty }, "callHttpWebService", "callHttp", "http");
             Register(factories, y => new SendEmailActionYaml { Type = y.Type ?? string.Empty, To = y.To ?? new ExpressionYaml(), Cc = y.Cc ?? new ExpressionYaml { Literal = string.Empty }, Subject = y.Subject ?? new ExpressionYaml { Literal = string.Empty }, Body = y.Body ?? y.BodyExpression ?? new ExpressionYaml { Literal = string.Empty } }, "sendEmail", "email");
             Register(factories, y => new SingleTaskActionYaml { Type = y.Type ?? string.Empty, AssignedTo = y.AssignedTo ?? new ExpressionYaml(), Title = y.Title ?? new ExpressionYaml(), Body = y.TaskBody ?? y.BodyExpression ?? y.Body ?? new ExpressionYaml { Literal = string.Empty }, DueDate = y.DueDate ?? new ExpressionYaml(), AssignmentEmailSubject = y.AssignmentEmailSubject ?? new ExpressionYaml { Literal = "Task Assigned - %Task: Title%" }, AssignmentEmailBody = y.AssignmentEmailBody ?? new ExpressionYaml(), WaitForTaskCompletion = y.WaitForTaskCompletion, WaiveAssignmentEmail = y.WaiveAssignmentEmail, WaiveCancelationEmail = y.WaiveCancelationEmail, ContentTypeId = y.ContentTypeId ?? string.Empty, OutcomeFieldName = y.OutcomeFieldName ?? string.Empty, CompletedStatus = y.CompletedStatus ?? string.Empty, TaskIdTo = y.TaskIdTo ?? string.Empty, OutcomeTo = y.OutcomeTo ?? string.Empty }, "singleTask", "task");

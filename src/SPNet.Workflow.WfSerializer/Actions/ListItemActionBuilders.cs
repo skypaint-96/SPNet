@@ -31,6 +31,15 @@ namespace SPNet.Workflow.WfSerializer
             return (Activity)lookup;
         }
 
+        private static Activity BuildLookupListItemDateTimeProperty(LookupListItemDateTimePropertyActionYaml action, Type? lookupType, ValueExpressionTypes valueExpressionTypes, System.Collections.Generic.IReadOnlyDictionary<string, Type> variableTypes)
+        {
+            if (lookupType == null) throw new InvalidOperationException(action.Type + " is not supported by the local SharePoint Designer proxy assembly; LookupSPListItemDateTimeProperty was not found.");
+            ValidateLookupTarget(action, typeof(DateTime), variableTypes);
+            var lookup = BuildLookupListItemPropertyBase(action, lookupType, valueExpressionTypes);
+            ActivityReflectionWriter.SetProperty(lookup, "Result", new OutArgument<DateTime>(new ArgumentReference<DateTime>(action.To)));
+            return (Activity)lookup;
+        }
+
         private static object BuildLookupListItemPropertyBase(LookupListItemPropertyActionYaml action, Type lookupType, ValueExpressionTypes valueExpressionTypes)
         {
             var lookup = ActivityReflectionWriter.Create(lookupType);

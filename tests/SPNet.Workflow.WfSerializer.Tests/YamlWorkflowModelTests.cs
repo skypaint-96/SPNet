@@ -2216,6 +2216,8 @@ stages:
                 case "lookupSPListItemStringProperty":
                 case "lookupListItemIntProperty":
                 case "lookupSPListItemIntProperty":
+                case "lookupListItemDateTimeProperty":
+                case "lookupSPListItemDateTimeProperty":
                     return "      - type: " + actionType + @"
         listId:
           type: getCurrentListId

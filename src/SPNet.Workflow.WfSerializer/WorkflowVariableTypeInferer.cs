@@ -29,6 +29,7 @@ namespace SPNet.Workflow.WfSerializer
             foreach (var target in actions.OfType<DateInRangeActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(bool));
             foreach (var target in actions.OfType<LookupListItemStringPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(string));
             foreach (var target in actions.OfType<LookupListItemIntPropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(int));
+            foreach (var target in actions.OfType<LookupListItemDateTimePropertyActionYaml>().Select(a => a.To)) AddIfMissing(variableTypes, target, typeof(DateTime));
             foreach (var target in actions.OfType<CallHttpWebServiceActionYaml>().SelectMany(a => new[] { a.ResponseContentTo, a.ResponseHeadersTo })) AddIfMissing(variableTypes, target, dynamicValueType);
             foreach (var action in actions.OfType<GetDynamicValuePropertyActionYaml>()) AddIfMissing(variableTypes, action.To, MapDynamicValuePropertyType(action.ValueType, dynamicValueType));
             foreach (var action in actions.OfType<SetDynamicValuePropertyActionYaml>()) AddIfMissing(variableTypes, string.IsNullOrWhiteSpace(action.To) ? action.Source : action.To, dynamicValueType);
