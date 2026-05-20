@@ -996,6 +996,23 @@ stages:
         }
 
         [TestMethod]
+        public void PrepareXamlForDeserialization_MapsDateOffsetMicrosoftExpressionsToProxyAssembly()
+        {
+            var prepared = WfActivityBuilderSerializer.PrepareXamlForDeserializationForTest(@"<Activity x:Class=""DateOffsetWorkflow.MTW"" xmlns=""http://schemas.microsoft.com/netfx/2009/xaml/activities"" xmlns:p=""http://schemas.microsoft.com/workflow/2012/07/xaml/activities"" xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""><Sequence><Assign x:TypeArguments=""x:DateTime""><Assign.Value><InArgument x:TypeArguments=""x:DateTime""><p:AddToDate><p:AddToDate.Input><InArgument x:TypeArguments=""x:DateTime"">2026-05-10T00:00:00Z</InArgument></p:AddToDate.Input><p:AddToDate.TimeSpan><InArgument x:TypeArguments=""x:TimeSpan""><p:CreateTimeSpan Days=""1"" Hours=""2"" Minutes=""3"" Seconds=""4"" /></InArgument></p:AddToDate.TimeSpan></p:AddToDate></InArgument></Assign.Value></Assign><p:GetTimeSpanFields /><p:SubtractFromDate /><p:DateInRange /></Sequence></Activity>");
+            var document = XDocument.Parse(prepared);
+            XNamespace expressionProxy = "clr-namespace:Microsoft.Activities.Expressions;assembly=Microsoft.Activities.Proxy";
+
+            Assert.IsTrue(document.Descendants(expressionProxy + "AddToDate").Any(), "Expected AddToDate to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "AddToDate.Input").Any(), "Expected AddToDate property elements to map with the activity namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "AddToDate.TimeSpan").Any(), "Expected AddToDate TimeSpan property to map with the activity namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "CreateTimeSpan").Any(), "Expected nested CreateTimeSpan to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "GetTimeSpanFields").Any(), "Expected GetTimeSpanFields to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "SubtractFromDate").Any(), "Expected SubtractFromDate to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsTrue(document.Descendants(expressionProxy + "DateInRange").Any(), "Expected DateInRange to map to Microsoft.Activities.Expressions proxy namespace.");
+            Assert.IsFalse(document.Descendants().Any(e => e.Name.NamespaceName == "http://schemas.microsoft.com/workflow/2012/07/xaml/activities" && new[] { "AddToDate", "CreateTimeSpan", "GetTimeSpanFields", "SubtractFromDate", "DateInRange" }.Contains(e.Name.LocalName)), "Expected date/time expression activity nodes to leave the generic workflow/2012 namespace.");
+        }
+
+        [TestMethod]
         [TestCategory("WebsiteCacheIntegration")]
         public void InspectWorkflowXaml_DeserializesDownloadedDynamicArrayWorkflow()
         {
